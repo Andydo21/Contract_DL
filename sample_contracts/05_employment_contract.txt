@@ -1,0 +1,15 @@
+EMPLOYMENT AGREEMENT
+
+This Employment Contract is dated February 20, 2027, by and between:
+Employer: CyberSecure Technologies Ltd.
+Employee: Johnathan Smith, Software Engineer.
+
+1. Position and Duties. Employee is hired as a Senior Software Engineer, reporting to the VP of Engineering.
+
+2. Compensation. Employee shall receive a base salary of $95,000.00 per annum, paid bi-weekly.
+
+3. Probationary Period. Employee shall serve a probationary period of six (6) months, during which employment may be terminated by either party with one (1) day's notice.
+
+4. Non-Compete Clause. Employee agrees that for a period of two (2) years following termination of employment, Employee shall not work for, consult with, or establish any business that directly competes with the Employer within the entire territory of North America.
+
+5. Confidentiality. Employee shall not disclose any proprietary codebase or client records to any third party during or after employment.

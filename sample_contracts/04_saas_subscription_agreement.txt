@@ -1,0 +1,15 @@
+B2B SOFTWARE AS A SERVICE (SAAS) AGREEMENT
+
+This SaaS Agreement is made on January 10, 2027, by and between:
+Provider: CloudSync Systems, Inc.
+Customer: Omni Logistics Corp.
+
+1. Subscription Service. Provider grants Customer a non-exclusive, non-transferable subscription to access the CloudSync Dispatch Platform via the cloud.
+
+2. Fees and Invoicing. Customer shall pay $3,500.00 per month. Invoices are issued monthly and must be settled within 10 days of the invoice date. Late payments shall accrue interest at 3% per month.
+
+3. Service Level Agreement (SLA). Provider guarantees 99.9% uptime. If uptime drops below this, Customer is eligible for service credits as outlined in Exhibit B.
+
+4. Data Privacy and Security. Customer data is hosted securely. Provider shall comply with GDPR guidelines. However, Customer agrees that Provider shall not be liable for any data breaches resulting from third-party cloud infrastructure failures.
+
+5. Termination. Either party may terminate this agreement with 60 days' written notice. Upon termination, all Customer data will be permanently deleted after 14 days.

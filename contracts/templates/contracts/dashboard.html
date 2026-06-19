@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contract Guard AI - Dashboard</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-color: #080b11;
+            --panel-bg: rgba(17, 25, 40, 0.55);
+            --panel-border: rgba(255, 255, 255, 0.07);
+            --glass-shine: rgba(255, 255, 255, 0.02);
+            --accent-primary: #6366f1;
+            --accent-primary-glow: rgba(99, 102, 241, 0.35);
+            --text-main: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            
+            --risk-high: #ef4444;
+            --risk-medium: #f97316;
+            --risk-low: #10b981;
+            
+            --badge-draft: #9ca3af;
+            --badge-analyzing: #3b82f6;
+            --badge-analyzed: #8b5cf6;
+            --badge-approved: #10b981;
+            
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 10% 10%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+                radial-gradient(at 90% 90%, rgba(139, 92, 246, 0.08) 0px, transparent 50%);
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        /* Scrollbar custom */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Layout Container */
+        .app-container {
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            flex-grow: 1;
+        }
+
+        /* Premium Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 16px 28px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 26px;
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 8px var(--accent-primary-glow));
+        }
+
+        .logo-text {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #ffffff, #d1d5db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stats-summary {
+            display: flex;
+            gap: 24px;
+        }
+
+        .stat-item {
+            text-align: right;
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            padding-left: 20px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        /* Main Workspace Grid */
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 420px 1fr;
+            gap: 24px;
+            flex-grow: 1;
+            min-height: 500px;
+        }
+
+        /* Left Panel - Contract List */
+        .contracts-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            backdrop-filter: blur(16px);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 16px var(--accent-primary-glow);
+            transition: var(--transition);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .contracts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            flex-grow: 1;
+            padding-right: 4px;
+        }
+
+        .contract-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 16px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .contract-card:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(99, 102, 241, 0.3);
+            transform: scale(1.01);
+        }
+
+        .contract-card.active {
+            background: rgba(99, 102, 241, 0.1);
+            border-color: var(--accent-primary);
+            box-shadow: inset 0 0 12px rgba(99, 102, 241, 0.15);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .card-code {
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 3px 8px;
+            border-radius: 6px;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        .status-badge {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 50px;
+            letter-spacing: 0.5px;
+        }
+
+        .status-draft { background: rgba(156, 163, 175, 0.15); color: var(--badge-draft); }
+        .status-analyzing { background: rgba(59, 130, 246, 0.15); color: var(--badge-analyzing); animation: pulse-blue 1.5s infinite; }
+        .status-analyzed { background: rgba(139, 92, 246, 0.15); color: var(--badge-analyzed); }
+        .status-approved { background: rgba(16, 185, 129, 0.15); color: var(--badge-approved); }
+
+        @keyframes pulse-blue {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.4;
+            color: #ffffff;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+            padding-top: 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .card-score {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+        }
+
+        .score-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .score-high { color: var(--risk-high); }
+        .score-medium { color: var(--risk-medium); }
+        .score-low { color: var(--risk-low); }
+
+        .bg-high { background-color: var(--risk-high); box-shadow: 0 0 6px var(--risk-high); }
+        .bg-medium { background-color: var(--risk-medium); box-shadow: 0 0 6px var(--risk-medium); }
+        .bg-low { background-color: var(--risk-low); box-shadow: 0 0 6px var(--risk-low); }
+
+        /* Right Panel - Analysis / Details */
+        .analysis-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            backdrop-filter: blur(16px);
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            max-height: 80vh;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            color: var(--text-muted);
+            height: 100%;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-icon {
+            font-size: 64px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .analysis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding-bottom: 24px;
+            margin-bottom: 24px;
+        }
+
+        .analysis-title-area {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: 70%;
+        }
+
+        .analysis-title {
+            font-size: 24px;
+            color: #ffffff;
+        }
+
+        .analysis-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .meta-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Risk Score Circle Gauge */
+        .gauge-area {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 16px 24px;
+        }
+
+        .gauge-circle {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .gauge-circle svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .gauge-circle circle {
+            fill: none;
+            stroke-width: 8;
+        }
+
+        .gauge-circle .bg-circle {
+            stroke: rgba(255, 255, 255, 0.06);
+        }
+
+        .gauge-circle .val-circle {
+            stroke: var(--accent-primary);
+            stroke-dasharray: 226;
+            stroke-dashoffset: 226;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 1s ease-out;
+        }
+
+        .gauge-text {
+            position: absolute;
+            font-family: 'Outfit', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .gauge-desc {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .gauge-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .gauge-status {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        /* Summary area */
+        .summary-box {
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 3px solid var(--accent-primary);
+            padding: 16px;
+            border-radius: 0 12px 12px 0;
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-main);
+        }
+
+        /* Findings List */
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .findings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .finding-item {
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.01);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .finding-item:hover {
+            border-color: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .finding-header {
+            padding: 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .finding-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .risk-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .badge-high { background: rgba(239, 68, 68, 0.15); color: var(--risk-high); }
+        .badge-medium { background: rgba(249, 115, 115, 0.15); color: var(--risk-medium); }
+        .badge-low { background: rgba(16, 185, 129, 0.15); color: var(--risk-low); }
+
+        .finding-body {
+            padding: 0 16px 16px 16px;
+            font-size: 13.5px;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+            background: rgba(0, 0, 0, 0.15);
+        }
+
+        .finding-block {
+            margin-top: 10px;
+        }
+
+        .block-label {
+            font-weight: 600;
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .block-text {
+            color: var(--text-main);
+        }
+
+        .rec-box {
+            background: rgba(16, 185, 129, 0.04);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-top: 8px;
+        }
+
+        /* Review Section */
+        .reviews-section {
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            padding-top: 24px;
+        }
+
+        .review-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .review-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .reviewer-info {
+            font-weight: 600;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .review-comment {
+            font-size: 13.5px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Form */
+        .review-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .form-control {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 13.5px;
+            outline: none;
+            transition: var(--transition);
+        }
+
+        .form-control:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 8px rgba(99, 102, 241, 0.2);
+        }
+
+        textarea.form-control {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        /* Upload Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition);
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-content {
+            background: rgba(13, 19, 32, 0.95);
+            border: 1px solid var(--panel-border);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 580px;
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9);
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 16px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            color: #ffffff;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* Custom File Input */
+        .file-drop-area {
+            border: 2px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            background: rgba(255, 255, 255, 0.01);
+            position: relative;
+        }
+
+        .file-drop-area:hover, .file-drop-area.dragover {
+            border-color: var(--accent-primary);
+            background: rgba(99, 102, 241, 0.03);
+        }
+
+        .file-icon {
+            font-size: 32px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .file-drop-area input[type=file] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* AI Scanner Loading Overlay */
+        .scanner-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(8, 11, 17, 0.9);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition);
+            z-index: 10;
+        }
+
+        .scanner-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .scanner-circle {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border: 3px solid rgba(99, 102, 241, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--accent-primary);
+            animation: spin 1s linear infinite;
+        }
+
+        .scanner-laser {
+            position: absolute;
+            width: 100px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+            box-shadow: 0 0 8px var(--accent-primary);
+            animation: scan 2s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes scan {
+            0%, 100% { top: 10%; }
+            50% { top: 90%; }
+        }
+
+        .scanner-text {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+            color: var(--accent-primary);
+            animation: pulse-text 1.5s infinite;
+        }
+
+        @keyframes pulse-text {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- Header -->
+        <header>
+            <div class="logo-section">
+                <i class="fa-solid fa-shield-halved logo-icon"></i>
+                <div class="logo-text">Contract Guard AI</div>
+            </div>
+            <div class="stats-summary">
+                <div class="stat-item">
+                    <div class="stat-label">Total Contracts</div>
+                    <div class="stat-value" id="stat-total">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">High Risk Found</div>
+                    <div class="stat-value text-red" id="stat-high-risk" style="color: var(--risk-high)">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Pending Review</div>
+                    <div class="stat-value" id="stat-pending" style="color: var(--badge-analyzed)">0</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="workspace-grid">
+            
+            <!-- Left Panel: Contract List -->
+            <div class="contracts-panel">
+                <div class="panel-header">
+                    <h3 class="panel-title">Contracts Registry</h3>
+                    <button class="btn" id="btn-open-upload">
+                        <i class="fa-solid fa-plus"></i> Upload Contract
+                    </button>
+                </div>
+                
+                <div class="contracts-list" id="contracts-list-container">
+                    <!-- Cards populated via JS -->
+                    <div style="text-align: center; padding: 40px 0; color: var(--text-muted)">
+                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
+                        <p>Loading contracts registry...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Analysis Details -->
+            <div class="analysis-panel" id="analysis-detail-panel">
+                <!-- Empty state shown initially -->
+                <div class="empty-state">
+                    <i class="fa-solid fa-file-contract empty-icon"></i>
+                    <h2>No Contract Selected</h2>
+                    <p>Choose an uploaded contract from the list to display its metadata, AI risk assessments, clauses, and expert reviews.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal-overlay" id="upload-modal">
+        <div class="modal-content" style="position: relative;">
+            
+            <!-- Scanning Loader Overlay -->
+            <div class="scanner-overlay" id="scanner-loader">
+                <div class="scanner-circle"></div>
+                <div class="scanner-laser"></div>
+                <div class="scanner-text">AI Scanning & Analyzing Contract...</div>
+            </div>
+
+            <div class="modal-header">
+                <h3 class="panel-title">Upload New Contract</h3>
+                <button class="modal-close" id="btn-close-upload"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <form id="upload-form">
+                <div class="form-row" style="margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Contract Code *</label>
+                        <input type="text" name="contract_code" class="form-control" placeholder="e.g. HD-2026-099" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contract Title *</label>
+                        <input type="text" name="title" class="form-control" placeholder="e.g. Service Level Agreement" required>
+                    </div>
+                </div>
+
+                <div class="form-row" style="margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Contract Type</label>
+                        <input type="text" name="contract_type" class="form-control" placeholder="e.g. Service, NDAs, Software">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contract Value ($)</label>
+                        <input type="number" step="0.01" name="contract_value" class="form-control" placeholder="0.00">
+                    </div>
+                </div>
+
+                <div class="form-row" style="margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Start Date</label>
+                        <input type="date" name="start_date" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">End Date</label>
+                        <input type="date" name="end_date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label">Paste Raw Contract Text (Alternative to File Upload)</label>
+                    <textarea name="raw_content" class="form-control" style="min-height: 100px;" placeholder="Paste your contract text, clauses, or agreement content here..."></textarea>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label class="form-label">Or Upload Contract File (PDF, DOCX, TXT)</label>
+                    <div class="file-drop-area" id="file-drop-zone">
+                        <i class="fa-solid fa-cloud-arrow-up file-icon"></i>
+                        <p id="file-drop-text">Drag and drop file here, or click to choose file</p>
+                        <input type="file" name="file" id="file-input">
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                    <button type="button" class="btn" id="btn-cancel-upload" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">Cancel</button>
+                    <button type="submit" class="btn">Start AI Analysis</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Frontend Scripts -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const listContainer = document.getElementById('contracts-list-container');
+            const detailPanel = document.getElementById('analysis-detail-panel');
+            
+            // Modal Elements
+            const uploadModal = document.getElementById('upload-modal');
+            const openUploadBtn = document.getElementById('btn-open-upload');
+            const closeUploadBtn = document.getElementById('btn-close-upload');
+            const cancelUploadBtn = document.getElementById('btn-cancel-upload');
+            const uploadForm = document.getElementById('upload-form');
+            const scannerLoader = document.getElementById('scanner-loader');
+            const fileInput = document.getElementById('file-input');
+            const fileDropZone = document.getElementById('file-drop-zone');
+            const fileDropText = document.getElementById('file-drop-text');
+
+            let currentContractId = null;
+
+            // Load Contracts list
+            async function loadContracts(selectedId = null) {
+                try {
+                    const res = await fetch('/api/contracts/');
+                    if (!res.ok) throw new Error("Failed to fetch contracts");
+                    const data = await res.json();
+                    
+                    renderStats(data);
+                    
+                    if (data.length === 0) {
+                        listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted)">
+                            <i class="fa-regular fa-folder-open" style="font-size: 32px; margin-bottom: 12px;"></i>
+                            <p>No contracts uploaded yet.</p>
+                        </div>`;
+                        return;
+                    }
+
+                    listContainer.innerHTML = '';
+                    data.forEach(c => {
+                        const card = document.createElement('div');
+                        card.className = `contract-card ${selectedId == c.id ? 'active' : ''}`;
+                        card.dataset.id = c.id;
+
+                        // Risk display
+                        let riskClass = 'score-low';
+                        let indicatorClass = 'bg-low';
+                        let riskLabel = 'Low Risk';
+                        
+                        if (c.risk_score !== null) {
+                            if (c.risk_score >= 80) {
+                                riskClass = 'score-high';
+                                indicatorClass = 'bg-high';
+                                riskLabel = `Score: ${c.risk_score}% (High)`;
+                            } else if (c.risk_score >= 50) {
+                                riskClass = 'score-medium';
+                                indicatorClass = 'bg-medium';
+                                riskLabel = `Score: ${c.risk_score}% (Medium)`;
+                            } else {
+                                riskClass = 'score-low';
+                                indicatorClass = 'bg-low';
+                                riskLabel = `Score: ${c.risk_score}% (Low)`;
+                            }
+                        } else {
+                            riskLabel = 'Pending AI Run';
+                            riskClass = 'score-low';
+                            indicatorClass = 'bg-low';
+                            if (c.status === 'ANALYZING') {
+                                riskLabel = 'Analyzing...';
+                            }
+                        }
+
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <span class="card-code">${c.contract_code}</span>
+                                <span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span>
+                            </div>
+                            <div class="card-title">${c.title}</div>
+                            <div class="card-footer">
+                                <span>$${c.contract_value.toLocaleString()}</span>
+                                <div class="card-score ${riskClass}">
+                                    <div class="score-indicator ${indicatorClass}"></div>
+                                    <span>${riskLabel}</span>
+                                </div>
+                            </div>
+                        `;
+                        
+                        card.addEventListener('click', () => {
+                            document.querySelectorAll('.contract-card').forEach(cc => cc.classList.remove('active'));
+                            card.classList.add('active');
+                            showContractDetail(c.id);
+                        });
+
+                        listContainer.appendChild(card);
+                    });
+
+                    // Auto-select active if set
+                    if (selectedId) {
+                        const activeCard = listContainer.querySelector(`[data-id="${selectedId}"]`);
+                        if (activeCard) activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+
+                } catch (err) {
+                    console.error(err);
+                    listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--risk-high)">
+                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 32px; margin-bottom: 12px;"></i>
+                        <p>Error loading registry database.</p>
+                    </div>`;
+                }
+            }
+
+            // Stats calculator
+            function renderStats(contracts) {
+                const total = contracts.length;
+                let highRiskCount = 0;
+                let pendingCount = 0;
+
+                contracts.forEach(c => {
+                    if (c.risk_score && c.risk_score >= 80) highRiskCount++;
+                    if (c.status === 'ANALYZED') pendingCount++;
+                });
+
+                document.getElementById('stat-total').innerText = total;
+                document.getElementById('stat-high-risk').innerText = highRiskCount;
+                document.getElementById('stat-pending').innerText = pendingCount;
+            }
+
+            // Load single contract details
+            async function showContractDetail(id) {
+                currentContractId = id;
+                detailPanel.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
+                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 32px; margin-bottom: 12px;"></i>
+                    </div>
+                `;
+
+                try {
+                    const res = await fetch(`/api/contracts/${id}/`);
+                    if (!res.ok) throw new Error("Failed to fetch contract details");
+                    const data = await res.json();
+
+                    // Render content
+                    let analysisHTML = '';
+                    if (data.analysis) {
+                        const score = data.analysis.overall_score;
+                        let strokeColor = '#10b981';
+                        let scoreStatus = 'Low Risk';
+                        let scoreStatusClass = 'score-low';
+                        
+                        if (score >= 80) {
+                            strokeColor = '#ef4444';
+                            scoreStatus = 'High Risk';
+                            scoreStatusClass = 'score-high';
+                        } else if (score >= 50) {
+                            strokeColor = '#f97316';
+                            scoreStatus = 'Medium Risk';
+                            scoreStatusClass = 'score-medium';
+                        }
+
+                        // SVG Circular gauge dashoffset
+                        const r = 36;
+                        const c = 2 * Math.PI * r; // ~226.2
+                        const dashoffset = c - (score / 100) * c;
+
+                        // Findings list HTML
+                        let findingsHTML = '';
+                        if (data.findings && data.findings.length > 0) {
+                            data.findings.forEach(f => {
+                                findingsHTML += `
+                                    <div class="finding-item">
+                                        <div class="finding-header" onclick="toggleFinding(this)">
+                                            <div class="finding-left">
+                                                <span class="risk-badge badge-${f.risk_level.toLowerCase()}">${f.risk_level}</span>
+                                                <span>${f.risk_name}</span>
+                                            </div>
+                                            <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
+                                        </div>
+                                        <div class="finding-body">
+                                            <div class="finding-block">
+                                                <div class="block-label">Violated Clause</div>
+                                                <div class="block-text" style="font-weight: 500; color: #ffffff;">${f.clause_title}</div>
+                                            </div>
+                                            <div class="finding-block">
+                                                <div class="block-label">Risk Explanation</div>
+                                                <div class="block-text">${f.explanation}</div>
+                                            </div>
+                                            ${f.recommendation ? `
+                                            <div class="rec-box">
+                                                <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
+                                                <div class="block-text">${f.recommendation}</div>
+                                            </div>` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                        } else {
+                            findingsHTML = `<p style="color: var(--text-muted); font-style: italic;">No specific risks identified.</p>`;
+                        }
+
+                        // Reviews list HTML
+                        let reviewsHTML = '';
+                        if (data.reviews && data.reviews.length > 0) {
+                            data.reviews.forEach(r => {
+                                reviewsHTML += `
+                                    <div class="review-card">
+                                        <div class="review-header">
+                                            <div class="reviewer-info">
+                                                <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
+                                                <span>${r.reviewer}</span>
+                                                <span class="status-badge" style="background: rgba(99,102,241,0.1); color: var(--accent-primary); font-size: 8px;">${r.role}</span>
+                                            </div>
+                                            <span class="risk-badge badge-${r.final_risk_level.toLowerCase()}">${r.final_risk_level} Decision</span>
+                                        </div>
+                                        <div class="review-comment">"${r.comment}"</div>
+                                    </div>
+                                `;
+                            });
+                        }
+
+                        // Show review form only if contract is not approved, or show a review submission form
+                        const showReviewForm = data.status === 'ANALYZED';
+
+                        analysisHTML = `
+                            <h4 class="section-title"><i class="fa-solid fa-chart-line"></i> Risk Assessment Summary</h4>
+                            <div class="gauge-area" style="margin-bottom: 20px;">
+                                <div class="gauge-circle">
+                                    <svg>
+                                        <circle class="bg-circle" cx="40" cy="40" r="${r}"></circle>
+                                        <circle class="val-circle" cx="40" cy="40" r="${r}" style="stroke-dashoffset: ${dashoffset}; stroke: ${strokeColor};"></circle>
+                                    </svg>
+                                    <div class="gauge-text">${score}%</div>
+                                </div>
+                                <div class="gauge-desc">
+                                    <div class="gauge-label">Overall AI Threat Level</div>
+                                    <div class="gauge-status ${scoreStatusClass}">${scoreStatus}</div>
+                                </div>
+                            </div>
+
+                            <div class="summary-box">
+                                ${data.analysis.summary}
+                            </div>
+
+                            <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Clause Violations</h4>
+                            <div class="findings-list">
+                                ${findingsHTML}
+                            </div>
+
+                            <div class="reviews-section">
+                                <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
+                                ${reviewsHTML}
+                                
+                                ${showReviewForm ? `
+                                <form class="review-form" id="submit-review-form">
+                                    <div class="form-group">
+                                        <label class="form-label">Review Verdict *</label>
+                                        <select class="form-control" name="final_risk_level" required>
+                                            <option value="LOW">LOW RISK - Approved</option>
+                                            <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
+                                            <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Expert Commentary *</label>
+                                        <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
+                                    </div>
+                                    <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
+                                        <i class="fa-solid fa-signature"></i> Sign & Submit Review
+                                    </button>
+                                </form>
+                                ` : `
+                                <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2);">
+                                    <i class="fa-solid fa-circle-check"></i>
+                                    <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
+                                </div>
+                                `}
+                            </div>
+                        `;
+                    } else {
+                        analysisHTML = `<div style="text-align: center; color: var(--text-muted); padding: 24px;">
+                            <i class="fa-solid fa-microchip-ai" style="font-size: 32px; margin-bottom: 8px;"></i>
+                            <p>AI Analysis is still in progress...</p>
+                        </div>`;
+                    }
+
+                    detailPanel.innerHTML = `
+                        <div class="analysis-header">
+                            <div class="analysis-title-area">
+                                <h2 class="analysis-title">${data.title}</h2>
+                                <div class="analysis-meta">
+                                    <div class="meta-tag"><i class="fa-solid fa-barcode"></i> ${data.contract_code}</div>
+                                    <div class="meta-tag"><i class="fa-solid fa-tag"></i> ${data.contract_type}</div>
+                                    <div class="meta-tag"><i class="fa-solid fa-dollar-sign"></i> ${data.contract_value.toLocaleString()}</div>
+                                    ${data.start_date ? `<div class="meta-tag"><i class="fa-solid fa-calendar-days"></i> ${data.start_date} to ${data.end_date}</div>` : ''}
+                                </div>
+                            </div>
+                            
+                            ${data.file_path ? `
+                            <a href="${data.file_path}" target="_blank" class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">
+                                <i class="fa-solid fa-file-pdf"></i> Download PDF
+                            </a>` : ''}
+                        </div>
+
+                        ${analysisHTML}
+                    `;
+
+                    // Bind Review Form Event if present
+                    const reviewForm = document.getElementById('submit-review-form');
+                    if (reviewForm) {
+                        reviewForm.addEventListener('submit', async (e) => {
+                            e.preventDefault();
+                            const final_risk_level = reviewForm.final_risk_level.value;
+                            const comment = reviewForm.comment.value;
+                            
+                            try {
+                                const rRes = await fetch(`/api/analyses/${data.analysis.id}/review/`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({ final_risk_level, comment })
+                                });
+                                
+                                const rData = await rRes.json();
+                                if (rData.success) {
+                                    // Reload details and list to update status
+                                    showContractDetail(currentContractId);
+                                    loadContracts(currentContractId);
+                                } else {
+                                    alert("Error submitting review: " + (rData.error || "Unknown error"));
+                                }
+                            } catch (err) {
+                                console.error(err);
+                                alert("Failed to submit review request.");
+                            }
+                        });
+                    }
+
+                } catch (err) {
+                    console.error(err);
+                    detailPanel.innerHTML = `
+                        <div class="empty-state" style="color: var(--risk-high)">
+                            <i class="fa-solid fa-triangle-exclamation" style="font-size: 64px;"></i>
+                            <h2>Failed to Load Details</h2>
+                            <p>An error occurred retrieving database records for this contract ID.</p>
+                        </div>
+                    `;
+                }
+            }
+
+            // Modal Interactions
+            openUploadBtn.addEventListener('click', () => {
+                uploadForm.reset();
+                fileDropText.innerHTML = 'Drag and drop file here, or click to choose file';
+                uploadModal.classList.add('active');
+            });
+
+            function closeModal() {
+                uploadModal.classList.remove('active');
+            }
+
+            closeUploadBtn.addEventListener('click', closeModal);
+            cancelUploadBtn.addEventListener('click', closeModal);
+
+            // Drag and drop events
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    fileDropText.innerHTML = `<strong>Selected file:</strong> ${fileInput.files[0].name}`;
+                }
+            });
+
+            fileDropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                fileDropZone.classList.add('dragover');
+            });
+
+            fileDropZone.addEventListener('dragleave', () => {
+                fileDropZone.classList.remove('dragover');
+            });
+
+            fileDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                fileDropZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    fileInput.files = e.dataTransfer.files;
+                    fileDropText.innerHTML = `<strong>Selected file:</strong> ${fileInput.files[0].name}`;
+                }
+            });
+
+            // Form Submit
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const fileSelected = fileInput.files.length > 0;
+                const rawContentVal = uploadForm.raw_content.value.trim();
+                
+                if (!fileSelected && !rawContentVal) {
+                    alert("Please either upload a contract file or paste the contract text.");
+                    return;
+                }
+
+                const formData = new FormData(uploadForm);
+                
+                // Show AI Scanner loader
+                scannerLoader.classList.add('active');
+                
+                try {
+                    const res = await fetch('/api/contracts/', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await res.json();
+                    
+                    // Simulate analysis lag slightly to let the animation play beautifully
+                    setTimeout(() => {
+                        scannerLoader.classList.remove('active');
+                        closeModal();
+                        
+                        if (data.success) {
+                            loadContracts(data.contract_id);
+                            showContractDetail(data.contract_id);
+                        } else {
+                            alert("Upload failed: " + (data.error || "Unknown error"));
+                        }
+                    }, 2500); // 2.5s scan duration for maximum user experience
+
+                } catch (err) {
+                    scannerLoader.classList.remove('active');
+                    console.error(err);
+                    alert("Network error: Failed to upload contract.");
+                }
+            });
+
+            // Init load
+            loadContracts();
+        });
+
+        // Toggle Clause finding details open/close
+        function toggleFinding(header) {
+            const item = header.parentElement;
+            item.classList.toggle('active');
+            
+            const body = item.querySelector('.finding-body');
+            const icon = header.querySelector('i');
+            
+            if (item.classList.contains('active')) {
+                body.style.display = 'flex';
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                body.style.display = 'none';
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+    </script>
+</body>
+</html>

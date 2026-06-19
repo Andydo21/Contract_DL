@@ -1,0 +1,18 @@
+SOFTWARE DEVELOPMENT AGREEMENT
+
+This Software Development Agreement (the "Agreement") is made on November 1, 2026, by and between:
+Client: Delta Retail Ltd.
+Developer: DevCraft Systems.
+
+1. Scope of Work. Developer agrees to design, develop, and implement the e-commerce web platform as detailed in Exhibit A (Specifications).
+
+2. Term and Delivery. The project must be completed and delivered on or before April 1, 2027. If delivery is delayed past this date, Developer shall pay Client $1,500.00 for each day of delay as liquidated damages.
+
+3. Payment. Client shall pay Developer a total fee of $45,000.00, structured as follows:
+- 20% Initial Deposit upon signing.
+- 40% Upon successful completion of Beta release.
+- 40% Upon final acceptance testing.
+
+4. Intellectual Property. All code, designs, and documentation created under this Agreement shall belong exclusively to the Client only after final payment has been made in full.
+
+5. Limitation of Liability. The maximum aggregate liability of the Developer under this Agreement for any claim whatsoever shall be capped at $500.00.

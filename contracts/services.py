@@ -1,0 +1,278 @@
+import os
+import random
+from decimal import Decimal
+from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
+from .repositories import (
+    ContractRepository, ContractFileRepository, ClauseRepository,
+    RiskRepository, AIAnalysisRepository, RiskFindingRepository,
+    ReviewRepository, AuditLogRepository
+)
+
+User = get_user_model()
+
+class RiskService:
+    def __init__(self):
+        self.risk_repo = RiskRepository()
+        self.audit_repo = AuditLogRepository()
+        
+    def list_all_risks(self):
+        risks = self.risk_repo.get_all_risks()
+        return [
+            {
+                'id': r.id,
+                'risk_name': r.risk_name,
+                'description': r.description,
+                'severity_level': r.severity_level
+            }
+            for r in risks
+        ]
+        
+    def create_new_risk(self, name, description, severity_level):
+        if not name:
+            raise ValueError("Risk name is required.")
+        if severity_level not in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']:
+            raise ValueError("Invalid severity level. Must be LOW, MEDIUM, HIGH, or CRITICAL.")
+            
+        risk = self.risk_repo.create_risk(name, description, severity_level)
+        
+        # Log Audit Trail
+        admin_user = User.objects.filter(is_superuser=True).first()
+        self.audit_repo.log_action(admin_user, "RISK_CREATED", "Risk", risk.id)
+        
+        return risk
+
+
+class ContractService:
+    def __init__(self):
+        self.contract_repo = ContractRepository()
+        self.file_repo = ContractFileRepository()
+        self.clause_repo = ClauseRepository()
+        self.risk_repo = RiskRepository()
+        self.analysis_repo = AIAnalysisRepository()
+        self.finding_repo = RiskFindingRepository()
+        self.review_repo = ReviewRepository()
+        self.audit_repo = AuditLogRepository()
+
+    def list_all_contracts(self):
+        contracts = self.contract_repo.get_all_contracts()
+        data = []
+        for c in contracts:
+            latest_analysis = c.ai_analyses.first()
+            data.append({
+                'id': c.id,
+                'contract_code': c.contract_code,
+                'title': c.title,
+                'contract_type': c.contract_type,
+                'start_date': c.start_date.isoformat() if c.start_date else None,
+                'end_date': c.end_date.isoformat() if c.end_date else None,
+                'contract_value': float(c.contract_value) if c.contract_value else None,
+                'status': c.status,
+                'risk_score': int(latest_analysis.overall_score) if (latest_analysis and latest_analysis.overall_score is not None) else None,
+                'created_at': c.created_at.isoformat()
+            })
+        return data
+
+    def get_contract_details(self, contract_id):
+        c = self.contract_repo.get_contract_by_id(contract_id)
+        if not c:
+            return None
+            
+        latest_file = c.files.first()
+        latest_analysis = c.ai_analyses.first()
+        
+        clauses_data = [
+            {'id': cl.id, 'title': cl.clause_title, 'content': cl.clause_content}
+            for cl in c.clauses.all()
+        ]
+        
+        reviews_data = []
+        if latest_analysis:
+            reviews_data = [
+                {
+                    'id': r.id,
+                    'comment': r.comment,
+                    'final_risk_level': r.final_risk_level,
+                    'reviewer': r.user.username,
+                    'reviewed_at': r.reviewed_at.isoformat()
+                }
+                for r in latest_analysis.reviews.all()
+            ]
+        
+        analysis_data = None
+        findings_data = []
+        
+        if latest_analysis:
+            analysis_data = {
+                'id': latest_analysis.id,
+                'model_name': latest_analysis.model_name,
+                'overall_score': float(latest_analysis.overall_score),
+                'summary': latest_analysis.summary,
+                'created_at': latest_analysis.created_at.isoformat()
+            }
+            findings_data = [
+                {
+                    'id': f.id,
+                    'clause_id': f.clause.id,
+                    'clause_title': f.clause.clause_title,
+                    'risk_name': f.risk.risk_name,
+                    'risk_level': f.risk_level,
+                    'explanation': f.explanation,
+                    'recommendation': f.recommendation
+                }
+                for f in latest_analysis.findings.all()
+            ]
+            
+        return {
+            'id': c.id,
+            'contract_code': c.contract_code,
+            'title': c.title,
+            'contract_type': c.contract_type,
+            'start_date': c.start_date.isoformat() if c.start_date else None,
+            'end_date': c.end_date.isoformat() if c.end_date else None,
+            'contract_value': float(c.contract_value) if c.contract_value else None,
+            'status': c.status,
+            'file_path': latest_file.file_path if latest_file else None,
+            'clauses': clauses_data,
+            'analysis': analysis_data,
+            'findings': findings_data,
+            'reviews': reviews_data
+        }
+
+    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None):
+        if not code or not title:
+            raise ValueError("Contract code and title are required.")
+            
+        # Create Contract
+        contract = self.contract_repo.create_contract(
+            code=code,
+            title=title,
+            contract_type=contract_type,
+            start_date=start_date,
+            end_date=end_date,
+            contract_value=contract_value,
+            status='ANALYZING'
+        )
+        
+        # Save Contract File
+        saved_file_path = None
+        if file_obj:
+            from django.core.files.storage import FileSystemStorage
+            fs = FileSystemStorage()
+            filename = fs.save(f"contracts/{file_obj.name}", file_obj)
+            saved_file_path = fs.url(filename)
+        elif raw_content:
+            from django.core.files.storage import FileSystemStorage
+            fs = FileSystemStorage()
+            # Clean safe filename
+            safe_code = "".join(x for x in code if x.isalnum() or x in "-_")
+            filename = fs.save(f"contracts/contract_{safe_code}.txt", ContentFile(raw_content.encode('utf-8')))
+            saved_file_path = fs.url(filename)
+            
+        if saved_file_path:
+            self.file_repo.create_file_record(contract, saved_file_path)
+            
+        # Trigger Simulated AI analysis
+        self._simulate_ai_analysis(contract)
+        
+        return contract
+
+    def submit_expert_review(self, analysis_id, comment, final_risk_level):
+        analysis = self.analysis_repo.get_analysis_by_id(analysis_id)
+        if not analysis:
+            raise ValueError("Analysis not found.")
+            
+        if final_risk_level not in ['LOW', 'MEDIUM', 'HIGH']:
+            raise ValueError("Invalid risk level.")
+            
+        admin_user = User.objects.filter(is_superuser=True).first()
+        
+        # Create review
+        review = self.review_repo.create_review(analysis, admin_user, comment, final_risk_level)
+        
+        # Update Contract status
+        contract = analysis.contract
+        contract.status = 'APPROVED'
+        contract.save()
+        
+        # Log Audit
+        self.audit_repo.log_action(admin_user, "REVIEW_SUBMITTED", "Review", review.id)
+        
+        return review
+
+    def _simulate_ai_analysis(self, contract):
+        # 1. Create mock clauses
+        clauses_to_create = [
+            {
+                "title": "Payment Obligations",
+                "content": "The buyer shall settle all invoices within 15 days of issue. Failure to pay will incur an interest charge of 2.0% per day on the outstanding balance."
+            },
+            {
+                "title": "Limitation of Liability",
+                "content": "To the maximum extent permitted by applicable law, the contractor's entire liability under this agreement shall be limited to $500.00."
+            },
+            {
+                "title": "Confidentiality & Non-Disclosure",
+                "content": "Both parties agree that all shared technical, operational, and customer records must be protected. However, no encryption controls or security audit rights are specified."
+            }
+        ]
+        
+        clauses = []
+        for c_data in clauses_to_create:
+            cl = self.clause_repo.create_clause(contract, c_data["title"], c_data["content"])
+            clauses.append(cl)
+            
+        # 2. Get-or-create master Risk categories
+        risk_payment, _ = self.risk_repo.get_or_create_risk(
+            "Payment Risk",
+            defaults={"description": "High late payment penalty fees.", "severity_level": "HIGH"}
+        )
+        risk_legal, _ = self.risk_repo.get_or_create_risk(
+            "Limitation of Liability Risk",
+            defaults={"description": "Unbalanced liability caps.", "severity_level": "CRITICAL"}
+        )
+        risk_privacy, _ = self.risk_repo.get_or_create_risk(
+            "Data Privacy & Security Risk",
+            defaults={"description": "Vague data protection policies.", "severity_level": "HIGH"}
+        )
+        
+        # 3. Create Analysis
+        score = Decimal(str(random.randint(65, 88)))
+        analysis = self.analysis_repo.create_analysis(
+            contract=contract,
+            model_name="ContractGuard-AI-V3",
+            overall_score=score,
+            summary=f"Analysis of contract '{contract.title}' completed. Identified critical late payment penalties, unbalanced limitation of liability clauses, and deficiencies in technical security requirements."
+        )
+        
+        # 4. Create findings
+        self.finding_repo.create_finding(
+            analysis=analysis,
+            clause=clauses[0],
+            risk=risk_payment,
+            risk_level="HIGH",
+            explanation="The daily late interest charge of 2.0% is extremely excessive (730% annually) and likely unenforceable under general contract laws.",
+            recommendation="Renegotiate the penalty rate to 0.05% daily, capped at a maximum of 5% of the total invoice value."
+        )
+        
+        self.finding_repo.create_finding(
+            analysis=analysis,
+            clause=clauses[1],
+            risk=risk_legal,
+            risk_level="HIGH",
+            explanation="A flat $500 liability cap is heavily unbalanced and leaves the client virtually unprotected against major vendor failures.",
+            recommendation="Request to raise the cap to 100% of the contract value or a mutually agreed-upon amount based on risk exposure."
+        )
+        
+        self.finding_repo.create_finding(
+            analysis=analysis,
+            clause=clauses[2],
+            risk=risk_privacy,
+            risk_level="MEDIUM",
+            explanation="The clause lacks standard technical data protections, security incident response workflows, and data residency guidelines.",
+            recommendation="Incorporate a standard Data Protection Addendum (DPA) specifying data security practices (e.g., encryption in transit and at rest)."
+        )
+        
+        # Update status
+        contract.status = 'ANALYZED'
+        contract.save()
