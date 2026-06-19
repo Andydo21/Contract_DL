@@ -62,13 +62,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 3. Run AI Analysis Trigger (Detailed Page)
-    const triggerAnalysisBtn = document.getElementById('btn-detail-trigger-analysis');
+    // 3. Run/Re-run AI Analysis Trigger (Detailed Page)
+    const triggerButtons = document.querySelectorAll('#btn-detail-trigger-analysis, #btn-detail-reanalyze');
     const scannerLoader = document.getElementById('scanner-loader');
     
-    if (triggerAnalysisBtn) {
-        triggerAnalysisBtn.addEventListener('click', async () => {
-            const contractId = triggerAnalysisBtn.dataset.contractId;
+    triggerButtons.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const contractId = btn.dataset.contractId;
             if (scannerLoader) scannerLoader.classList.add('active');
             
             try {
@@ -91,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert("Network error: Failed to trigger AI analysis.");
             }
         });
-    }
+    });
 });
 
 // Toggle folding/unfolding of risk findings (Global helper)

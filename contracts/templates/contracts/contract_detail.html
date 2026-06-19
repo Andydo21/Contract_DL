@@ -53,8 +53,13 @@
 
             <!-- Right Side: Analysis & Expert Review Panel -->
             <div class="analysis-panel">
-                <div class="panel-header">
-                    <h3 class="panel-title"><i class="fa-solid fa-chart-line"></i> Risk Analysis & Actions</h3>
+                <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 class="panel-title" style="margin: 0;"><i class="fa-solid fa-chart-line"></i> Risk Analysis & Actions</h3>
+                    {% if contract.status != 'DRAFT' %}
+                    <button class="btn" id="btn-detail-reanalyze" data-contract-id="{{ contract.id }}" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; margin: 0; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); color: #818cf8;">
+                        <i class="fa-solid fa-arrows-rotate"></i> Re-Analyze
+                    </button>
+                    {% endif %}
                 </div>
                 
                 <div class="panel-body">

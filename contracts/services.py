@@ -206,6 +206,10 @@ class ContractService:
         contract.status = 'ANALYZING'
         contract.save()
         
+        # Clean up existing clauses and analyses for re-run support
+        contract.clauses.all().delete()
+        contract.ai_analyses.all().delete()
+        
         # Trigger Simulated AI analysis
         self._simulate_ai_analysis(contract)
         
