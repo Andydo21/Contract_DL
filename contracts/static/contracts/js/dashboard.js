@@ -270,11 +270,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         `}
                     </div>
                 `;
+            } else if (data.status === 'DRAFT') {
+                analysisHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+                        <i class="fa-solid fa-microchip-ai" style="font-size: 48px; color: var(--accent-primary); animation: pulse-text 1.5s infinite;"></i>
+                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Analysis Pending</h3>
+                        <p style="max-width: 320px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary);">This contract is currently in Draft status. Click below to run the AI risk scanner to extract clauses and flag violations.</p>
+                        <button class="btn" id="btn-trigger-analysis" style="margin-top: 8px;">
+                            <i class="fa-solid fa-play"></i> Run AI Analysis
+                        </button>
+                    </div>
+                `;
             } else {
-                analysisHTML = `<div style="text-align: center; color: var(--text-muted); padding: 24px;">
-                    <i class="fa-solid fa-microchip-ai" style="font-size: 32px; margin-bottom: 8px;"></i>
-                    <p>AI Analysis is still in progress...</p>
-                </div>`;
+                analysisHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 48px; color: var(--accent-primary);"></i>
+                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Scanning in Progress</h3>
+                        <p style="max-width: 320px; font-size: 13.5px; color: var(--text-secondary);">Extracting agreement clauses and analyzing legal language...</p>
+                    </div>
+                `;
             }
 
             // Render original clauses list HTML
@@ -376,6 +390,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 tabFulltextContent.classList.add('active');
             });
 
+
+            // Bind Run AI Analysis Event if present
+            const triggerAnalysisBtn = document.getElementById('btn-trigger-analysis');
+            if (triggerAnalysisBtn) {
+                triggerAnalysisBtn.addEventListener('click', async () => {
+                    // Show AI Scanner loader overlay
+                    scannerLoader.classList.add('active');
+                    
+                    try {
+                        const runRes = await fetch(`/api/contracts/${data.id}/analyze/`, {
+                            method: 'POST'
+                        });
+                        const runData = await runRes.json();
+                        
+                        setTimeout(() => {
+                            scannerLoader.classList.remove('active');
+                            if (runData.success) {
+                                // Reload details panel and contract list
+                                showContractDetail(data.id);
+                                loadContracts(data.id);
+                            } else {
+                                alert("Failed to run analysis: " + (runData.error || "Unknown error"));
+                            }
+                        }, 2500); // 2.5s simulation duration
+                    } catch (err) {
+                        scannerLoader.classList.remove('active');
+                        console.error(err);
+                        alert("Network error: Failed to trigger AI analysis.");
+                    }
+                });
+            }
 
             // Bind Review Form Event if present
             const reviewForm = document.getElementById('submit-review-form');

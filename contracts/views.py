@@ -86,6 +86,26 @@ def api_contract_detail(request, contract_id):
 
 
 @csrf_exempt
+def api_analyze_contract(request, contract_id):
+    """
+    POST: Run the AI analysis simulator for the given contract.
+    """
+    if request.method == 'POST':
+        try:
+            contract = contract_service.analyze_contract(contract_id)
+            return JsonResponse({
+                'success': True,
+                'contract_id': contract.id,
+                'status': contract.status
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+            
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+
+@csrf_exempt
 def api_submit_review(request, analysis_id):
     """
     POST: Submit legal expert review.

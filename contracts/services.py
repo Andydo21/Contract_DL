@@ -167,7 +167,7 @@ class ContractService:
         if not code or not title:
             raise ValueError("Contract code and title are required.")
             
-        # Create Contract
+        # Create Contract as DRAFT first, without running AI analysis immediately
         contract = self.contract_repo.create_contract(
             code=code,
             title=title,
@@ -175,7 +175,7 @@ class ContractService:
             start_date=start_date,
             end_date=end_date,
             contract_value=contract_value,
-            status='ANALYZING'
+            status='DRAFT'
         )
         
         # Save Contract File
@@ -196,10 +196,21 @@ class ContractService:
         if saved_file_path:
             self.file_repo.create_file_record(contract, saved_file_path)
             
+        return contract
+
+    def analyze_contract(self, contract_id):
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+            
+        contract.status = 'ANALYZING'
+        contract.save()
+        
         # Trigger Simulated AI analysis
         self._simulate_ai_analysis(contract)
         
         return contract
+
 
     def submit_expert_review(self, analysis_id, comment, final_risk_level):
         analysis = self.analysis_repo.get_analysis_by_id(analysis_id)

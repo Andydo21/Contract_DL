@@ -61,6 +61,37 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // 3. Run AI Analysis Trigger (Detailed Page)
+    const triggerAnalysisBtn = document.getElementById('btn-detail-trigger-analysis');
+    const scannerLoader = document.getElementById('scanner-loader');
+    
+    if (triggerAnalysisBtn) {
+        triggerAnalysisBtn.addEventListener('click', async () => {
+            const contractId = triggerAnalysisBtn.dataset.contractId;
+            if (scannerLoader) scannerLoader.classList.add('active');
+            
+            try {
+                const res = await fetch(`/api/contracts/${contractId}/analyze/`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                
+                setTimeout(() => {
+                    if (scannerLoader) scannerLoader.classList.remove('active');
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert("Failed to run analysis: " + (data.error || "Unknown error"));
+                    }
+                }, 2500); // 2.5s simulation loader duration
+            } catch (err) {
+                if (scannerLoader) scannerLoader.classList.remove('active');
+                console.error(err);
+                alert("Network error: Failed to trigger AI analysis.");
+            }
+        });
+    }
 });
 
 // Toggle folding/unfolding of risk findings (Global helper)

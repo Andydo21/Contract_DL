@@ -83,7 +83,16 @@
                         </div>
                     </div>
 
-                    {% if contract.analysis %}
+                    {% if contract.status == 'DRAFT' %}
+                    <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+                        <i class="fa-solid fa-microchip-ai" style="font-size: 48px; color: var(--accent-primary); animation: pulse-text 1.5s infinite;"></i>
+                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Analysis Pending</h3>
+                        <p style="max-width: 320px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary);">This contract is currently in Draft status. Click below to run the AI risk scanner to extract clauses and flag violations.</p>
+                        <button class="btn" id="btn-detail-trigger-analysis" data-contract-id="{{ contract.id }}" style="margin-top: 8px;">
+                            <i class="fa-solid fa-play"></i> Run AI Analysis
+                        </button>
+                    </div>
+                    {% elif contract.analysis %}
                     <!-- Circular Gauge -->
                     <div class="gauge-area">
                         <div class="gauge-circle">
@@ -186,6 +195,13 @@
                     </div>
                     {% endif %}
                 </div>
+            </div>
+
+            <!-- AI Scanner Loading Overlay -->
+            <div class="scanner-overlay" id="scanner-loader">
+                <div class="scanner-circle"></div>
+                <div class="scanner-laser"></div>
+                <div class="scanner-text">AI SCANNER RUNNING...</div>
             </div>
 
         </div>
