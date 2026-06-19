@@ -583,6 +583,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     badgeClass = 'badge-low';
                 }
                 
+                let contractsHTML = '';
+                if (r.contracts && r.contracts.length > 0) {
+                    contractsHTML += `
+                        <div style="margin-top: 8px; border-top: 1px dashed var(--panel-border); padding-top: 8px;">
+                            <span style="font-size: 10.5px; color: var(--text-muted); display: block; margin-bottom: 6px;"><i class="fa-solid fa-link"></i> Associated Contracts:</span>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    `;
+                    r.contracts.forEach(c => {
+                        contractsHTML += `
+                            <a href="#" onclick="event.preventDefault(); selectContractFromModal(${c.id})" style="font-size: 11px; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.25); color: #a5b4fc; padding: 3px 8px; border-radius: 4px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; transition: var(--transition);">
+                                <i class="fa-solid fa-file-signature" style="font-size: 10px;"></i>
+                                <span>${c.contract_code}</span>
+                            </a>
+                        `;
+                    });
+                    contractsHTML += `
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    contractsHTML += `
+                        <div style="margin-top: 8px; border-top: 1px dashed var(--panel-border); padding-top: 6px; font-size: 10.5px; color: var(--text-muted); font-style: italic;">
+                            No contracts currently flagged with this risk.
+                        </div>
+                    `;
+                }
+                
                 html += `
                     <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -590,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="risk-badge ${badgeClass}" style="font-size: 10px; padding: 2px 6px;">${r.severity_level}</span>
                         </div>
                         <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${r.description || 'No description provided.'}</p>
+                        ${contractsHTML}
                     </div>
                 `;
             });
@@ -661,5 +689,20 @@ window.toggleFinding = function(header) {
     } else {
         body.style.display = 'none';
         icon.style.transform = 'rotate(0deg)';
+    }
+};
+
+// Global handler to navigate to a contract from the risks modal
+window.selectContractFromModal = function(id) {
+    const risksModal = document.getElementById('risks-modal');
+    if (risksModal) {
+        risksModal.classList.remove('active');
+    }
+    
+    // Find contract card in the registry list, highlight it and click it
+    const card = document.querySelector(`.contract-card[data-id="${id}"]`);
+    if (card) {
+        card.click();
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 };

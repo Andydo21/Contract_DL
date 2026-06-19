@@ -2,10 +2,11 @@ import json
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from .services import ContractService, RiskService
+from .services import ContractService, RiskService, AnalysisHistoryService
 
 contract_service = ContractService()
 risk_service = RiskService()
+analysis_history_service = AnalysisHistoryService()
 
 def dashboard(request):
     """Render the dashboard SPA template."""
@@ -182,4 +183,23 @@ def api_risks_list(request):
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
             
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+def analysis_history(request):
+    """Render the AI analysis history page."""
+    return render(request, 'contracts/analysis_history.html')
+
+
+@csrf_exempt
+def api_analyses_list(request):
+    """
+    GET: Return full list of all AI analyses ordered by most recent.
+    """
+    if request.method == 'GET':
+        try:
+            data = analysis_history_service.list_all_analyses()
+            return JsonResponse(data, safe=False)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
     return JsonResponse({'error': 'Method not allowed.'}, status=405)

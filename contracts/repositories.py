@@ -92,6 +92,12 @@ class AIAnalysisRepository:
             summary=summary
         )
 
+    @staticmethod
+    def get_all_analyses():
+        return AIAnalysis.objects.select_related('contract').prefetch_related(
+            'findings__risk'
+        ).order_by('-created_at')
+
 
 class ClauseRepository:
     @staticmethod

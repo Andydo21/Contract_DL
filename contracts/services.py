@@ -18,15 +18,30 @@ class RiskService:
         
     def list_all_risks(self):
         risks = self.risk_repo.get_all_risks()
-        return [
-            {
+        result = []
+        for r in risks:
+            # Query related contracts with findings of this risk category
+            from .models import RiskFinding, Contract
+            contract_ids = RiskFinding.objects.filter(risk=r).values_list('analysis__contract_id', flat=True).distinct()
+            contracts = Contract.objects.filter(id__in=contract_ids).only('id', 'title', 'contract_code')
+            
+            contracts_list = [
+                {
+                    'id': c.id,
+                    'title': c.title,
+                    'contract_code': c.contract_code
+                }
+                for c in contracts
+            ]
+            
+            result.append({
                 'id': r.id,
                 'risk_name': r.risk_name,
                 'description': r.description,
-                'severity_level': r.severity_level
-            }
-            for r in risks
-        ]
+                'severity_level': r.severity_level,
+                'contracts': contracts_list
+            })
+        return result
         
     def create_new_risk(self, name, description, severity_level):
         if not name:
@@ -41,6 +56,51 @@ class RiskService:
         self.audit_repo.log_action(admin_user, "RISK_CREATED", "Risk", risk.id)
         
         return risk
+
+
+class AnalysisHistoryService:
+    def __init__(self):
+        self.analysis_repo = AIAnalysisRepository()
+
+    def list_all_analyses(self):
+        analyses = self.analysis_repo.get_all_analyses()
+        result = []
+        for a in analyses:
+            # Deduplicate findings by risk name
+            risk_names_seen = set()
+            findings = []
+            for f in a.findings.all():
+                if f.risk.risk_name not in risk_names_seen:
+                    risk_names_seen.add(f.risk.risk_name)
+                    findings.append({
+                        'risk_name': f.risk.risk_name,
+                        'risk_level': f.risk_level,
+                        'severity_level': f.risk.severity_level,
+                    })
+
+            score = int(a.overall_score) if a.overall_score is not None else 0
+            if score >= 80:
+                risk_label = 'HIGH'
+            elif score >= 50:
+                risk_label = 'MEDIUM'
+            else:
+                risk_label = 'LOW'
+
+            result.append({
+                'id': a.id,
+                'contract_id': a.contract.id,
+                'contract_code': a.contract.contract_code,
+                'contract_title': a.contract.title,
+                'contract_status': a.contract.status,
+                'model_name': a.model_name,
+                'overall_score': score,
+                'risk_label': risk_label,
+                'summary': a.summary,
+                'findings_count': a.findings.count(),
+                'findings_preview': findings[:3],
+                'created_at': a.created_at.strftime('%Y-%m-%d %H:%M'),
+            })
+        return result
 
 
 class ContractService:
