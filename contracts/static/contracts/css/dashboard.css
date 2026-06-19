@@ -885,3 +885,20 @@ textarea.form-control {
     color: var(--text-secondary);
     line-height: 1.6;
 }
+
+/* Document Preview Styling */
+.doc-preview-container {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 24px;
+    max-height: 600px;
+    overflow-y: auto;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-main);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+

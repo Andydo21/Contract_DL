@@ -307,16 +307,21 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${data.start_date ? `<div class="meta-tag"><i class="fa-solid fa-calendar-days"></i> ${data.start_date} to ${data.end_date}</div>` : ''}
                         </div>
                     </div>
-                    
-                    ${data.file_path ? `
-                    <a href="${data.file_path}" target="_blank" class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">
-                        <i class="fa-solid fa-file-pdf"></i> Download PDF
-                    </a>` : ''}
+                    <div style="display: flex; gap: 8px;">
+                        <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
+                            <i class="fa-solid fa-expand"></i> Full Reader Page
+                        </a>
+                        ${data.file_path ? `
+                        <a href="${data.file_path}" target="_blank" class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
+                            <i class="fa-solid fa-file-pdf"></i> Download PDF
+                        </a>` : ''}
+                    </div>
                 </div>
 
                 <div class="tabs-header">
                     <button class="tab-btn active" id="btn-tab-analysis"><i class="fa-solid fa-chart-line"></i> Risk Assessment</button>
                     <button class="tab-btn" id="btn-tab-clauses"><i class="fa-solid fa-file-invoice"></i> Original Clauses (${data.clauses ? data.clauses.length : 0})</button>
+                    <button class="tab-btn" id="btn-tab-fulltext"><i class="fa-solid fa-file-lines"></i> Full Document</button>
                 </div>
 
                 <div id="tab-analysis" class="tab-content active">
@@ -328,27 +333,49 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${clausesHTML}
                     </div>
                 </div>
+
+                <div id="tab-fulltext" class="tab-content">
+                    <pre class="doc-preview-container">${data.raw_content || 'No content available.'}</pre>
+                </div>
             `;
 
             // Bind Tab Navigation Events
             const tabAnalysisBtn = document.getElementById('btn-tab-analysis');
             const tabClausesBtn = document.getElementById('btn-tab-clauses');
+            const tabFulltextBtn = document.getElementById('btn-tab-fulltext');
+            
             const tabAnalysisContent = document.getElementById('tab-analysis');
             const tabClausesContent = document.getElementById('tab-clauses');
+            const tabFulltextContent = document.getElementById('tab-fulltext');
+
+            function deactivateAllTabs() {
+                tabAnalysisBtn.classList.remove('active');
+                tabClausesBtn.classList.remove('active');
+                tabFulltextBtn.classList.remove('active');
+                
+                tabAnalysisContent.classList.remove('active');
+                tabClausesContent.classList.remove('active');
+                tabFulltextContent.classList.remove('active');
+            }
 
             tabAnalysisBtn.addEventListener('click', () => {
+                deactivateAllTabs();
                 tabAnalysisBtn.classList.add('active');
-                tabClausesBtn.classList.remove('active');
                 tabAnalysisContent.classList.add('active');
-                tabClausesContent.classList.remove('active');
             });
 
             tabClausesBtn.addEventListener('click', () => {
+                deactivateAllTabs();
                 tabClausesBtn.classList.add('active');
-                tabAnalysisBtn.classList.remove('active');
                 tabClausesContent.classList.add('active');
-                tabAnalysisContent.classList.remove('active');
             });
+
+            tabFulltextBtn.addEventListener('click', () => {
+                deactivateAllTabs();
+                tabFulltextBtn.classList.add('active');
+                tabFulltextContent.classList.add('active');
+            });
+
 
             // Bind Review Form Event if present
             const reviewForm = document.getElementById('submit-review-form');

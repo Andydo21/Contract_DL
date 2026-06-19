@@ -12,6 +12,16 @@ def dashboard(request):
     return render(request, 'contracts/dashboard.html')
 
 
+def contract_detail(request, contract_id):
+    """Render the dedicated contract detail page."""
+    details = contract_service.get_contract_details(contract_id)
+    if not details:
+        from django.http import Http404
+        raise Http404("Contract not found")
+    return render(request, 'contracts/contract_detail.html', {'contract': details})
+
+
+
 @csrf_exempt
 def api_contracts_list(request):
     """

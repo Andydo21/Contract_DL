@@ -1,0 +1,197 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contract Detail - {{ contract.title }}</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="{% static 'contracts/css/contract_detail.css' %}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation -->
+        <header>
+            <div class="logo-section">
+                <a href="{% url 'dashboard' %}" class="btn-back">
+                    <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
+                </a>
+                <div class="divider"></div>
+                <div class="logo-text">Contract Guard AI</div>
+            </div>
+            <div class="contract-header-info">
+                <span class="status-badge status-{{ contract.status|lower }}">{{ contract.status }}</span>
+            </div>
+        </header>
+
+        <!-- Main Workspace Split Screen -->
+        <div class="detail-grid">
+            
+            <!-- Left Side: Full Document Reader -->
+            <div class="doc-panel">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="fa-solid fa-file-lines"></i> Original Contract Document</h3>
+                    {% if contract.file_path %}
+                    <a href="{{ contract.file_path }}" target="_blank" class="btn-download">
+                        <i class="fa-solid fa-file-pdf"></i> Download PDF
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="doc-reader-body">
+                    <pre class="doc-content-pre">{{ contract.raw_content }}</pre>
+                </div>
+            </div>
+
+            <!-- Right Side: Analysis & Expert Review Panel -->
+            <div class="analysis-panel">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="fa-solid fa-chart-line"></i> Risk Analysis & Actions</h3>
+                </div>
+                
+                <div class="panel-body">
+                    <!-- Metadata Section -->
+                    <div class="meta-section">
+                        <div class="meta-card">
+                            <div class="meta-icon"><i class="fa-solid fa-barcode"></i></div>
+                            <div class="meta-info">
+                                <span class="meta-label">Code</span>
+                                <span class="meta-val">{{ contract.contract_code }}</span>
+                            </div>
+                        </div>
+                        <div class="meta-card">
+                            <div class="meta-icon"><i class="fa-solid fa-tag"></i></div>
+                            <div class="meta-info">
+                                <span class="meta-label">Type</span>
+                                <span class="meta-val">{{ contract.contract_type|default:"N/A" }}</span>
+                            </div>
+                        </div>
+                        <div class="meta-card">
+                            <div class="meta-icon"><i class="fa-solid fa-dollar-sign"></i></div>
+                            <div class="meta-info">
+                                <span class="meta-label">Value</span>
+                                <span class="meta-val">${{ contract.contract_value|floatformat:2|default:"0" }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if contract.analysis %}
+                    <!-- Circular Gauge -->
+                    <div class="gauge-area">
+                        <div class="gauge-circle">
+                            <svg>
+                                <circle class="bg-circle" cx="40" cy="40" r="36"></circle>
+                                <circle class="val-circle" id="gauge-val" cx="40" cy="40" r="36" data-score="{{ contract.analysis.overall_score }}"></circle>
+                            </svg>
+                            <div class="gauge-text">{{ contract.analysis.overall_score|floatformat:0 }}%</div>
+                        </div>
+                        <div class="gauge-desc">
+                            <div class="gauge-label">Threat Level</div>
+                            <div class="gauge-status" id="gauge-status">Calculating...</div>
+                        </div>
+                    </div>
+
+                    <!-- AI Summary -->
+                    <div class="summary-box">
+                        {{ contract.analysis.summary }}
+                    </div>
+
+                    <!-- Findings -->
+                    <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Risks</h4>
+                    <div class="findings-list">
+                        {% for f in contract.findings %}
+                        <div class="finding-item">
+                            <div class="finding-header" onclick="toggleFinding(this)">
+                                <div class="finding-left">
+                                    <span class="risk-badge badge-{{ f.risk_level|lower }}">{{ f.risk_level }}</span>
+                                    <span>{{ f.risk_name }}</span>
+                                </div>
+                                <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
+                            </div>
+                            <div class="finding-body" style="display: none;">
+                                <div class="finding-block">
+                                    <div class="block-label">Violated Clause</div>
+                                    <div class="block-text" style="font-weight: 500; color: #ffffff;">{{ f.clause_title }}</div>
+                                </div>
+                                <div class="finding-block">
+                                    <div class="block-label">Risk Explanation</div>
+                                    <div class="block-text">{{ f.explanation }}</div>
+                                </div>
+                                {% if f.recommendation %}
+                                <div class="rec-box">
+                                    <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
+                                    <div class="block-text">{{ f.recommendation }}</div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% empty %}
+                        <p style="color: var(--text-muted); font-style: italic;">No specific risks identified.</p>
+                        {% endfor %}
+                    </div>
+
+                    <!-- Reviews -->
+                    <div class="reviews-section">
+                        <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
+                        {% for r in contract.reviews %}
+                        <div class="review-card">
+                            <div class="review-header">
+                                <div class="reviewer-info">
+                                    <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
+                                    <span>{{ r.reviewer }}</span>
+                                </div>
+                                <span class="risk-badge badge-{{ r.final_risk_level|lower }}">{{ r.final_risk_level }} Decision</span>
+                            </div>
+                            <div class="review-comment">"{{ r.comment }}"</div>
+                        </div>
+                        {% endfor %}
+
+                        {% if contract.status == 'ANALYZED' %}
+                        <form class="review-form" id="detail-review-form" data-analysis-id="{{ contract.analysis.id }}">
+                            <div class="form-group">
+                                <label class="form-label">Review Verdict *</label>
+                                <select class="form-control" name="final_risk_level" required>
+                                    <option value="LOW">LOW RISK - Approved</option>
+                                    <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
+                                    <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Expert Commentary *</label>
+                                <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
+                            </div>
+                            <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
+                                <i class="fa-solid fa-signature"></i> Sign & Submit Review
+                            </button>
+                        </form>
+                        {% else %}
+                        <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2); margin-top: 12px;">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                        <i class="fa-solid fa-microchip-ai" style="font-size: 48px; margin-bottom: 12px; color: var(--accent-primary);"></i>
+                        <p>AI Analysis is in progress for this contract...</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- External JS -->
+    <script src="{% static 'contracts/js/contract_detail.js' %}"></script>
+</body>
+</html>

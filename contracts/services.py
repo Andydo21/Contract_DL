@@ -74,6 +74,7 @@ class ContractService:
         return data
 
     def get_contract_details(self, contract_id):
+        from django.conf import settings
         c = self.contract_repo.get_contract_by_id(contract_id)
         if not c:
             return None
@@ -123,6 +124,27 @@ class ContractService:
                 for f in latest_analysis.findings.all()
             ]
             
+        # Read original text if available
+        raw_content = ""
+        if latest_file and latest_file.file_path:
+            media_prefix = settings.MEDIA_URL
+            rel_path = latest_file.file_path
+            if rel_path.startswith(media_prefix):
+                rel_path = rel_path[len(media_prefix):]
+            
+            full_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
+            if os.path.exists(full_path):
+                if full_path.endswith('.txt') or full_path.endswith('.docx') or full_path.endswith('.doc'):
+                    try:
+                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            raw_content = f.read()
+                    except Exception:
+                        pass
+        
+        # Fallback to reconstructing from clauses if empty
+        if not raw_content and clauses_data:
+            raw_content = "\n\n".join([f"--- {cl['title']} ---\n{cl['content']}" for cl in clauses_data])
+            
         return {
             'id': c.id,
             'contract_code': c.contract_code,
@@ -133,11 +155,13 @@ class ContractService:
             'contract_value': float(c.contract_value) if c.contract_value else None,
             'status': c.status,
             'file_path': latest_file.file_path if latest_file else None,
+            'raw_content': raw_content,
             'clauses': clauses_data,
             'analysis': analysis_data,
             'findings': findings_data,
             'reviews': reviews_data
         }
+
 
     def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None):
         if not code or not title:
