@@ -1024,7 +1024,7 @@
                             </div>
                             <div class="card-title">${c.title}</div>
                             <div class="card-footer">
-                                <span>$${c.contract_value.toLocaleString()}</span>
+                                <span>$${c.contract_value !== null && c.contract_value !== undefined ? c.contract_value.toLocaleString() : '0'}</span>
                                 <div class="card-score ${riskClass}">
                                     <div class="score-indicator ${indicatorClass}"></div>
                                     <span>${riskLabel}</span>
@@ -1236,7 +1236,7 @@
                                 <div class="analysis-meta">
                                     <div class="meta-tag"><i class="fa-solid fa-barcode"></i> ${data.contract_code}</div>
                                     <div class="meta-tag"><i class="fa-solid fa-tag"></i> ${data.contract_type}</div>
-                                    <div class="meta-tag"><i class="fa-solid fa-dollar-sign"></i> ${data.contract_value.toLocaleString()}</div>
+                                    <div class="meta-tag"><i class="fa-solid fa-dollar-sign"></i> ${data.contract_value !== null && data.contract_value !== undefined ? data.contract_value.toLocaleString() : '0'}</div>
                                     ${data.start_date ? `<div class="meta-tag"><i class="fa-solid fa-calendar-days"></i> ${data.start_date} to ${data.end_date}</div>` : ''}
                                 </div>
                             </div>
