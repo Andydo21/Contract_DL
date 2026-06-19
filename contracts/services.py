@@ -235,27 +235,106 @@ class ContractService:
         
         return review
 
-    def _simulate_ai_analysis(self, contract):
-        # 1. Create mock clauses
-        clauses_to_create = [
-            {
-                "title": "Payment Obligations",
-                "content": "The buyer shall settle all invoices within 15 days of issue. Failure to pay will incur an interest charge of 2.0% per day on the outstanding balance."
-            },
-            {
-                "title": "Limitation of Liability",
-                "content": "To the maximum extent permitted by applicable law, the contractor's entire liability under this agreement shall be limited to $500.00."
-            },
-            {
-                "title": "Confidentiality & Non-Disclosure",
-                "content": "Both parties agree that all shared technical, operational, and customer records must be protected. However, no encryption controls or security audit rights are specified."
-            }
-        ]
+    def _get_raw_content(self, contract):
+        latest_file = contract.files.first()
+        if not latest_file or not latest_file.file_path:
+            return ""
+        
+        import os
+        from django.conf import settings
+        rel_path = latest_file.file_path
+        url_prefix = settings.MEDIA_URL
+        if rel_path.startswith(url_prefix):
+            rel_path = rel_path[len(url_prefix):]
+        physical_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+        
+        if os.path.exists(physical_path):
+            try:
+                with open(physical_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                pass
+        return ""
+
+    def _split_clauses(self, raw_text):
+        import re
+        if not raw_text or not raw_text.strip():
+            return []
+            
+        # Standardize newlines
+        text = raw_text.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # Heading match pattern (e.g. Điều 1:, Article 2., Section 3, Clause 4, 1. Title)
+        pattern = r'(?m)^(?=(?:Điều|Article|Section|Paragraph|Clause|\d+)\s*[:\.\-\d\s]+)'
+        
+        parts = re.split(pattern, text)
+        parts = [p.strip() for p in parts if p.strip()]
         
         clauses = []
-        for c_data in clauses_to_create:
-            cl = self.clause_repo.create_clause(contract, c_data["title"], c_data["content"])
-            clauses.append(cl)
+        for i, part in enumerate(parts):
+            lines = part.split('\n')
+            title = lines[0].strip()
+            # If the title line is very long, it's not a real heading; treat entire block as content
+            if len(title) > 80 or len(lines) == 1:
+                title = f"Clause {i+1}"
+                content = part
+            else:
+                content = "\n".join(lines[1:]).strip()
+                if not content:
+                    content = title
+                    title = f"Clause {i+1}"
+            
+            clauses.append({
+                "title": title,
+                "content": content
+            })
+            
+        # Fallback to paragraph-based splitting if no structural headers matched
+        if len(clauses) <= 1:
+            paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+            clauses = []
+            for i, p in enumerate(paragraphs):
+                lines = p.split('\n')
+                first_line = lines[0].strip()
+                if len(first_line) < 60 and (":" in first_line or "-" in first_line or first_line.isupper()):
+                    title = first_line
+                    content = "\n".join(lines[1:]).strip()
+                else:
+                    title = f"Clause {i+1}"
+                    content = p
+                
+                if not content:
+                    content = title
+                    title = f"Clause {i+1}"
+                    
+                clauses.append({
+                    "title": title,
+                    "content": content
+                })
+                
+        return clauses
+
+    def _simulate_ai_analysis(self, contract):
+        # 1. Retrieve raw text and split dynamically
+        raw_text = self._get_raw_content(contract)
+        parsed_clauses = self._split_clauses(raw_text)
+        
+        # Fallback if text is empty or couldn't be loaded
+        if not parsed_clauses:
+            parsed_clauses = [
+                {
+                    "title": "Payment Obligations",
+                    "content": "The buyer shall settle all invoices within 15 days of issue. Failure to pay will incur an interest charge of 2.0% per day on the outstanding balance."
+                },
+                {
+                    "title": "Limitation of Liability",
+                    "content": "To the maximum extent permitted by applicable law, the contractor's entire liability under this agreement shall be limited to $500.00."
+                },
+                {
+                    "title": "Confidentiality & Non-Disclosure",
+                    "content": "Both parties agree that all shared technical, operational, and customer records must be protected. However, no encryption controls or security audit rights are specified."
+                }
+            ]
             
         # 2. Get-or-create master Risk categories
         risk_payment, _ = self.risk_repo.get_or_create_risk(
@@ -271,43 +350,74 @@ class ContractService:
             defaults={"description": "Vague data protection policies.", "severity_level": "HIGH"}
         )
         
-        # 3. Create Analysis
-        score = Decimal(str(random.randint(65, 88)))
+        # 3. Create Analysis Object
+        score = Decimal(str(random.randint(60, 92)))
         analysis = self.analysis_repo.create_analysis(
             contract=contract,
             model_name="ContractGuard-AI-V3",
             overall_score=score,
-            summary=f"Analysis of contract '{contract.title}' completed. Identified critical late payment penalties, unbalanced limitation of liability clauses, and deficiencies in technical security requirements."
+            summary=f"Analysis of contract '{contract.title}' completed. Scanned all clauses and detected potential contract risk exposures."
         )
         
-        # 4. Create findings
-        self.finding_repo.create_finding(
-            analysis=analysis,
-            clause=clauses[0],
-            risk=risk_payment,
-            risk_level="HIGH",
-            explanation="The daily late interest charge of 2.0% is extremely excessive (730% annually) and likely unenforceable under general contract laws.",
-            recommendation="Renegotiate the penalty rate to 0.05% daily, capped at a maximum of 5% of the total invoice value."
-        )
+        # 4. Save clauses and match findings dynamically
+        clauses = []
+        findings_created = 0
         
-        self.finding_repo.create_finding(
-            analysis=analysis,
-            clause=clauses[1],
-            risk=risk_legal,
-            risk_level="HIGH",
-            explanation="A flat $500 liability cap is heavily unbalanced and leaves the client virtually unprotected against major vendor failures.",
-            recommendation="Request to raise the cap to 100% of the contract value or a mutually agreed-upon amount based on risk exposure."
-        )
-        
-        self.finding_repo.create_finding(
-            analysis=analysis,
-            clause=clauses[2],
-            risk=risk_privacy,
-            risk_level="MEDIUM",
-            explanation="The clause lacks standard technical data protections, security incident response workflows, and data residency guidelines.",
-            recommendation="Incorporate a standard Data Protection Addendum (DPA) specifying data security practices (e.g., encryption in transit and at rest)."
-        )
-        
+        for c_data in parsed_clauses:
+            cl = self.clause_repo.create_clause(contract, c_data["title"], c_data["content"])
+            clauses.append(cl)
+            
+            content_lower = cl.clause_content.lower()
+            title_lower = cl.clause_title.lower()
+            
+            # Check for Payment Risk
+            if any(k in content_lower or k in title_lower for k in ["payment", "pay", "fee", "penalty", "thanh toán", "phạt", "lãi suất"]):
+                self.finding_repo.create_finding(
+                    analysis=analysis,
+                    clause=cl,
+                    risk=risk_payment,
+                    risk_level="HIGH",
+                    explanation=f"Clause '{cl.clause_title}' contains payment or penalty terms. Excessive daily rates or short window terms present risk.",
+                    recommendation="Ensure payment window is at least 30 days and late interest rate is capped at maximum statutory limit (e.g. 9-15% annually)."
+                )
+                findings_created += 1
+                
+            # Check for Limitation of Liability Risk
+            if any(k in content_lower or k in title_lower for k in ["liability", "limit", "cap", "bồi thường", "trách nhiệm"]):
+                self.finding_repo.create_finding(
+                    analysis=analysis,
+                    clause=cl,
+                    risk=risk_legal,
+                    risk_level="HIGH",
+                    explanation=f"Clause '{cl.clause_title}' restricts or waives vendor liabilities. Extremely low caps leave your business vulnerable to damages.",
+                    recommendation="Renegotiate the liability cap to be equal to 1x-2x the annual contract value rather than a flat low fee."
+                )
+                findings_created += 1
+                
+            # Check for Data Privacy / Security Risk
+            if any(k in content_lower or k in title_lower for k in ["privacy", "security", "confidential", "data", "bảo mật", "bí mật", "thông tin"]):
+                self.finding_repo.create_finding(
+                    analysis=analysis,
+                    clause=cl,
+                    risk=risk_privacy,
+                    risk_level="MEDIUM",
+                    explanation=f"Clause '{cl.clause_title}' regulates information confidentiality but lacks specific technical security audit and breach reporting guarantees.",
+                    recommendation="Add standard security compliance (e.g. SOC2, ISO27001) and require a 72-hour security incident notification window."
+                )
+                findings_created += 1
+                
+        # If no findings were created because no keywords matched, seed default findings on the first clause
+        if findings_created == 0 and clauses:
+            self.finding_repo.create_finding(
+                analysis=analysis,
+                clause=clauses[0],
+                risk=risk_payment,
+                risk_level="MEDIUM",
+                explanation=f"Clause '{clauses[0].clause_title}' was flagged for review. General verification is required to confirm standard operating compliance.",
+                recommendation="Review the exact terms to ensure mutual liability and standard commercial definitions."
+            )
+            
         # Update status
         contract.status = 'ANALYZED'
         contract.save()
+
