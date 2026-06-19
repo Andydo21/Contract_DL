@@ -50,9 +50,14 @@
             <div class="contracts-panel">
                 <div class="panel-header">
                     <h3 class="panel-title">Contracts Registry</h3>
-                    <button class="btn" id="btn-open-upload">
-                        <i class="fa-solid fa-plus"></i> Upload Contract
-                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn" id="btn-open-risks-mgmt" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Master Risks
+                        </button>
+                        <button class="btn" id="btn-open-upload">
+                            <i class="fa-solid fa-plus"></i> Upload Contract
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="contracts-list" id="contracts-list-container">
@@ -73,6 +78,53 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Master Risks Modal -->
+    <div class="modal-overlay" id="risks-modal">
+        <div class="modal-content" style="position: relative; max-width: 800px; width: 90%;">
+            <div class="modal-header">
+                <h3 class="panel-title"><i class="fa-solid fa-triangle-exclamation"></i> Master Risk Categories</h3>
+                <button class="modal-close" id="btn-close-risks"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="risks-modal-grid" style="display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 24px; margin-top: 16px;">
+                <!-- Left: List of current Master Risks -->
+                <div class="risks-list-column" style="display: flex; flex-direction: column; gap: 12px; max-height: 420px; overflow-y: auto; padding-right: 8px;">
+                    <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;">Active Risk Definitions</h4>
+                    <div id="modal-risks-container" style="display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Loaded dynamically via JS -->
+                    </div>
+                </div>
+                
+                <!-- Right: Form to add new Risk -->
+                <div class="risks-form-column" style="border-left: 1px solid var(--panel-border); padding-left: 20px;">
+                    <h4 style="font-family: 'Outfit', sans-serif; font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">Add New Risk Category</h4>
+                    <form id="add-risk-form">
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label class="form-label">Risk Name *</label>
+                            <input type="text" name="risk_name" class="form-control" placeholder="e.g. Intellectual Property" required>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label class="form-label">Severity Level *</label>
+                            <select name="severity_level" class="form-control" required style="background-color: #0d1117;">
+                                <option value="LOW">LOW</option>
+                                <option value="MEDIUM" selected>MEDIUM</option>
+                                <option value="HIGH">HIGH</option>
+                                <option value="CRITICAL">CRITICAL</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label class="form-label">Description *</label>
+                            <textarea name="description" class="form-control" style="min-height: 100px;" placeholder="Describe the risk conditions..." required></textarea>
+                        </div>
+                        <button type="submit" class="btn" style="width: 100%;">
+                            <i class="fa-solid fa-plus"></i> Create Risk
+                        </button>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 

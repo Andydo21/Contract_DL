@@ -550,6 +550,99 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Master Risks Management Modal Interactions
+    const openRisksBtn = document.getElementById('btn-open-risks-mgmt');
+    const risksModal = document.getElementById('risks-modal');
+    const closeRisksBtn = document.getElementById('btn-close-risks');
+    const risksContainer = document.getElementById('modal-risks-container');
+    const addRiskForm = document.getElementById('add-risk-form');
+
+    async function loadMasterRisks() {
+        risksContainer.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+                <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 20px; margin-bottom: 8px;"></i>
+                <p style="font-size: 12px;">Loading risk categories...</p>
+            </div>
+        `;
+        try {
+            const res = await fetch('/api/risks/');
+            if (!res.ok) throw new Error("Failed to load risks");
+            const data = await res.json();
+            
+            if (data.length === 0) {
+                risksContainer.innerHTML = `<p style="color: var(--text-muted); font-style: italic; text-align: center; padding: 20px;">No risk definitions found.</p>`;
+                return;
+            }
+            
+            let html = '';
+            data.forEach(r => {
+                let badgeClass = 'badge-medium';
+                if (r.severity_level === 'HIGH' || r.severity_level === 'CRITICAL') {
+                    badgeClass = 'badge-high';
+                } else if (r.severity_level === 'LOW') {
+                    badgeClass = 'badge-low';
+                }
+                
+                html += `
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <strong style="color: #ffffff; font-size: 13.5px;">${r.risk_name}</strong>
+                            <span class="risk-badge ${badgeClass}" style="font-size: 10px; padding: 2px 6px;">${r.severity_level}</span>
+                        </div>
+                        <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${r.description || 'No description provided.'}</p>
+                    </div>
+                `;
+            });
+            risksContainer.innerHTML = html;
+        } catch (err) {
+            console.error(err);
+            risksContainer.innerHTML = `<p style="color: var(--risk-high); font-size: 12px; text-align: center; padding: 20px;">Error loading risks.</p>`;
+        }
+    }
+
+    if (openRisksBtn) {
+        openRisksBtn.addEventListener('click', () => {
+            addRiskForm.reset();
+            risksModal.classList.add('active');
+            loadMasterRisks();
+        });
+    }
+
+    if (closeRisksBtn) {
+        closeRisksBtn.addEventListener('click', () => {
+            risksModal.classList.remove('active');
+        });
+    }
+
+    if (addRiskForm) {
+        addRiskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const risk_name = addRiskForm.risk_name.value.trim();
+            const severity_level = addRiskForm.severity_level.value;
+            const description = addRiskForm.description.value.trim();
+            
+            try {
+                const res = await fetch('/api/risks/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ risk_name, severity_level, description })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    addRiskForm.reset();
+                    loadMasterRisks();
+                } else {
+                    alert("Failed to add risk: " + (data.error || "Unknown error"));
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Network error: Failed to add new risk category.");
+            }
+        });
+    }
+
     // Init load
     loadContracts();
 });
