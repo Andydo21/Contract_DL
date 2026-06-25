@@ -22,7 +22,7 @@ class RiskService:
         for r in risks:
             # Query related contracts with findings of this risk category
             from .models import RiskFinding, Contract
-            contract_ids = RiskFinding.objects.filter(risk=r).values_list('analysis__contract_id', flat=True).distinct()
+            contract_ids = RiskFinding.objects.filter(rule=r).values_list('analysis__version__contract_id', flat=True).distinct()
             contracts = Contract.objects.filter(id__in=contract_ids).only('id', 'title', 'contract_code')
             
             contracts_list = [
@@ -36,9 +36,10 @@ class RiskService:
             
             result.append({
                 'id': r.id,
-                'risk_name': r.risk_name,
+                'risk_name': r.rule_name,
+                'risk_code': r.rule_code,
                 'description': r.description,
-                'severity_level': r.severity_level,
+                'severity_level': r.severity,
                 'contracts': contracts_list
             })
         return result
@@ -70,12 +71,12 @@ class AnalysisHistoryService:
             risk_names_seen = set()
             findings = []
             for f in a.findings.all():
-                if f.risk.risk_name not in risk_names_seen:
-                    risk_names_seen.add(f.risk.risk_name)
+                if f.rule.rule_name not in risk_names_seen:
+                    risk_names_seen.add(f.rule.rule_name)
                     findings.append({
-                        'risk_name': f.risk.risk_name,
+                        'risk_name': f.rule.rule_name,
                         'risk_level': f.risk_level,
-                        'severity_level': f.risk.severity_level,
+                        'severity_level': f.rule.severity,
                     })
 
             score = int(a.overall_score) if a.overall_score is not None else 0
@@ -88,10 +89,10 @@ class AnalysisHistoryService:
 
             result.append({
                 'id': a.id,
-                'contract_id': a.contract.id,
-                'contract_code': a.contract.contract_code,
-                'contract_title': a.contract.title,
-                'contract_status': a.contract.status,
+                'contract_id': a.version.contract.id,
+                'contract_code': a.version.contract.contract_code,
+                'contract_title': a.version.contract.title,
+                'contract_status': a.version.contract.status,
                 'model_name': a.model_name,
                 'overall_score': score,
                 'risk_label': risk_label,
@@ -133,18 +134,30 @@ class ContractService:
             })
         return data
 
-    def get_contract_details(self, contract_id):
+    def get_contract_details(self, contract_id, version_id=None):
         from django.conf import settings
         c = self.contract_repo.get_contract_by_id(contract_id)
         if not c:
             return None
             
-        latest_file = c.files.first()
-        latest_analysis = c.ai_analyses.first()
+        from .models import ContractVersion
+        if version_id:
+            try:
+                version = c.versions.get(id=version_id)
+            except Exception:
+                version = c.latest_version
+        else:
+            version = c.latest_version
+            
+        if not version:
+            version = ContractVersion.objects.create(contract=c, version_number=1)
+            
+        latest_file = version.files.first()
+        latest_analysis = version.ai_analyses.first()
         
         clauses_data = [
             {'id': cl.id, 'title': cl.clause_title, 'content': cl.clause_content}
-            for cl in c.clauses.all()
+            for cl in version.clauses.all()
         ]
         
         reviews_data = []
@@ -152,8 +165,8 @@ class ContractService:
             reviews_data = [
                 {
                     'id': r.id,
-                    'comment': r.comment,
-                    'final_risk_level': r.final_risk_level,
+                    'comment': r.note,
+                    'final_risk_level': r.decision,
                     'reviewer': r.user.username,
                     'reviewed_at': r.reviewed_at.isoformat()
                 }
@@ -174,12 +187,13 @@ class ContractService:
             findings_data = [
                 {
                     'id': f.id,
-                    'clause_id': f.clause.id,
-                    'clause_title': f.clause.clause_title,
-                    'risk_name': f.risk.risk_name,
+                    'clause_id': f.clause.id if f.clause else None,
+                    'clause_title': f.clause.clause_title if f.clause else "",
+                    'risk_name': f.rule.rule_name,
                     'risk_level': f.risk_level,
                     'explanation': f.explanation,
-                    'recommendation': f.recommendation
+                    'recommendation': f.recommendation,
+                    'disadvantaged_party': f.disadvantaged_party
                 }
                 for f in latest_analysis.findings.all()
             ]
@@ -205,6 +219,18 @@ class ContractService:
         if not raw_content and clauses_data:
             raw_content = "\n\n".join([f"--- {cl['title']} ---\n{cl['content']}" for cl in clauses_data])
             
+        versions_list = []
+        for v in c.versions.all().order_by('-version_number'):
+            v_analysis = v.ai_analyses.first()
+            versions_list.append({
+                'id': v.id,
+                'version_number': v.version_number,
+                'change_summary': v.change_summary or "Initial version",
+                'created_at': v.created_at.isoformat(),
+                'overall_score': float(v_analysis.overall_score) if (v_analysis and v_analysis.overall_score is not None) else None,
+                'risk_level': v_analysis.risk_level if v_analysis else 'NONE',
+            })
+            
         return {
             'id': c.id,
             'contract_code': c.contract_code,
@@ -219,9 +245,12 @@ class ContractService:
             'clauses': clauses_data,
             'analysis': analysis_data,
             'findings': findings_data,
-            'reviews': reviews_data
+            'reviews': reviews_data,
+            'active_version_id': version.id,
+            'active_version_number': version.version_number,
+            'active_version_change_summary': version.change_summary,
+            'versions': versions_list
         }
-
 
     def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None):
         if not code or not title:
@@ -238,6 +267,10 @@ class ContractService:
             status='DRAFT'
         )
         
+        # Create default version 1
+        from .models import ContractVersion
+        version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
+        
         # Save Contract File
         saved_file_path = None
         if file_obj:
@@ -248,17 +281,70 @@ class ContractService:
         elif raw_content:
             from django.core.files.storage import FileSystemStorage
             fs = FileSystemStorage()
-            # Clean safe filename
             safe_code = "".join(x for x in code if x.isalnum() or x in "-_")
             filename = fs.save(f"contracts/contract_{safe_code}.txt", ContentFile(raw_content.encode('utf-8')))
             saved_file_path = fs.url(filename)
             
         if saved_file_path:
-            self.file_repo.create_file_record(contract, saved_file_path)
+            self.file_repo.create_file_record(version, saved_file_path)
+            
+        # Extract and save clauses immediately upon creation
+        try:
+            raw_text = self._get_raw_content(contract, version)
+            parsed_clauses = self._split_clauses(raw_text)
+            for c_data in parsed_clauses:
+                self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("django")
+            logger.warning(f"Failed to auto-extract clauses on creation: {e}")
             
         return contract
 
-    def analyze_contract(self, contract_id):
+    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary=""):
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+            
+        latest = contract.latest_version
+        next_num = (latest.version_number + 1) if latest else 1
+        
+        from .models import ContractVersion
+        version = ContractVersion.objects.create(
+            contract=contract,
+            version_number=next_num,
+            change_summary=change_summary
+        )
+        
+        saved_file_path = None
+        if file_obj:
+            from django.core.files.storage import FileSystemStorage
+            fs = FileSystemStorage()
+            filename = fs.save(f"contracts/{file_obj.name}", file_obj)
+            saved_file_path = fs.url(filename)
+        elif raw_content:
+            from django.core.files.storage import FileSystemStorage
+            fs = FileSystemStorage()
+            safe_code = "".join(x for x in contract.contract_code if x.isalnum() or x in "-_")
+            filename = fs.save(f"contracts/contract_{safe_code}_v{next_num}.txt", ContentFile(raw_content.encode('utf-8')))
+            saved_file_path = fs.url(filename)
+            
+        if saved_file_path:
+            self.file_repo.create_file_record(version, saved_file_path)
+            
+        try:
+            raw_text = self._get_raw_content(contract, version)
+            parsed_clauses = self._split_clauses(raw_text)
+            for c_data in parsed_clauses:
+                self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("django")
+            logger.warning(f"Failed to auto-extract clauses on new version: {e}")
+            
+        return version
+
+    def analyze_contract(self, contract_id, version_id=None):
         contract = self.contract_repo.get_contract_by_id(contract_id)
         if not contract:
             raise ValueError("Contract not found.")
@@ -266,15 +352,23 @@ class ContractService:
         contract.status = 'ANALYZING'
         contract.save()
         
-        # Clean up existing clauses and analyses for re-run support
-        contract.clauses.all().delete()
-        contract.ai_analyses.all().delete()
+        from .models import ContractVersion
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+            if not version:
+                version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
         
-        # Trigger Simulated AI analysis
-        self._simulate_ai_analysis(contract)
+        version.clauses.all().delete()
+        version.ai_analyses.all().delete()
+        
+        self._run_ai_analysis_via_api(contract, version)
         
         return contract
-
 
     def submit_expert_review(self, analysis_id, comment, final_risk_level):
         analysis = self.analysis_repo.get_analysis_by_id(analysis_id)
@@ -290,7 +384,7 @@ class ContractService:
         review = self.review_repo.create_review(analysis, admin_user, comment, final_risk_level)
         
         # Update Contract status
-        contract = analysis.contract
+        contract = analysis.version.contract
         contract.status = 'APPROVED'
         contract.save()
         
@@ -299,8 +393,12 @@ class ContractService:
         
         return review
 
-    def _get_raw_content(self, contract):
-        latest_file = contract.files.first()
+    def _get_raw_content(self, contract, version=None):
+        if not version:
+            version = contract.latest_version
+        if not version:
+            return ""
+        latest_file = version.files.first()
         if not latest_file or not latest_file.file_path:
             return ""
         
@@ -338,8 +436,13 @@ class ContractService:
         for i, part in enumerate(parts):
             lines = part.split('\n')
             title = lines[0].strip()
-            # If the title line is very long, it's not a real heading; treat entire block as content
-            if len(title) > 80 or len(lines) == 1:
+            
+            # Check if we can extract a heading prefix like "1. Title. Content"
+            match = re.match(r'^((?:Điều|Article|Section|Paragraph|Clause|\d+)\s*[:\.\-\d\s]+[^.\n]+?)\.(.*)', part, re.DOTALL)
+            if match and len(match.group(1)) < 80:
+                title = match.group(1).strip()
+                content = match.group(2).strip()
+            elif len(title) > 80 or len(lines) == 1:
                 title = f"Clause {i+1}"
                 content = part
             else:
@@ -378,110 +481,185 @@ class ContractService:
                 
         return clauses
 
-    def _simulate_ai_analysis(self, contract):
+    def _run_ai_analysis_via_api(self, contract, version):
+        import requests
+        from django.conf import settings
+        from decimal import Decimal
+        
         # 1. Retrieve raw text and split dynamically
-        raw_text = self._get_raw_content(contract)
+        raw_text = self._get_raw_content(contract, version)
         parsed_clauses = self._split_clauses(raw_text)
         
-        # Fallback if text is empty or couldn't be loaded
         if not parsed_clauses:
-            parsed_clauses = [
-                {
-                    "title": "Payment Obligations",
-                    "content": "The buyer shall settle all invoices within 15 days of issue. Failure to pay will incur an interest charge of 2.0% per day on the outstanding balance."
-                },
-                {
-                    "title": "Limitation of Liability",
-                    "content": "To the maximum extent permitted by applicable law, the contractor's entire liability under this agreement shall be limited to $500.00."
-                },
-                {
-                    "title": "Confidentiality & Non-Disclosure",
-                    "content": "Both parties agree that all shared technical, operational, and customer records must be protected. However, no encryption controls or security audit rights are specified."
-                }
-            ]
+            raise ValueError("No clauses found in contract to analyze.")
             
-        # 2. Get-or-create master Risk categories
-        risk_payment, _ = self.risk_repo.get_or_create_risk(
-            "Payment Risk",
-            defaults={"description": "High late payment penalty fees.", "severity_level": "HIGH"}
-        )
-        risk_legal, _ = self.risk_repo.get_or_create_risk(
-            "Limitation of Liability Risk",
-            defaults={"description": "Unbalanced liability caps.", "severity_level": "CRITICAL"}
-        )
-        risk_privacy, _ = self.risk_repo.get_or_create_risk(
-            "Data Privacy & Security Risk",
-            defaults={"description": "Vague data protection policies.", "severity_level": "HIGH"}
-        )
-        
-        # 3. Create Analysis Object
-        score = Decimal(str(random.randint(60, 92)))
-        analysis = self.analysis_repo.create_analysis(
-            contract=contract,
-            model_name="ContractGuard-AI-V3",
-            overall_score=score,
-            summary=f"Analysis of contract '{contract.title}' completed. Scanned all clauses and detected potential contract risk exposures."
-        )
-        
-        # 4. Save clauses and match findings dynamically
+        # 2. Save clauses and immediately pre-extract basic entities (so they exist in the DB before AI analysis)
         clauses = []
-        findings_created = 0
-        
         for c_data in parsed_clauses:
-            cl = self.clause_repo.create_clause(contract, c_data["title"], c_data["content"])
+            cl = self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+            self._extract_and_save_basic_entities(cl)
             clauses.append(cl)
             
-            content_lower = cl.clause_content.lower()
-            title_lower = cl.clause_title.lower()
-            
-            # Check for Payment Risk
-            if any(k in content_lower or k in title_lower for k in ["payment", "pay", "fee", "penalty", "thanh toán", "phạt", "lãi suất"]):
-                self.finding_repo.create_finding(
-                    analysis=analysis,
-                    clause=cl,
-                    risk=risk_payment,
-                    risk_level="HIGH",
-                    explanation=f"Clause '{cl.clause_title}' contains payment or penalty terms. Excessive daily rates or short window terms present risk.",
-                    recommendation="Ensure payment window is at least 30 days and late interest rate is capped at maximum statutory limit (e.g. 9-15% annually)."
-                )
-                findings_created += 1
-                
-            # Check for Limitation of Liability Risk
-            if any(k in content_lower or k in title_lower for k in ["liability", "limit", "cap", "bồi thường", "trách nhiệm"]):
-                self.finding_repo.create_finding(
-                    analysis=analysis,
-                    clause=cl,
-                    risk=risk_legal,
-                    risk_level="HIGH",
-                    explanation=f"Clause '{cl.clause_title}' restricts or waives vendor liabilities. Extremely low caps leave your business vulnerable to damages.",
-                    recommendation="Renegotiate the liability cap to be equal to 1x-2x the annual contract value rather than a flat low fee."
-                )
-                findings_created += 1
-                
-            # Check for Data Privacy / Security Risk
-            if any(k in content_lower or k in title_lower for k in ["privacy", "security", "confidential", "data", "bảo mật", "bí mật", "thông tin"]):
-                self.finding_repo.create_finding(
-                    analysis=analysis,
-                    clause=cl,
-                    risk=risk_privacy,
-                    risk_level="MEDIUM",
-                    explanation=f"Clause '{cl.clause_title}' regulates information confidentiality but lacks specific technical security audit and breach reporting guarantees.",
-                    recommendation="Add standard security compliance (e.g. SOC2, ISO27001) and require a 72-hour security incident notification window."
-                )
-                findings_created += 1
-                
-        # If no findings were created because no keywords matched, seed default findings on the first clause
-        if findings_created == 0 and clauses:
-            self.finding_repo.create_finding(
-                analysis=analysis,
-                clause=clauses[0],
-                risk=risk_payment,
-                risk_level="MEDIUM",
-                explanation=f"Clause '{clauses[0].clause_title}' was flagged for review. General verification is required to confirm standard operating compliance.",
-                recommendation="Review the exact terms to ensure mutual liability and standard commercial definitions."
+        # 3. Retrieve the newly saved ExtractedEntity records to pass in the API payload
+        from .models import ExtractedEntity
+        db_entities = ExtractedEntity.objects.filter(clause__in=clauses)
+        
+        # Retrieve existing risk rules from the database to guide the prompt
+        existing_rules = self.risk_repo.get_all_risks()
+        
+        payload = {
+            "clauses": [
+                {"title": cl.clause_title, "content": cl.clause_content}
+                for cl in clauses
+            ],
+            "extracted_entities": [
+                {
+                    "clause_title": ee.clause.clause_title,
+                    "entity_type": ee.entity_type,
+                    "entity_value": ee.entity_value,
+                    "normalized_value": ee.normalized_value or "",
+                    "confidence_score": float(ee.confidence_score)
+                }
+                for ee in db_entities
+            ],
+            "risk_rules": [
+                {"name": r.rule_name, "description": r.description}
+                for r in existing_rules
+            ]
+        }
+        
+        try:
+            response = requests.post(
+                f"{settings.AI_SERVICE_URL}/api/v1/analyze",
+                json=payload,
+                timeout=600  # LLM generation can take time
             )
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as e:
+            from django.db import connection
+            connection.close()
+            # Revert status to DRAFT so it can be re-run, but keep the extracted clauses
+            contract.status = 'DRAFT'
+            contract.save()
+            raise RuntimeError(f"AI Service communication failed: {e}")
             
+        from django.db import connection
+        connection.close()
+            
+        # 4. Create Analysis Object
+        overall_score = Decimal(str(result.get("overall_score", 0)))
+        summary = result.get("summary", "Analysis completed.")
+        
+        analysis = self.analysis_repo.create_analysis(
+            contract_or_version=version,
+            model_name="Qwen2.5-3B-Instruct (Fine-tuned)",
+            overall_score=overall_score,
+            summary=summary
+        )
+        
+        # 5. Match findings returned by the API to the already saved clauses
+        for cl in clauses:
+            # Find findings belonging to this clause in the API output
+            for finding in result.get("findings", []):
+                if finding.get("clause_title") == cl.clause_title:
+                    # Get or create Risk category
+                    risk_name = finding.get("risk_category", "Rủi ro chung")
+                    risk_level = finding.get("risk_level", "MEDIUM")
+                    explanation = finding.get("explanation", "")
+                    recommendation = finding.get("recommendation", "")
+                    disadvantaged = finding.get("disadvantaged_party")
+                    
+                    risk, _ = self.risk_repo.get_or_create_risk(
+                        risk_name,
+                        defaults={"description": f"Auto-created category for {risk_name}.", "severity_level": risk_level}
+                    )
+                    
+                    self.finding_repo.create_finding(
+                        analysis=analysis,
+                        clause=cl,
+                        risk=risk,
+                        risk_level=risk_level,
+                        explanation=explanation,
+                        recommendation=recommendation,
+                        disadvantaged_party=disadvantaged
+                    )
+            
+            # Find any additional entities returned by the API that were not pre-extracted
+            for entity in result.get("entities", []):
+                if entity.get("clause_title") == cl.clause_title:
+                    ExtractedEntity.objects.get_or_create(
+                        clause=cl,
+                        entity_type=entity.get("entity_type"),
+                        entity_value=entity.get("entity_value"),
+                        defaults={
+                            "normalized_value": entity.get("normalized_value"),
+                            "confidence_score": Decimal(str(entity.get("confidence_score", 1.0)))
+                        }
+                    )
+                    
         # Update status
         contract.status = 'ANALYZED'
         contract.save()
 
+    def _extract_and_save_basic_entities(self, clause):
+        from .models import ExtractedEntity
+        content_lower = clause.clause_content.lower()
+        
+        # 1. Identify Parties
+        party_found = []
+        if "bên a" in content_lower:
+            party_found.append("Bên A")
+        if "bên b" in content_lower:
+            party_found.append("Bên B")
+        if "landlord" in content_lower or "bên cho thuê" in content_lower:
+            party_found.append("Bên cho thuê (Landlord)")
+        if "tenant" in content_lower or "bên thuê" in content_lower:
+            party_found.append("Bên thuê (Tenant)")
+        if "client" in content_lower or "khách hàng" in content_lower:
+            party_found.append("Khách hàng (Client)")
+        if "consultant" in content_lower or "nhà tư vấn" in content_lower:
+            party_found.append("Nhà tư vấn (Consultant)")
+        if "developer" in content_lower or "nhà phát triển" in content_lower:
+            party_found.append("Nhà phát triển (Developer)")
+        if "distributor" in content_lower or "nhà phân phối" in content_lower:
+            party_found.append("Nhà phân phối (Distributor)")
+        if "techvibe" in content_lower:
+            party_found.append("Công ty TechVibe")
+        if "devcore" in content_lower:
+            party_found.append("Công ty DevCore")
+        if "landmark" in content_lower:
+            party_found.append("Landmark")
+        if "smartacademy" in content_lower:
+            party_found.append("SmartAcademy")
+
+        for p in party_found:
+            ExtractedEntity.objects.get_or_create(
+                clause=clause,
+                entity_type="PARTY",
+                entity_value=p,
+                defaults={"normalized_value": p.upper(), "confidence_score": Decimal("0.95")}
+            )
+
+        # 2. Identify Actions
+        action_found = []
+        if "đơn phương chấm dứt" in content_lower or "unilaterally terminate" in content_lower or "terminate for convenience" in content_lower:
+            action_found.append(("Đơn phương chấm dứt hợp đồng", "TERMINATION"))
+        if "chậm thanh toán" in content_lower or "chậm trả" in content_lower or "late payment" in content_lower:
+            action_found.append(("Chậm thanh toán nghĩa vụ tài chính", "PAYMENT_DEFAULT"))
+        if "sở hữu trí tuệ" in content_lower or "quyền tác giả" in content_lower or "intellectual property" in content_lower or "bản quyền" in content_lower:
+            action_found.append(("Sở hữu trí tuệ và bản quyền tác giả", "IP_OWNERSHIP"))
+        if "độc quyền" in content_lower or "exclusivity" in content_lower or "exclusive" in content_lower:
+            action_found.append(("Cam kết độc quyền thương mại", "EXCLUSIVITY"))
+        if "phạt vi phạm" in content_lower or "penalty" in content_lower or "forfeit" in content_lower or "tiền cọc" in content_lower:
+            action_found.append(("Áp dụng chế tài phạt vi phạm/tịch thu cọc", "PENALTY"))
+        if "tranh chấp" in content_lower or "dispute" in content_lower or "arbitration" in content_lower or "tòa án" in content_lower or "trọng tài" in content_lower:
+            action_found.append(("Giải quyết tranh chấp phát sinh", "DISPUTE_RESOLUTION"))
+
+        for act_val, act_norm in action_found:
+            ExtractedEntity.objects.get_or_create(
+                clause=clause,
+                entity_type="ACTION",
+                entity_value=act_val,
+                defaults={"normalized_value": act_norm, "confidence_score": Decimal("0.90")}
+            )

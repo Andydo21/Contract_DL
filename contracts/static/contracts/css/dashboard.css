@@ -508,7 +508,7 @@ header {
     text-transform: uppercase;
 }
 
-.badge-high { background: rgba(239, 68, 68, 0.15); color: var(--risk-high); }
+.badge-high, .badge-critical { background: rgba(239, 68, 68, 0.15); color: var(--risk-high); }
 .badge-medium { background: rgba(249, 115, 115, 0.15); color: var(--risk-medium); }
 .badge-low { background: rgba(16, 185, 129, 0.15); color: var(--risk-low); }
 

@@ -411,13 +411,19 @@ document.addEventListener('DOMContentLoaded', () => {
                                 showContractDetail(data.id);
                                 loadContracts(data.id);
                             } else {
-                                alert("Failed to run analysis: " + (runData.error || "Unknown error"));
+                                const errorMsg = runData.error || "Unknown error";
+                                const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
+                                if (isModelError) {
+                                    showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
+                                } else {
+                                    showToast(errorMsg, "error");
+                                }
                             }
                         }, 2500); // 2.5s simulation duration
                     } catch (err) {
                         scannerLoader.classList.remove('active');
                         console.error(err);
-                        alert("Network error: Failed to trigger AI analysis.");
+                        showToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
                     }
                 });
             }
@@ -705,4 +711,126 @@ window.selectContractFromModal = function(id) {
         card.click();
         card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+};
+
+// Toast notification helper
+window.showToast = function(message, type = 'error') {
+    if (!document.getElementById('toast-styles')) {
+        const style = document.createElement('style');
+        style.id = 'toast-styles';
+        style.innerHTML = `
+            .toast-container {
+                position: fixed;
+                top: 24px;
+                right: 24px;
+                z-index: 9999;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                pointer-events: none;
+            }
+            .toast-card {
+                background: rgba(13, 17, 23, 0.95);
+                border: 1px solid rgba(239, 68, 68, 0.2);
+                border-left: 4px solid #ef4444;
+                color: #ffffff;
+                padding: 16px 20px;
+                border-radius: 12px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+                backdrop-filter: blur(12px);
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                min-width: 320px;
+                max-width: 450px;
+                transform: translateX(120%);
+                transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
+                pointer-events: auto;
+                opacity: 0;
+            }
+            .toast-card.show {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            .toast-card.warning {
+                border-left-color: #f59e0b;
+                border-color: rgba(245, 158, 11, 0.2);
+            }
+            .toast-icon {
+                font-size: 20px;
+                color: #ef4444;
+                flex-shrink: 0;
+            }
+            .toast-card.warning .toast-icon {
+                color: #f59e0b;
+            }
+            .toast-content {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .toast-title {
+                font-family: 'Outfit', sans-serif;
+                font-weight: 600;
+                font-size: 14.5px;
+            }
+            .toast-desc {
+                font-size: 12.5px;
+                color: rgba(255, 255, 255, 0.7);
+                line-height: 1.4;
+            }
+            .toast-close {
+                margin-left: auto;
+                background: none;
+                border: none;
+                color: rgba(255, 255, 255, 0.4);
+                cursor: pointer;
+                padding: 4px;
+                transition: color 0.2s;
+            }
+            .toast-close:hover {
+                color: #ffffff;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast-card ${type}`;
+    
+    const iconClass = type === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation';
+    const titleText = type === 'warning' ? 'Cảnh Báo Hệ Thống' : 'Lỗi Hệ Thống';
+
+    toast.innerHTML = `
+        <i class="${iconClass} toast-icon"></i>
+        <div class="toast-content">
+            <div class="toast-title">${titleText}</div>
+            <div class="toast-desc">${message}</div>
+        </div>
+        <button class="toast-close"><i class="fa-solid fa-xmark"></i></button>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 10);
+
+    const closeBtn = toast.querySelector('.toast-close');
+    const dismiss = () => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    };
+
+    closeBtn.addEventListener('click', dismiss);
+    setTimeout(dismiss, 8000);
 };

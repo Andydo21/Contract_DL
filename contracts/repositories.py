@@ -1,41 +1,73 @@
-from .models import Contract, ContractFile, Clause, Risk, AIAnalysis, RiskFinding, Review, AuditLog
+from .models import Contract, ContractVersion, ContractFile, Clause, RiskRule, AIAnalysis, RiskFinding, Review, AuditLog
+import os
 
 class RiskRepository:
     @staticmethod
     def get_all_risks():
-        return Risk.objects.all().order_by('risk_name')
+        return RiskRule.objects.all().order_by('rule_name')
         
     @staticmethod
     def get_risk_by_id(risk_id):
         try:
-            return Risk.objects.get(id=risk_id)
-        except Risk.DoesNotExist:
+            return RiskRule.objects.get(id=risk_id)
+        except RiskRule.DoesNotExist:
             return None
             
     @staticmethod
     def create_risk(name, description, severity_level):
-        return Risk.objects.create(
-            risk_name=name,
+        code = name.upper().replace(" ", "_").replace("-", "_")
+        return RiskRule.objects.create(
+            rule_code=code,
+            rule_name=name,
             description=description,
-            severity_level=severity_level
+            severity=severity_level
         )
 
     @staticmethod
     def get_or_create_risk(name, defaults):
-        return Risk.objects.get_or_create(
-            risk_name=name,
-            defaults=defaults
+        name_clean = name.strip()
+        # Look up case-insensitively first to avoid duplicate risk rules
+        existing = RiskRule.objects.filter(rule_name__iexact=name_clean).first()
+        if existing:
+            return existing, False
+            
+        mapped_defaults = {}
+        for k, v in defaults.items():
+            if k == 'severity_level':
+                mapped_defaults['severity'] = v
+            else:
+                mapped_defaults[k] = v
+        if 'rule_code' not in mapped_defaults:
+            # Clean up non-alphanumeric chars for clean code
+            import re
+            cleaned_code = re.sub(r'[^A-Z0-9_]', '', name_clean.upper().replace(" ", "_").replace("-", "_"))
+            mapped_defaults['rule_code'] = cleaned_code
+        return RiskRule.objects.get_or_create(
+            rule_name=name_clean,
+            defaults=mapped_defaults
         )
 
 
 class AuditLogRepository:
     @staticmethod
     def log_action(user, action, target_model, target_id):
+        contract = None
+        if target_model == "Contract":
+            try:
+                contract = Contract.objects.get(id=target_id)
+            except Contract.DoesNotExist:
+                pass
+        elif target_model == "Review":
+            try:
+                review = Review.objects.get(id=target_id)
+                contract = review.analysis.version.contract
+            except Exception:
+                pass
+        
         return AuditLog.objects.create(
             user=user,
-            action=action,
-            target_model=target_model,
-            target_id=target_id
+            contract=contract,
+            action=action
         )
 
 
@@ -48,7 +80,10 @@ class ContractRepository:
     def get_contract_by_id(contract_id):
         try:
             return Contract.objects.prefetch_related(
-                'clauses', 'ai_analyses__findings__risk', 'ai_analyses__reviews__user'
+                'versions__files',
+                'versions__clauses', 
+                'versions__ai_analyses__findings__rule', 
+                'versions__ai_analyses__reviews__user'
             ).get(id=contract_id)
         except Contract.DoesNotExist:
             return None
@@ -68,9 +103,16 @@ class ContractRepository:
 
 class ContractFileRepository:
     @staticmethod
-    def create_file_record(contract, file_path):
+    def create_file_record(contract_or_version, file_path):
+        if isinstance(contract_or_version, Contract):
+            version, _ = ContractVersion.objects.get_or_create(contract=contract_or_version, version_number=1)
+        else:
+            version = contract_or_version
+            
+        file_name = os.path.basename(file_path)
         return ContractFile.objects.create(
-            contract=contract,
+            version=version,
+            file_name=file_name,
             file_path=file_path
         )
 
@@ -84,9 +126,13 @@ class AIAnalysisRepository:
             return None
             
     @staticmethod
-    def create_analysis(contract, model_name, overall_score, summary):
+    def create_analysis(contract_or_version, model_name, overall_score, summary):
+        if isinstance(contract_or_version, Contract):
+            version, _ = ContractVersion.objects.get_or_create(contract=contract_or_version, version_number=1)
+        else:
+            version = contract_or_version
         return AIAnalysis.objects.create(
-            contract=contract,
+            version=version,
             model_name=model_name,
             overall_score=overall_score,
             summary=summary
@@ -94,16 +140,20 @@ class AIAnalysisRepository:
 
     @staticmethod
     def get_all_analyses():
-        return AIAnalysis.objects.select_related('contract').prefetch_related(
-            'findings__risk'
+        return AIAnalysis.objects.select_related('version__contract').prefetch_related(
+            'findings__rule'
         ).order_by('-created_at')
 
 
 class ClauseRepository:
     @staticmethod
-    def create_clause(contract, title, content):
+    def create_clause(contract_or_version, title, content):
+        if isinstance(contract_or_version, Contract):
+            version, _ = ContractVersion.objects.get_or_create(contract=contract_or_version, version_number=1)
+        else:
+            version = contract_or_version
         return Clause.objects.create(
-            contract=contract,
+            version=version,
             clause_title=title,
             clause_content=content
         )
@@ -111,14 +161,15 @@ class ClauseRepository:
 
 class RiskFindingRepository:
     @staticmethod
-    def create_finding(analysis, clause, risk, risk_level, explanation, recommendation):
+    def create_finding(analysis, clause, risk, risk_level, explanation, recommendation, disadvantaged_party=None):
         return RiskFinding.objects.create(
             analysis=analysis,
             clause=clause,
-            risk=risk,
+            rule=risk,
             risk_level=risk_level,
             explanation=explanation,
-            recommendation=recommendation
+            recommendation=recommendation,
+            disadvantaged_party=disadvantaged_party
         )
 
 
@@ -128,6 +179,6 @@ class ReviewRepository:
         return Review.objects.create(
             analysis=analysis,
             user=user,
-            comment=comment,
-            final_risk_level=final_risk_level
+            note=comment,
+            decision=final_risk_level
         )

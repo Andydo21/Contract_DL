@@ -1,0 +1,301 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contract Guard AI - Developer Prompt Test UI</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="{% static 'contracts/css/dashboard.css' %}">
+    
+    <style>
+        .test-grid {
+            display: grid;
+            grid-template-columns: 450px 1fr;
+            gap: 24px;
+            flex-grow: 1;
+        }
+        
+        .code-box {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Fira Code', monospace;
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: #34d399;
+            overflow-x: auto;
+            max-height: 350px;
+            white-space: pre-wrap;
+        }
+        
+        .prompt-box {
+            color: #60a5fa;
+            border-color: rgba(96, 165, 250, 0.2);
+            background: rgba(10, 25, 47, 0.4);
+        }
+        
+        .payload-box {
+            color: #a5b4fc;
+            border-color: rgba(99, 102, 241, 0.2);
+        }
+        
+        .log-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .badge-reused {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .badge-created {
+            background: rgba(249, 115, 22, 0.15);
+            color: #f97316;
+            border: 1px solid rgba(249, 115, 22, 0.3);
+        }
+        
+        .header-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .header-btn:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- Header -->
+        <header>
+            <div class="logo-section">
+                <i class="fa-solid fa-bug logo-icon" style="background: linear-gradient(135deg, #fb7185, #f43f5e); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"></i>
+                <div class="logo-text">Contract Guard AI <span style="font-size: 12px; font-weight: 500; color: #fb7185; background: rgba(251,113,133,0.1); padding: 2px 8px; border-radius: 6px; margin-left: 8px;">Dev Test Console</span></div>
+            </div>
+            
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <a href="/" class="header-btn"><i class="fa-solid fa-house"></i> Go to App Dashboard</a>
+                <a href="/analyses/" class="header-btn"><i class="fa-solid fa-clock-rotate-left"></i> Analysis History</a>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="test-grid">
+            
+            <!-- Left Side: Selection & Controls -->
+            <div class="contracts-panel" style="max-height: 85vh;">
+                <div class="panel-header">
+                    <h3 class="panel-title"><i class="fa-solid fa-sliders"></i> Test Parameters</h3>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Select Target Contract for Test</label>
+                    <select id="select-contract" class="form-control" style="background: #0d1117; width: 100%;">
+                        <option value="">-- Choose Contract --</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" style="margin-top: 10px;">
+                    <label class="form-label">Master Risk Rules Injected in System Prompt</label>
+                    <div id="dev-rules-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; padding-right: 4px;">
+                        <div style="color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px 0;">
+                            Loading master risk rules...
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="btn" id="btn-run-test" style="width: 100%; margin-top: 15px; background: linear-gradient(135deg, #f43f5e, #e11d48); box-shadow: 0 4px 16px rgba(244, 63, 94, 0.3);">
+                    <i class="fa-solid fa-play"></i> Run End-to-End API Test
+                </button>
+            </div>
+
+            <!-- Right Side: Live Logs and Prompt Inspections -->
+            <div class="analysis-panel" id="test-results-panel" style="max-height: 85vh; padding: 24px;">
+                
+                <!-- Initial Empty State -->
+                <div class="empty-state" id="test-empty-state">
+                    <i class="fa-solid fa-terminal empty-icon" style="color: rgba(251,113,133,0.2);"></i>
+                    <h2>Prompt Integration Test Runner</h2>
+                    <p>Select a contract on the left and click "Run End-to-End API Test". The console will capture the exact system prompts, payload JSON, raw model responses, and DB lookup mapping outcomes.</p>
+                </div>
+                
+                <!-- Loading State -->
+                <div class="empty-state" id="test-loading-state" style="display: none;">
+                    <i class="fa-solid fa-circle-notch fa-spin empty-icon" style="color: #fb7185;"></i>
+                    <h2>Executing End-to-End API Analysis...</h2>
+                    <p>AI service model is generating Vietnamese findings. Please wait patiently (takes 1-3 minutes depending on GPU generation speed)...</p>
+                </div>
+                
+                <!-- Content State -->
+                <div id="test-content-state" style="display: none; display: flex; flex-direction: column; gap: 24px;">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(251,113,133,0.05); border: 1px solid rgba(251,113,133,0.15); border-radius: 12px; padding: 16px 20px;">
+                        <div>
+                            <h3 style="color: #ffffff; font-size: 18px; display: flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-circle-check" style="color: #10b981;"></i> Analysis Completed Successfully
+                            </h3>
+                            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 4px;" id="text-overall-summary"></p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px;">Overall Risk Score</div>
+                            <div style="font-size: 32px; font-weight: 800; color: #f43f5e;" id="text-overall-score">0</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="section-title"><i class="fa-solid fa-code"></i> 1. Exact System Prompt Sent (Injected Risk Rules)</h4>
+                        <div class="code-box prompt-box" id="box-system-prompt"></div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="section-title"><i class="fa-solid fa-brackets-curly"></i> 2. Full Request Payload JSON</h4>
+                        <div class="code-box payload-box" id="box-request-payload"></div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="section-title"><i class="fa-solid fa-reply"></i> 3. Raw AI Service Response JSON</h4>
+                        <div class="code-box" id="box-raw-response"></div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="section-title"><i class="fa-solid fa-map-location-dot"></i> 4. Database Mapping & Rule Reuse Logs</h4>
+                        <div id="mapped-findings-container" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                    </div>
+                    
+                </div>
+                
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- Script Section -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load Contracts list
+            fetch('/api/contracts/')
+                .then(r => r.json())
+                .then(data => {
+                    const select = document.getElementById('select-contract');
+                    select.innerHTML = '<option value="">-- Choose Contract --</option>';
+                    data.forEach(c => {
+                        select.innerHTML += `<option value="${c.id}">${c.contract_code} - ${c.title} (${c.status})</option>`;
+                    });
+                });
+                
+            // Load Master Risk Rules list
+            fetch('/api/risks/')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('dev-rules-list');
+                    container.innerHTML = '';
+                    data.forEach(rule => {
+                        container.innerHTML += `
+                            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <strong style="color:#ffffff; font-size:13px;">${rule.risk_name}</strong>
+                                    <span style="font-size:10px; font-weight:700; color: #a5b4fc; background: rgba(99,102,241,0.1); padding: 1px 6px; border-radius:4px;">${rule.risk_code}</span>
+                                </div>
+                                <div style="color:var(--text-secondary); font-size:11px; margin-top:4px; line-height:1.4;">${rule.description || 'No description provided.'}</div>
+                            </div>
+                        `;
+                    });
+                });
+                
+            // Run Prompt integration test button
+            document.getElementById('btn-run-test').addEventListener('click', function() {
+                const contractId = document.getElementById('select-contract').value;
+                if (!contractId) {
+                    alert('Please select a contract first.');
+                    return;
+                }
+                
+                // Show loading state
+                document.getElementById('test-empty-state').style.display = 'none';
+                document.getElementById('test-content-state').style.display = 'none';
+                document.getElementById('test-loading-state').style.display = 'flex';
+                
+                fetch('/api/developer-test/run/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contract_id: contractId })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error running test: ' + data.error);
+                        document.getElementById('test-loading-state').style.display = 'none';
+                        document.getElementById('test-empty-state').style.display = 'flex';
+                        return;
+                    }
+                    
+                    // Render details
+                    document.getElementById('text-overall-summary').innerText = data.summary;
+                    document.getElementById('text-overall-score').innerText = data.overall_score;
+                    
+                    document.getElementById('box-system-prompt').innerText = data.system_prompt;
+                    document.getElementById('box-request-payload').innerText = JSON.stringify(data.payload_sent, null, 2);
+                    document.getElementById('box-raw-response').innerText = JSON.stringify(data.raw_response, null, 2);
+                    
+                    // Render Database mapping logs
+                    const container = document.getElementById('mapped-findings-container');
+                    container.innerHTML = '';
+                    
+                    data.mapped_findings.forEach(f => {
+                        const badgeClass = f.action === 'REUSED_CASE_INSENSITIVE' ? 'badge-reused' : 'badge-created';
+                        const badgeText = f.action === 'REUSED_CASE_INSENSITIVE' ? 'Reused Existing Rule' : 'Created New Rule';
+                        
+                        container.innerHTML += `
+                            <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 16px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom:8px; margin-bottom:8px;">
+                                    <strong style="color:#ffffff; font-size:13.5px;">${f.clause_title}</strong>
+                                    <span class="log-badge ${badgeClass}">${badgeText}</span>
+                                </div>
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; font-size:12.5px; margin-bottom:8px;">
+                                    <div><span style="color:var(--text-secondary);">Risk Category:</span> <strong style="color:#ffffff;">${f.risk_category}</strong></div>
+                                    <div><span style="color:var(--text-secondary);">Rule Code:</span> <code style="color:#fb7185;">${f.risk_code}</code></div>
+                                </div>
+                                <div style="font-size:12.5px; line-height:1.5; color:var(--text-secondary);"><span style="color:var(--text-muted);">Explanation:</span> ${f.explanation}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    // Switch view to content state
+                    document.getElementById('test-loading-state').style.display = 'none';
+                    document.getElementById('test-content-state').style.display = 'flex';
+                })
+                .catch(err => {
+                    alert('Request error: ' + err);
+                    document.getElementById('test-loading-state').style.display = 'none';
+                    document.getElementById('test-empty-state').style.display = 'flex';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

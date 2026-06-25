@@ -8,7 +8,10 @@ urlpatterns = [
     path('api/contracts/', views.api_contracts_list, name='api_contracts_list'),
     path('api/contracts/<int:contract_id>/', views.api_contract_detail, name='api_contract_detail'),
     path('api/contracts/<int:contract_id>/analyze/', views.api_analyze_contract, name='api_analyze_contract'),
+    path('api/contracts/<int:contract_id>/versions/', views.api_contract_versions, name='api_contract_versions'),
     path('api/analyses/', views.api_analyses_list, name='api_analyses_list'),
     path('api/analyses/<int:analysis_id>/review/', views.api_submit_review, name='api_submit_review'),
     path('api/risks/', views.api_risks_list, name='api_risks_list'),
+    path('developer-test/', views.developer_test, name='developer_test'),
+    path('api/developer-test/run/', views.api_run_developer_test, name='api_run_developer_test'),
 ]

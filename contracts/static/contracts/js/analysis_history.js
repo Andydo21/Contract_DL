@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let findingsHTML = '';
             if (a.findings_preview && a.findings_preview.length > 0) {
                 findingsHTML = a.findings_preview.map(f => {
-                    const cls = f.risk_level === 'HIGH' ? 'finding-high'
+                    const cls = (f.risk_level === 'HIGH' || f.risk_level === 'CRITICAL') ? 'finding-high'
                         : f.risk_level === 'MEDIUM' ? 'finding-medium' : 'finding-low';
                     return `<span class="finding-tag ${cls}">${f.risk_name}</span>`;
                 }).join('');
