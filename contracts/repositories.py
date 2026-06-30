@@ -89,7 +89,7 @@ class ContractRepository:
             return None
             
     @staticmethod
-    def create_contract(code, title, contract_type, start_date, end_date, contract_value, status='DRAFT'):
+    def create_contract(code, title, contract_type, start_date, end_date, contract_value, status='DRAFT', company=None):
         return Contract.objects.create(
             contract_code=code,
             title=title,
@@ -97,7 +97,8 @@ class ContractRepository:
             start_date=start_date,
             end_date=end_date,
             contract_value=contract_value,
-            status=status
+            status=status,
+            company=company
         )
 
 

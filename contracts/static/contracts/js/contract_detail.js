@@ -99,7 +99,76 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 4. Version switcher dropdown event
+    // 4. Push to Workflow button
+    const btnPushWorkflow = document.getElementById('btn-push-workflow');
+    if (btnPushWorkflow) {
+        btnPushWorkflow.addEventListener('click', async () => {
+            const contractId = btnPushWorkflow.dataset.contractId;
+            btnPushWorkflow.disabled = true;
+            btnPushWorkflow.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing...';
+
+            try {
+                const res = await fetch(`/api/contracts/${contractId}/workflow/`, { method: 'POST' });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('Contract đã được đẩy lên workflow thành công! Đang tải lại...', 'success');
+                    setTimeout(() => window.location.reload(), 1800);
+                } else {
+                    btnPushWorkflow.disabled = false;
+                    btnPushWorkflow.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push to Workflow';
+                    const msg = data.error || 'Không thể đẩy lên workflow.';
+                    showToast(msg.includes('already active') ? 'Workflow đã tồn tại cho contract này.' : msg, 'warning');
+                }
+            } catch (err) {
+                btnPushWorkflow.disabled = false;
+                btnPushWorkflow.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push to Workflow';
+                console.error(err);
+                showToast('Lỗi kết nối: Không thể kết nối tới workflow service.', 'error');
+            }
+        });
+    }
+
+    // 5. Auto-load workflow status when PENDING_WORKFLOW
+    const workflowContainer = document.getElementById('workflow-steps-container');
+    if (workflowContainer) {
+        const contractId = workflowContainer.dataset.contractId;
+        (async () => {
+            try {
+                const res = await fetch(`/api/contracts/${contractId}/workflow/status/`);
+                const data = await res.json();
+                const wf = data.workflow;
+                if (!wf) {
+                    workflowContainer.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Chưa có workflow nào được tạo.</p>';
+                    return;
+                }
+                const statusColor = { PENDING: '#6366f1', IN_PROGRESS: '#f59e0b', COMPLETED: '#10b981', REJECTED: '#ef4444' };
+                const stepStatusIcon = { PENDING: 'fa-clock', APPROVED: 'fa-circle-check', REJECTED: 'fa-circle-xmark' };
+                const stepStatusColor = { PENDING: '#6b7280', APPROVED: '#10b981', REJECTED: '#ef4444' };
+
+                workflowContainer.innerHTML = `
+                    <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:12px;font-weight:600;background:${statusColor[wf.status]||'#6366f1'}22;color:${statusColor[wf.status]||'#6366f1'};padding:4px 10px;border-radius:20px;">${wf.status}</span>
+                        <span style="font-size:12px;color:var(--text-muted);">${wf.workflow_name}</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        ${wf.steps.map(st => `
+                        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.07);">
+                            <i class="fa-solid ${stepStatusIcon[st.status]||'fa-clock'}" style="color:${stepStatusColor[st.status]||'#6b7280'};font-size:15px;"></i>
+                            <div>
+                                <div style="font-size:13px;font-weight:600;color:#fff;">${st.step_order}. ${st.step_name}</div>
+                                <div style="font-size:11.5px;color:var(--text-muted);">${st.status}${st.completed_at ? ' · ' + new Date(st.completed_at).toLocaleDateString('vi-VN') : ''}</div>
+                            </div>
+                        </div>`).join('')}
+                    </div>
+                `;
+            } catch (e) {
+                workflowContainer.innerHTML = '<p style="color:#ef4444;font-size:13px;">Không tải được trạng thái workflow.</p>';
+            }
+        })();
+    }
+
+    // 6. Version switcher dropdown event
     const versionSelect = document.getElementById('version-select');
     if (versionSelect) {
         versionSelect.addEventListener('change', (e) => {
@@ -325,6 +394,10 @@ window.showToast = function(message, type = 'error') {
                 border-left-color: #f59e0b;
                 border-color: rgba(245, 158, 11, 0.2);
             }
+            .toast-card.success {
+                border-left-color: #10b981;
+                border-color: rgba(16, 185, 129, 0.2);
+            }
             .toast-icon {
                 font-size: 20px;
                 color: #ef4444;
@@ -374,8 +447,8 @@ window.showToast = function(message, type = 'error') {
     const toast = document.createElement('div');
     toast.className = `toast-card ${type}`;
     
-    const iconClass = type === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-exclamation';
-    const titleText = type === 'warning' ? 'Cảnh Báo Hệ Thống' : 'Lỗi Hệ Thống';
+    const iconClass = type === 'warning' ? 'fa-solid fa-triangle-exclamation' : type === 'success' ? 'fa-solid fa-circle-check' : 'fa-solid fa-circle-exclamation';
+    const titleText = type === 'warning' ? 'Cảnh Báo Hệ Thống' : type === 'success' ? 'Thành Công' : 'Lỗi Hệ Thống';
 
     toast.innerHTML = `
         <i class="${iconClass} toast-icon"></i>

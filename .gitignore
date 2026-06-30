@@ -18,3 +18,7 @@ staticfiles/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+explorer_logs/
+

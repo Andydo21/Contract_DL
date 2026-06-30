@@ -1,6 +1,6 @@
 from .models import (
     SignatureCertificate, HashProof, BlockchainNetwork, SmartContract,
-    BlockchainNode, BlockchainTransaction, BlockchainAudit, KeyManagement
+    BlockchainTransaction, BlockchainAudit
 )
 
 class SignatureCertificateRepository:
@@ -82,17 +82,16 @@ class BlockchainTransactionRepository:
 
 class BlockchainAuditRepository:
     @staticmethod
-    def create_audit(transaction, event_type, event_data):
+    def create_audit(transaction, user_id=None, company_id=None, ip=None, action="Hash Generated", resource="UNKNOWN", before_state=None, after_state=None, status="SUCCESS", error_message=None):
         return BlockchainAudit.objects.create(
             transaction=transaction,
-            event_type=event_type,
-            event_data=event_data
+            user_id=user_id,
+            company_id=company_id,
+            ip=ip,
+            action=action,
+            resource=resource,
+            before_state=before_state,
+            after_state=after_state,
+            status=status,
+            error_message=error_message
         )
-
-class KeyManagementRepository:
-    @staticmethod
-    def get_by_id(key_id):
-        try:
-            return KeyManagement.objects.get(id=key_id)
-        except KeyManagement.DoesNotExist:
-            return None

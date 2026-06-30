@@ -16,7 +16,7 @@ class BlockchainConfig(AppConfig):
         # Give some time for migrations to complete
         time.sleep(5)
         from django.utils import timezone
-        from .models import BlockchainNetwork, SmartContract, BlockchainNode
+        from .models import BlockchainNetwork, SmartContract
         from django.db import connection
         try:
             with connection.cursor() as cursor:
@@ -37,13 +37,6 @@ class BlockchainConfig(AppConfig):
                     contract_name="ContractVerifyChaincode",
                     version="1.0.0",
                     deployed_at=timezone.now()
-                )
-                BlockchainNode.objects.create(
-                    network=net,
-                    node_name="Peer0Org1",
-                    endpoint="fabric-peer:7051",
-                    organization="Org1MSP",
-                    status="ACTIVE"
                 )
                 print("Seeded default Hyperledger network inside blockchain microservice.")
         except Exception as e:

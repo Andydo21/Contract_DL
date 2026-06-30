@@ -1,0 +1,2 @@
+Installed chaincodes on peer:
+Package ID: contract_verify_1.0:f10db825010fea87f2692e9cf6d5dfd7294af0528326c87c0734f99cfc2c1362, Label: contract_verify_1.0

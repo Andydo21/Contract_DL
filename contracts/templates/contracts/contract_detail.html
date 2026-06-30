@@ -232,6 +232,29 @@
                         </div>
                         {% endif %}
                     </div>
+
+                    {% if contract.status == 'APPROVED' %}
+                    <!-- Push to Workflow -->
+                    <div class="workflow-push-section" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px;">
+                        <h4 class="section-title" style="margin-bottom: 12px;"><i class="fa-solid fa-diagram-project"></i> Approval Workflow</h4>
+                        <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
+                            Contract đã được phê duyệt. Đẩy lên hệ thống workflow để khởi động quy trình ký kết và lưu trữ chính thức.
+                        </p>
+                        <button class="btn" id="btn-push-workflow" data-contract-id="{{ contract.id }}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-paper-plane"></i> Push to Workflow
+                        </button>
+                    </div>
+                    {% endif %}
+
+                    {% if contract.status == 'PENDING_WORKFLOW' %}
+                    <!-- Workflow Status Display -->
+                    <div class="workflow-status-section" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px;">
+                        <h4 class="section-title" style="margin-bottom: 16px;"><i class="fa-solid fa-diagram-project"></i> Workflow Status</h4>
+                        <div id="workflow-steps-container" data-contract-id="{{ contract.id }}">
+                            <p style="color: var(--text-muted); font-size: 13px;"><i class="fa-solid fa-spinner fa-spin"></i> Loading workflow...</p>
+                        </div>
+                    </div>
+                    {% endif %}
                     {% else %}
                     <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                         <i class="fa-solid fa-microchip-ai" style="font-size: 48px; margin-bottom: 12px; color: var(--accent-primary);"></i>

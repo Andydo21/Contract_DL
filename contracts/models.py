@@ -5,6 +5,9 @@ class Company(models.Model):
     company_name = models.CharField(max_length=255, verbose_name="Company Name")
     tax_code = models.CharField(max_length=50, verbose_name="Tax Code")
     status = models.CharField(max_length=50, default='ACTIVE', verbose_name="Status")
+    tx_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Blockchain Tx Hash")
+    block_number = models.BigIntegerField(blank=True, null=True, verbose_name="Blockchain Block Number")
+    block_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Blockchain Block Hash")
 
     class Meta:
         verbose_name = 'Company'
@@ -44,6 +47,9 @@ class User(AbstractUser):
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users', verbose_name="Role")
     password_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Password Hash")
     status = models.CharField(max_length=50, default='ACTIVE', verbose_name="Status")
+    tx_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Blockchain Tx Hash")
+    block_number = models.BigIntegerField(blank=True, null=True, verbose_name="Blockchain Block Number")
+    block_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Blockchain Block Hash")
 
     class Meta:
         verbose_name = 'User'

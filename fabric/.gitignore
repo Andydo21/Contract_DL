@@ -1,0 +1,5 @@
+crypto-config/
+gateway/node_modules/
+contracts-channel.block
+chaincode/package_id.txt
+chaincode/code.tar.gz

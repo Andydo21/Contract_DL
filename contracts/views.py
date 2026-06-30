@@ -13,6 +13,49 @@ def dashboard(request):
     return render(request, 'contracts/dashboard.html')
 
 
+def workflow_board(request):
+    """Render the workflow management board page."""
+    return render(request, 'contracts/workflow_board.html')
+
+
+@csrf_exempt
+def api_workflow_all(request):
+    """GET: Proxy — lấy tất cả workflows từ workflow-service."""
+    import requests as req
+    from django.conf import settings
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+    try:
+        resp = req.get(f"{workflow_url}/workflows/all/", timeout=10)
+        resp.raise_for_status()
+        return JsonResponse(resp.json())
+    except Exception as e:
+        return JsonResponse({'error': str(e), 'workflows': []}, status=200)
+
+
+@csrf_exempt
+def api_approve_workflow_step(request, step_id):
+    """POST: Proxy — duyệt / từ chối 1 step trong workflow-service."""
+    import requests as req
+    from django.conf import settings
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+    try:
+        body = json.loads(request.body)
+    except Exception:
+        body = {}
+    try:
+        resp = req.post(
+            f"{workflow_url}/workflows/steps/{step_id}/approve/",
+            json=body,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return JsonResponse(resp.json())
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
 def contract_detail(request, contract_id):
     """Render the dedicated contract detail page."""
     version_id = request.GET.get('version_id')
@@ -28,7 +71,6 @@ def contract_detail(request, contract_id):
 def api_contracts_list(request):
     """
     GET: Get list of all contracts.
-    POST: Create a contract, upload file/text, and trigger mock AI Analysis.
     """
     if request.method == 'GET':
         try:
@@ -38,39 +80,55 @@ def api_contracts_list(request):
             return JsonResponse({'error': str(e)}, status=500)
             
     elif request.method == 'POST':
-        code = request.POST.get('contract_code')
-        title = request.POST.get('title')
-        contract_type = request.POST.get('contract_type', '')
-        start_date = request.POST.get('start_date') or None
-        end_date = request.POST.get('end_date') or None
-        contract_value = request.POST.get('contract_value') or '0.00'
-        raw_content = request.POST.get('raw_content')
-        file_obj = request.FILES.get('file')
-
-        if not code or not title:
-            return JsonResponse({'error': 'Contract code and title are required.'}, status=400)
-
-        try:
-            contract = contract_service.create_and_analyze_contract(
-                code=code,
-                title=title,
-                contract_type=contract_type,
-                start_date=start_date,
-                end_date=end_date,
-                contract_value=contract_value,
-                file_obj=file_obj,
-                raw_content=raw_content
-            )
-            return JsonResponse({
-                'success': True,
-                'contract_id': contract.id,
-                'contract_code': contract.contract_code,
-                'status': contract.status
-            })
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=400)
+        return api_create_contract(request)
             
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@csrf_exempt
+def api_create_contract(request):
+    """
+    POST: Create a contract, upload file/text, and trigger mock AI Analysis.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+        
+    code = request.POST.get('contract_code')
+    title = request.POST.get('title')
+    contract_type = request.POST.get('contract_type', '')
+    start_date = request.POST.get('start_date') or None
+    end_date = request.POST.get('end_date') or None
+    contract_value = request.POST.get('contract_value') or '0.00'
+    raw_content = request.POST.get('raw_content')
+    file_obj = request.FILES.get('file')
+
+    if not code or not title:
+        return JsonResponse({'error': 'Contract code and title are required.'}, status=400)
+
+    try:
+        company = None
+        if request.user.is_authenticated:
+            company = getattr(request.user, 'company', None)
+
+        contract = contract_service.create_and_analyze_contract(
+            code=code,
+            title=title,
+            contract_type=contract_type,
+            start_date=start_date,
+            end_date=end_date,
+            contract_value=contract_value,
+            file_obj=file_obj,
+            raw_content=raw_content,
+            company=company
+        )
+        return JsonResponse({
+            'success': True,
+            'contract_id': contract.id,
+            'contract_code': contract.contract_code,
+            'status': contract.status
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
 
 
 @csrf_exempt
@@ -111,6 +169,44 @@ def api_analyze_contract(request, contract_id):
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
             
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@csrf_exempt
+def api_push_to_workflow(request, contract_id):
+    """
+    POST: Đẩy contract lên workflow-service để khởi tạo quy trình phê duyệt.
+    """
+    if request.method == 'POST':
+        version_id = request.GET.get('version_id')
+        if not version_id and request.body:
+            try:
+                body = json.loads(request.body)
+                version_id = body.get('version_id')
+            except Exception:
+                pass
+        try:
+            result = contract_service.push_to_workflow(contract_id, version_id=version_id)
+            return JsonResponse({'success': True, **result})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@csrf_exempt
+def api_workflow_status(request, contract_id):
+    """
+    GET: Lấy trạng thái workflow hiện tại của contract từ workflow-service.
+    """
+    if request.method == 'GET':
+        version_id = request.GET.get('version_id')
+        try:
+            result = contract_service.get_workflow_status(contract_id, version_id=version_id)
+            if result is None:
+                return JsonResponse({'workflow': None})
+            return JsonResponse({'workflow': result})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
@@ -393,3 +489,466 @@ def api_run_developer_test(request):
             return JsonResponse({'error': str(e)}, status=400)
             
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+# ─────────────────────────────────────────────
+# BLOCKCHAIN API ENDPOINTS
+# Gọi thẳng HTTP sang blockchain-service container.
+# Chỉ giữ lại _bc_version_payload vì web container là nơi
+# duy nhất có quyền truy cập file media (MEDIA_ROOT).
+# ─────────────────────────────────────────────
+
+import os as _os
+import requests as _req
+from django.conf import settings as _settings
+
+_BC_URL = _os.environ.get("BLOCKCHAIN_SERVICE_URL", "http://blockchain-service:8000")
+
+
+def _bc_version_payload(version):
+    """Đọc nội dung file hợp đồng để tạo payload gửi sang blockchain-service."""
+    content = None
+    file_obj = version.files.first()
+    if file_obj and file_obj.file_path:
+        rel = file_obj.file_path.lstrip(_settings.MEDIA_URL)
+        full = _os.path.join(str(_settings.MEDIA_ROOT), rel.replace('/', _os.sep))
+        if _os.path.exists(full):
+            try:
+                from .crypto_utils import decrypt_pdf
+                with open(full, 'rb') as f:
+                    encrypted_data = f.read()
+                decrypted_data = decrypt_pdf(encrypted_data)
+                content = decrypted_data.decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+
+    # Find previous version of the same contract
+    prev_version = version.contract.versions.filter(version_number=version.version_number - 1).first()
+    prev_version_id = prev_version.id if prev_version else None
+
+    return {
+        "version_id": version.id,
+        "content": content,
+        "change_summary": version.change_summary or "",
+        "contract_code": version.contract.contract_code,
+        "version_number": version.version_number,
+        "previous_version_id": prev_version_id
+    }
+
+
+def _get_version_or_latest(contract_id, version_id=None):
+    from .models import Contract, ContractVersion
+    try:
+        contract = Contract.objects.get(id=contract_id)
+    except Contract.DoesNotExist:
+        return None, None, JsonResponse({'error': 'Contract not found.'}, status=404)
+    if version_id:
+        try:
+            return contract, contract.versions.get(id=version_id), None
+        except ContractVersion.DoesNotExist:
+            return None, None, JsonResponse({'error': 'Version not found.'}, status=404)
+    version = contract.latest_version
+    if not version:
+        return None, None, JsonResponse({'error': 'No version found.'}, status=404)
+    return contract, version, None
+
+
+@csrf_exempt
+def api_blockchain_generate_proof(request, contract_id):
+    """POST { version_id? } → /proofs/generate/ trên blockchain-service."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body) if request.body else {}
+        contract, version, err = _get_version_or_latest(contract_id, body.get('version_id'))
+        if err:
+            return err
+        resp = _req.post(f"{_BC_URL}/proofs/generate/", json=_bc_version_payload(version), timeout=15)
+        result = resp.json()
+        return JsonResponse({'success': resp.ok, 'contract_code': contract.contract_code,
+                             'version_id': version.id, 'version_number': version.version_number, **result},
+                            status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_blockchain_anchor_proof(request, contract_id):
+    """POST { proof_id, network_id, smart_contract_id? } → /proofs/anchor/ trên blockchain-service."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body)
+        if not body.get('proof_id') or not body.get('network_id'):
+            return JsonResponse({'error': 'proof_id and network_id are required.'}, status=400)
+        resp = _req.post(f"{_BC_URL}/proofs/anchor/", json={
+            "proof_id": body['proof_id'],
+            "network_id": body['network_id'],
+            "smart_contract_id": body.get('smart_contract_id'),
+        }, timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_blockchain_verify_proof(request, contract_id):
+    """POST { version_id? } → /proofs/verify/ trên blockchain-service."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body) if request.body else {}
+        contract, version, err = _get_version_or_latest(contract_id, body.get('version_id'))
+        if err:
+            return err
+        resp = _req.post(f"{_BC_URL}/proofs/verify/", json=_bc_version_payload(version), timeout=15)
+        result = resp.json()
+        return JsonResponse({'contract_code': contract.contract_code,
+                             'version_id': version.id, 'version_number': version.version_number, **result},
+                            status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_blockchain_status(request, contract_id):
+    """GET → trạng thái blockchain cho tất cả versions của hợp đồng."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        from .models import Contract
+        contract = Contract.objects.get(id=contract_id)
+        versions = []
+        for v in contract.versions.order_by('version_number'):
+            try:
+                r = _req.post(f"{_BC_URL}/proofs/verify/", json=_bc_version_payload(v), timeout=15)
+                bc_data = r.json()
+            except Exception as ex:
+                bc_data = {'verified': False, 'error': str(ex)}
+            versions.append({'version_id': v.id, 'version_number': v.version_number,
+                             'change_summary': v.change_summary or 'Initial version',
+                             'blockchain': bc_data})
+        return JsonResponse({'contract_id': contract.id, 'contract_code': contract.contract_code,
+                             'versions': versions})
+    except Contract.DoesNotExist:
+        return JsonResponse({'error': 'Contract not found.'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_blockchain_create_certificate(request):
+    """POST { user_id, serial_number, issuer, valid_days? } → /certificates/create/ trên blockchain-service."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body)
+        if not body.get('user_id') or not body.get('serial_number') or not body.get('issuer'):
+            return JsonResponse({'error': 'user_id, serial_number và issuer là bắt buộc.'}, status=400)
+        resp = _req.post(f"{_BC_URL}/certificates/create/", json={
+            'user_id': body['user_id'],
+            'serial_number': body['serial_number'],
+            'issuer': body['issuer'],
+            'valid_days': body.get('valid_days', 365),
+        }, timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_blockchain_sign_step(request):
+    """POST { step_id, user_id, certificate_id, signature_hash } → /signatures/create/ trên blockchain-service."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body)
+        required = ['step_id', 'user_id', 'certificate_id', 'signature_hash']
+        missing = [k for k in required if not body.get(k)]
+        if missing:
+            return JsonResponse({'error': f'Thiếu các trường: {", ".join(missing)}'}, status=400)
+        resp = _req.post(f"{_BC_URL}/signatures/create/", json={
+            'step_id': body['step_id'],
+            'user_id': body['user_id'],
+            'certificate_id': body['certificate_id'],
+            'signature_hash': body['signature_hash'],
+        }, timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_download_file(request, file_id):
+    from django.conf import settings
+    import os
+    from django.http import HttpResponse, Http404
+    from .models import ContractFile
+    from .crypto_utils import decrypt_pdf
+    
+    try:
+        cf = ContractFile.objects.get(id=file_id)
+    except ContractFile.DoesNotExist:
+        raise Http404("File not found")
+        
+    rel_path = cf.file_path
+    media_prefix = settings.MEDIA_URL
+    if rel_path.startswith(media_prefix):
+        rel_path = rel_path[len(media_prefix):]
+        
+    physical_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
+    if not os.path.exists(physical_path):
+        raise Http404("Physical file not found")
+        
+    try:
+        with open(physical_path, 'rb') as f:
+            encrypted_data = f.read()
+        decrypted_data = decrypt_pdf(encrypted_data)
+    except Exception as e:
+        return HttpResponse(f"Error decrypting file: {str(e)}", status=500)
+        
+    response = HttpResponse(decrypted_data, content_type='application/octet-stream')
+    if cf.file_name.lower().endswith('.pdf'):
+        response['Content-Type'] = 'application/pdf'
+    elif cf.file_name.lower().endswith('.txt'):
+        response['Content-Type'] = 'text/plain'
+        
+    response['Content-Disposition'] = f'attachment; filename="{cf.file_name}"'
+    return response
+
+
+def api_blockchain_history(request, version_id):
+    """GET → /history/<version_id>/ trên blockchain-service."""
+    try:
+        resp = _req.get(f"{_BC_URL}/history/{version_id}/", timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_blockchain_transaction(request, tx_hash):
+    """GET → /transaction/<tx_hash>/ trên blockchain-service."""
+    try:
+        resp = _req.get(f"{_BC_URL}/transaction/{tx_hash}/", timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_blockchain_proof(request, version_id):
+    """GET → /proof/<version_id>/ trên blockchain-service."""
+    try:
+        resp = _req.get(f"{_BC_URL}/proof/{version_id}/", timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_blockchain_certificate(request, user_id):
+    """GET → /certificate/<user_id>/ trên blockchain-service."""
+    try:
+        resp = _req.get(f"{_BC_URL}/certificate/{user_id}/", timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def identity_registry(request):
+    """Render the identity registry page."""
+    return render(request, 'contracts/identity_registry.html')
+
+
+@csrf_exempt
+def api_register_company(request):
+    """POST: Register a new Company in DB and anchor it to the blockchain."""
+    import requests
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body)
+        name = body.get('company_name')
+        tax_code = body.get('tax_code')
+        if not name or not tax_code:
+            return JsonResponse({'error': 'Thiếu tên công ty hoặc mã số thuế'}, status=400)
+            
+        from .models import Company
+        # Create in database
+        company = Company.objects.create(
+            company_name=name,
+            tax_code=tax_code,
+            status='ACTIVE'
+        )
+        
+        # Anchor to blockchain via blockchain-service
+        try:
+            resp = requests.post(f"{_BC_URL}/company/register/", json={
+                'company_id': company.id,
+                'company_name': name,
+                'tax_code': tax_code,
+                'status': 'ACTIVE',
+                'sender': 'System'
+            }, timeout=20)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                company.tx_hash = data.get('tx_hash')
+                company.block_number = data.get('block_number')
+                company.block_hash = data.get('block_hash')
+                company.save()
+            else:
+                error_msg = resp.json().get('error', 'Unknown blockchain error')
+                company.status = 'ERROR'
+                company.save()
+                return JsonResponse({'error': f'Lỗi lưu blockchain: {error_msg}'}, status=400)
+        except Exception as e:
+            company.status = 'ERROR'
+            company.save()
+            return JsonResponse({'error': f'Không kết nối được dịch vụ blockchain: {str(e)}'}, status=500)
+            
+        return JsonResponse({
+            'status': 'success',
+            'company_id': company.id,
+            'company_name': company.company_name,
+            'tax_code': company.tax_code,
+            'tx_hash': company.tx_hash,
+            'block_number': company.block_number,
+            'block_hash': company.block_hash
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_register_user(request):
+    """POST: Register a new User in DB and anchor them to the blockchain."""
+    import requests
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+    try:
+        body = json.loads(request.body)
+        username = body.get('username')
+        email = body.get('email')
+        password = body.get('password')
+        company_id = body.get('company_id')
+        role_id = body.get('role_id')
+        
+        if not username or not email or not password or not company_id or not role_id:
+            return JsonResponse({'error': 'Thiếu thông tin đăng ký nhân sự'}, status=400)
+            
+        from .models import Company, Role, User
+        try:
+            company = Company.objects.get(id=company_id)
+            role = Role.objects.get(id=role_id)
+        except (Company.DoesNotExist, Role.DoesNotExist) as e:
+            return JsonResponse({'error': 'Công ty hoặc Vai trò không tồn tại'}, status=404)
+            
+        # Create in database
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            company=company,
+            role=role,
+            status='ACTIVE'
+        )
+        
+        # Anchor to blockchain via blockchain-service
+        try:
+            resp = requests.post(f"{_BC_URL}/user/register/", json={
+                'user_id': user.id,
+                'username': username,
+                'company_id': company.id,
+                'role': role.role_name,
+                'status': 'ACTIVE',
+                'sender': 'System'
+            }, timeout=20)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                user.tx_hash = data.get('tx_hash')
+                user.block_number = data.get('block_number')
+                user.block_hash = data.get('block_hash')
+                user.save()
+                
+                # Automatically issue a digital certificate for the new user
+                try:
+                    import random
+                    clean_company_name = "".join(x for x in company.company_name.upper() if x.isalnum() or x == ' ')
+                    serial_number = f"CERT-{clean_company_name.replace(' ', '-')[:8]}-{user.id:04d}-{random.randint(1000, 9999)}"
+                    requests.post(f"{_BC_URL}/certificates/create/", json={
+                        'user_id': user.id,
+                        'serial_number': serial_number,
+                        'issuer': 'ContractGuard CA',
+                        'valid_days': 365
+                    }, timeout=10)
+                except Exception as cert_err:
+                    print(f"Warning: Failed to automatically issue certificate: {str(cert_err)}")
+            else:
+                error_msg = resp.json().get('error', 'Unknown blockchain error')
+                user.status = 'ERROR'
+                user.save()
+                return JsonResponse({'error': f'Lỗi lưu blockchain: {error_msg}'}, status=400)
+        except Exception as e:
+            user.status = 'ERROR'
+            user.save()
+            return JsonResponse({'error': f'Không kết nối được dịch vụ blockchain: {str(e)}'}, status=500)
+            
+        return JsonResponse({
+            'status': 'success',
+            'user_id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'company_name': company.company_name,
+            'role_name': role.role_name,
+            'tx_hash': user.tx_hash,
+            'block_number': user.block_number,
+            'block_hash': user.block_hash
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_companies_list(request):
+    """GET: Get list of all companies."""
+    from .models import Company
+    companies = Company.objects.all().order_by('-id')
+    data = []
+    for c in companies:
+        data.append({
+            'id': c.id,
+            'company_name': c.company_name,
+            'tax_code': c.tax_code,
+            'status': c.status,
+            'tx_hash': c.tx_hash,
+            'block_number': c.block_number,
+            'block_hash': c.block_hash
+        })
+    return JsonResponse(data, safe=False)
+
+
+def api_users_list(request):
+    """GET: Get list of all users."""
+    from .models import User
+    users = User.objects.all().select_related('company', 'role').order_by('-id')
+    data = []
+    for u in users:
+        data.append({
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'company_name': u.company.company_name if u.company else 'N/A',
+            'role_name': u.role.role_name if u.role else 'N/A',
+            'status': u.status,
+            'tx_hash': u.tx_hash,
+            'block_number': u.block_number,
+            'block_hash': u.block_hash
+        })
+    return JsonResponse(data, safe=False)
+
+
+def api_roles_list(request):
+    """GET: Get list of all roles."""
+    from .models import Role
+    roles = Role.objects.all().order_by('role_name')
+    data = [{'id': r.id, 'role_name': r.role_name} for r in roles]
+    return JsonResponse(data, safe=False)
+
+

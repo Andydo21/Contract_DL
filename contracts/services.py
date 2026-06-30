@@ -198,7 +198,7 @@ class ContractService:
                 for f in latest_analysis.findings.all()
             ]
             
-        # Read original text if available
+        # Read original text if available (decrypting first)
         raw_content = ""
         if latest_file and latest_file.file_path:
             media_prefix = settings.MEDIA_URL
@@ -208,12 +208,14 @@ class ContractService:
             
             full_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
             if os.path.exists(full_path):
-                if full_path.endswith('.txt') or full_path.endswith('.docx') or full_path.endswith('.doc'):
-                    try:
-                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            raw_content = f.read()
-                    except Exception:
-                        pass
+                try:
+                    from .crypto_utils import decrypt_pdf
+                    with open(full_path, 'rb') as f:
+                        encrypted_bytes = f.read()
+                    decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                    raw_content = decrypted_bytes.decode('utf-8', errors='ignore')
+                except Exception:
+                    pass
         
         # Fallback to reconstructing from clauses if empty
         if not raw_content and clauses_data:
@@ -240,7 +242,7 @@ class ContractService:
             'end_date': c.end_date.isoformat() if c.end_date else None,
             'contract_value': float(c.contract_value) if c.contract_value else None,
             'status': c.status,
-            'file_path': latest_file.file_path if latest_file else None,
+            'file_path': f"/api/contracts/files/{latest_file.id}/download/" if latest_file else None,
             'raw_content': raw_content,
             'clauses': clauses_data,
             'analysis': analysis_data,
@@ -252,7 +254,7 @@ class ContractService:
             'versions': versions_list
         }
 
-    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None):
+    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):
         if not code or not title:
             raise ValueError("Contract code and title are required.")
             
@@ -264,25 +266,32 @@ class ContractService:
             start_date=start_date,
             end_date=end_date,
             contract_value=contract_value,
-            status='DRAFT'
+            status='DRAFT',
+            company=company
         )
         
         # Create default version 1
         from .models import ContractVersion
         version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
         
-        # Save Contract File
+        # Save Contract File (Encrypted with AES-256)
         saved_file_path = None
+        from django.core.files.base import ContentFile
+        from .crypto_utils import encrypt_pdf
+        
         if file_obj:
             from django.core.files.storage import FileSystemStorage
             fs = FileSystemStorage()
-            filename = fs.save(f"contracts/{file_obj.name}", file_obj)
+            file_data = file_obj.read()
+            encrypted_data = encrypt_pdf(file_data)
+            filename = fs.save(f"contracts/{file_obj.name}", ContentFile(encrypted_data))
             saved_file_path = fs.url(filename)
         elif raw_content:
             from django.core.files.storage import FileSystemStorage
             fs = FileSystemStorage()
             safe_code = "".join(x for x in code if x.isalnum() or x in "-_")
-            filename = fs.save(f"contracts/contract_{safe_code}.txt", ContentFile(raw_content.encode('utf-8')))
+            encrypted_data = encrypt_pdf(raw_content.encode('utf-8'))
+            filename = fs.save(f"contracts/contract_{safe_code}.txt", ContentFile(encrypted_data))
             saved_file_path = fs.url(filename)
             
         if saved_file_path:
@@ -317,16 +326,22 @@ class ContractService:
         )
         
         saved_file_path = None
+        from django.core.files.base import ContentFile
+        from .crypto_utils import encrypt_pdf
+        
         if file_obj:
             from django.core.files.storage import FileSystemStorage
             fs = FileSystemStorage()
-            filename = fs.save(f"contracts/{file_obj.name}", file_obj)
+            file_data = file_obj.read()
+            encrypted_data = encrypt_pdf(file_data)
+            filename = fs.save(f"contracts/{file_obj.name}", ContentFile(encrypted_data))
             saved_file_path = fs.url(filename)
         elif raw_content:
             from django.core.files.storage import FileSystemStorage
             fs = FileSystemStorage()
             safe_code = "".join(x for x in contract.contract_code if x.isalnum() or x in "-_")
-            filename = fs.save(f"contracts/contract_{safe_code}_v{next_num}.txt", ContentFile(raw_content.encode('utf-8')))
+            encrypted_data = encrypt_pdf(raw_content.encode('utf-8'))
+            filename = fs.save(f"contracts/contract_{safe_code}_v{next_num}.txt", ContentFile(encrypted_data))
             saved_file_path = fs.url(filename)
             
         if saved_file_path:
@@ -393,6 +408,93 @@ class ContractService:
         
         return review
 
+    def push_to_workflow(self, contract_id, version_id=None):
+        """Đẩy contract lên workflow-service để tạo quy trình phê duyệt."""
+        import requests
+        from django.conf import settings
+
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+
+        from .models import ContractVersion
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+            if not version:
+                raise ValueError("Contract has no version to push.")
+
+        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+
+        payload = {
+            "version_id":    version.id,
+            "workflow_name": f"Approval Workflow – {contract.title}",
+            "steps": [
+                {"step_order": 1, "step_name": "Legal Review"},
+                {"step_order": 2, "step_name": "Manager Approval"},
+                {"step_order": 3, "step_name": "Sign & Archive"},
+            ],
+        }
+
+        try:
+            resp = requests.post(
+                f"{workflow_url}/workflows/",
+                json=payload,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Workflow service error: {e}")
+
+        # Cập nhật trạng thái contract
+        contract.status = 'PENDING_WORKFLOW'
+        contract.save()
+
+        admin_user = User.objects.filter(is_superuser=True).first()
+        self.audit_repo.log_action(admin_user, "PUSHED_TO_WORKFLOW", "Contract", contract.id)
+
+        return {
+            "contract_id":   contract.id,
+            "workflow_id":   result.get("workflow_id"),
+            "workflow_name": result.get("workflow_name"),
+            "status":        result.get("status"),
+            "steps":         result.get("steps", []),
+        }
+
+    def get_workflow_status(self, contract_id, version_id=None):
+        """Lấy trạng thái workflow từ workflow-service."""
+        import requests
+        from django.conf import settings
+
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+
+        from .models import ContractVersion
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+
+        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+
+        try:
+            resp = requests.get(f"{workflow_url}/workflows/{version.id}/", timeout=10)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Workflow service error: {e}")
+
     def _get_raw_content(self, contract, version=None):
         if not version:
             version = contract.latest_version
@@ -412,8 +514,11 @@ class ContractService:
         
         if os.path.exists(physical_path):
             try:
-                with open(physical_path, 'r', encoding='utf-8') as f:
-                    return f.read()
+                from .crypto_utils import decrypt_pdf
+                with open(physical_path, 'rb') as f:
+                    encrypted_bytes = f.read()
+                decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                return decrypted_bytes.decode('utf-8', errors='ignore')
             except Exception:
                 pass
         return ""

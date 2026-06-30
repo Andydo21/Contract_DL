@@ -1,0 +1,135 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Board – Contract Guard AI</title>
+    <meta name="description" content="Manage and approve contract approval workflows across all stages.">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}">
+</head>
+<body>
+    <div class="app-shell">
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <i class="fa-solid fa-shield-halved logo-icon"></i>
+                <span class="logo-text">Contract Guard</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{% url 'dashboard' %}" class="nav-item">
+                    <i class="fa-solid fa-gauge-high"></i><span>Dashboard</span>
+                </a>
+                <a href="{% url 'analysis_history' %}" class="nav-item">
+                    <i class="fa-solid fa-clock-rotate-left"></i><span>Analysis History</span>
+                </a>
+                <a href="{% url 'workflow_board' %}" class="nav-item active">
+                    <i class="fa-solid fa-diagram-project"></i><span>Workflows</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                    <div class="user-info">
+                        <div class="user-name">Admin</div>
+                        <div class="user-role">Legal Officer</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- Top Bar -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 class="page-title"><i class="fa-solid fa-diagram-project"></i> Workflow Board</h1>
+                    <p class="page-subtitle">Manage contract approval pipelines and step-by-step sign-offs</p>
+                </div>
+                <div class="topbar-right">
+                    <div class="stat-pill" id="stat-total">
+                        <i class="fa-solid fa-layer-group"></i>
+                        <span id="count-total">–</span> Total
+                    </div>
+                    <div class="stat-pill pending" id="stat-pending">
+                        <i class="fa-solid fa-hourglass-half"></i>
+                        <span id="count-pending">–</span> Pending
+                    </div>
+                    <div class="stat-pill progress" id="stat-progress">
+                        <i class="fa-solid fa-spinner"></i>
+                        <span id="count-progress">–</span> In Progress
+                    </div>
+                    <div class="stat-pill done" id="stat-done">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span id="count-done">–</span> Completed
+                    </div>
+                    <button class="btn-refresh" id="btn-refresh" title="Refresh">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar">
+                <button class="filter-btn active" data-filter="ALL">All</button>
+                <button class="filter-btn" data-filter="PENDING">Pending</button>
+                <button class="filter-btn" data-filter="IN_PROGRESS">In Progress</button>
+                <button class="filter-btn" data-filter="COMPLETED">Completed</button>
+                <button class="filter-btn" data-filter="REJECTED">Rejected</button>
+            </div>
+
+            <!-- Workflow Grid -->
+            <div class="workflow-grid" id="workflow-grid">
+                <!-- Populated by JS -->
+                <div class="loading-state" id="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading workflows...</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Approve Modal -->
+    <div class="modal-overlay" id="approve-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <i class="fa-solid fa-signature modal-icon"></i>
+                    <div>
+                        <h3 class="modal-title" id="modal-step-name">Step Name</h3>
+                        <p class="modal-subtitle" id="modal-workflow-name">Workflow</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Comment (optional)</label>
+                    <textarea class="form-textarea" id="modal-comment" placeholder="Add your review notes, conditions, or reasoning..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-reject" id="btn-reject">
+                    <i class="fa-solid fa-xmark"></i> Reject
+                </button>
+                <button class="btn btn-approve" id="btn-approve">
+                    <i class="fa-solid fa-check"></i> Approve
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="{% static 'contracts/js/workflow_board.js' %}"></script>
+</body>
+</html>
