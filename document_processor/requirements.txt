@@ -1,0 +1,21 @@
+# Requirements — document_processor
+# Chạy: pip install -r requirements.txt
+
+# ── Core document parsing ──────────────────────────────────────────────────
+python-docx>=1.1.0          # Đọc file DOCX (paragraph + table)
+PyMuPDF>=1.23.0             # Đọc PDF text + render PDF → ảnh (không cần Poppler)
+
+# ── OCR ────────────────────────────────────────────────────────────────────
+paddlepaddle>=2.6.0         # PaddlePaddle CPU (backend của PaddleOCR)
+paddleocr>=2.7.0            # OCR engine — hỗ trợ tiếng Việt
+# Nếu dùng GPU: thay paddlepaddle bằng paddlepaddle-gpu
+
+# ── Image processing ───────────────────────────────────────────────────────
+Pillow>=10.0.0              # Đọc / xử lý ảnh PNG, JPG
+numpy>=1.24.0               # Array xử lý ảnh cho PaddleOCR
+
+# ── Data validation & serialisation ───────────────────────────────────────
+pydantic>=2.5.0             # Schema validation + JSON serialisation
+
+# ── Utilities ──────────────────────────────────────────────────────────────
+# (Không cần thêm: unicodedata, re, logging, pathlib đều là stdlib)
