@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Custom Apps
     "contracts.apps.ContractsConfig",
+    "ai_extract.apps.AiExtractConfig",
 ]
 
 MIDDLEWARE = [
@@ -137,4 +138,10 @@ AUTH_USER_MODEL = "contracts.User"
 # AI Inference Service Configuration
 AI_SERVICE_URL = os.environ.get(
     "AI_SERVICE_URL", "https://rummage-triangle-figurine.ngrok-free.dev"
+)
+
+# Kaggle Qwen AI Extract & Summarize Service
+# Points to the kaggle-qwen-service Docker container (or ngrok URL when Kaggle notebook is running)
+KAGGLE_QWEN_SERVICE_URL = os.environ.get(
+    "KAGGLE_QWEN_SERVICE_URL", "http://kaggle-qwen-service:8000"
 )

@@ -1,0 +1,40 @@
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    # ── Summarize ──────────────────────────────────────────────────────────
+    # POST  /api/ai/contracts/<id>/summarize/   → run summarize & save
+    path(
+        "contracts/<int:contract_id>/summarize/",
+        views.api_summarize_contract,
+        name="ai_summarize_contract",
+    ),
+    # GET   /api/ai/contracts/<id>/summary/     → retrieve saved summary
+    path(
+        "contracts/<int:contract_id>/summary/",
+        views.api_get_summary,
+        name="ai_get_summary",
+    ),
+
+    # ── Extract Entities ────────────────────────────────────────────────────
+    # POST  /api/ai/contracts/<id>/extract-entities/  → run per-clause extraction & save
+    path(
+        "contracts/<int:contract_id>/extract-entities/",
+        views.api_extract_entities,
+        name="ai_extract_entities",
+    ),
+    # GET   /api/ai/contracts/<id>/entities/          → list saved entities
+    path(
+        "contracts/<int:contract_id>/entities/",
+        views.api_get_entities,
+        name="ai_get_entities",
+    ),
+
+    # ── Free-text extraction (no contract binding) ──────────────────────────
+    # POST  /api/ai/extract-from-text/
+    path(
+        "extract-from-text/",
+        views.api_extract_from_text,
+        name="ai_extract_from_text",
+    ),
+]

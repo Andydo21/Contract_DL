@@ -15,6 +15,7 @@ services:
       - AI_SERVICE_URL=http://ai-service:8000
       - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
       - WORKFLOW_SERVICE_URL=http://workflow-service:8000
+      - KAGGLE_QWEN_SERVICE_URL=http://kaggle-qwen-service:8000
     volumes:
       - .:/app
     networks:
@@ -31,6 +32,23 @@ services:
       - HF_TOKEN=${HF_TOKEN}
     volumes:
       - ./ai_service:/app
+    networks:
+      - riskdl-net
+
+  kaggle-qwen-service:
+    build:
+      context: ./kaggle_qwen_service
+      dockerfile: Dockerfile
+    container_name: riskdl_kaggle_qwen
+    restart: always
+    environment:
+      # Paste the ngrok URL printed by the Kaggle notebook here
+      # Example: - KAGGLE_AI_URL=https://xxxx.ngrok-free.app
+      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./kaggle_qwen_service:/app
     networks:
       - riskdl-net
 
