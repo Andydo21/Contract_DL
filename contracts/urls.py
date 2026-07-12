@@ -39,4 +39,10 @@ urlpatterns = [
     path('api/identity/users/', views.api_users_list, name='api_users_list'),
     path('api/identity/users/register/', views.api_register_user, name='api_register_user'),
     path('api/identity/roles/', views.api_roles_list, name='api_roles_list'),
+    # AI Demo endpoints
+    path('ai-demo/', views.ai_demo_page, name='ai_demo_page'),
+    path('api/ai-demo/proxy/', views.api_ai_demo_proxy, name='api_ai_demo_proxy'),
+    # Document Processor (Test Mode — No DB)
+    path('doc-processor/', views.doc_processor_page, name='doc_processor_page'),
+    path('doc-processor/upload/', views.api_doc_processor_upload, name='api_doc_processor_upload'),
 ]

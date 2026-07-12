@@ -952,3 +952,149 @@ def api_roles_list(request):
     return JsonResponse(data, safe=False)
 
 
+# --- AI Demo Views ---
+def ai_demo_page(request):
+    """Render the standalone AI Demo UI."""
+    return render(request, 'contracts/ai_demo.html')
+
+@csrf_exempt
+def api_ai_demo_proxy(request):
+    """Proxy requests to the Kaggle AI Server to avoid CORS issues."""
+    import json
+    import os
+    from django.http import JsonResponse
+    
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+        
+    try:
+        import requests
+        from django.conf import settings
+        
+        body = json.loads(request.body)
+        action = body.get('action') # 'summarize' or 'extract_entities'
+        payload = body.get('payload')
+        
+        kaggle_url = getattr(settings, 'AI_SERVICE_URL', os.environ.get('KAGGLE_AI_URL', ''))
+        if not kaggle_url:
+            return JsonResponse({'error': 'KAGGLE_AI_URL is not set in .env'}, status=500)
+            
+        endpoint = f"{kaggle_url.rstrip('/')}/api/v1/{action}"
+        
+        # Forward to Kaggle
+        resp = requests.post(endpoint, json=payload, timeout=300)
+        resp.raise_for_status()
+        
+        return JsonResponse(resp.json())
+        
+    except requests.RequestException as e:
+        return JsonResponse({'error': f'Kaggle Connection Error: {str(e)}'}, status=502)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+
+# ── Document Processor (Test — No DB) ─────────────────────────────────────
+
+def doc_processor_page(request):
+    """Render trang Web UI Document Processor (test mode, không lưu DB)."""
+    return render(request, 'contracts/doc_processor.html')
+
+
+@csrf_exempt
+def api_doc_processor_upload(request):
+    """
+    POST: Nhận file upload → chạy DocumentService → lưu JSON log → trả kết quả.
+
+    Không lưu vào database — chỉ dùng để test pipeline DocumentProcessor.
+    Kết quả được ghi vào: logs/doc_processor/<timestamp>_<filename>.json
+    """
+    import os
+    import sys
+    import time
+    import tempfile
+    from pathlib import Path
+    from django.conf import settings
+
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    uploaded = request.FILES.get('file')
+    if not uploaded:
+        return JsonResponse({'error': 'Không có file được gửi lên.'}, status=400)
+
+    ocr_lang = request.POST.get('ocr_lang', 'vi')
+
+    # Thư mục log
+    log_dir = Path(settings.BASE_DIR) / 'logs' / 'doc_processor'
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Lưu file tạm
+    suffix = Path(uploaded.name).suffix.lower()
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=suffix, prefix='dp_upload_'
+    ) as tmp:
+        for chunk in uploaded.chunks():
+            tmp.write(chunk)
+        tmp_path = tmp.name
+
+    try:
+        # Thêm thư mục gốc project vào sys.path nếu chưa có
+        project_root = str(settings.BASE_DIR)
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
+        from document_processor.services.document_service import DocumentService
+
+        service = DocumentService(ocr_lang=ocr_lang)
+
+        start = time.perf_counter()
+        output = service.process(tmp_path)
+        elapsed = round(time.perf_counter() - start, 3)
+
+        # Serialize kết quả
+        result_dict = output.to_dict()
+
+        # Đặt tên log file: timestamp + tên file gốc
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in uploaded.name)
+        log_filename = f'{ts}_{safe_name}.json'
+        log_path = log_dir / log_filename
+
+        # Ghi log JSON
+        log_dir_rel = f'logs/doc_processor/{log_filename}'
+        import json as _json
+        log_path.write_text(
+            _json.dumps({
+                'meta': {
+                    'original_filename': uploaded.name,
+                    'ocr_lang': ocr_lang,
+                    'elapsed_seconds': elapsed,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                },
+                'result': result_dict,
+            }, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+
+        return JsonResponse({
+            **result_dict,
+            'elapsed_seconds': elapsed,
+            'log_path': log_dir_rel,
+        })
+
+    except Exception as exc:
+        # Ghi error log
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        err_log = log_dir / f'{ts}_ERROR_{Path(uploaded.name).stem}.txt'
+        err_log.write_text(
+            f'File: {uploaded.name}\nError: {type(exc).__name__}: {exc}\n',
+            encoding='utf-8',
+        )
+        return JsonResponse({'error': f'{type(exc).__name__}: {exc}'}, status=500)
+
+    finally:
+        # Xoá file tạm
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

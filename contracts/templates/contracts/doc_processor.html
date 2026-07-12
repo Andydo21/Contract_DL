@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Processor — Contract Analysis System</title>
+    <meta name="description" content="Upload và phân tích hợp đồng PDF, DOCX, hình ảnh — trích xuất điều khoản tự động bằng AI.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Design Tokens ─────────────────────────────────────────── */
+        :root {
+            --bg-dark:       #0a0f1e;
+            --bg-deep:       #060b16;
+            --panel-bg:      #111827;
+            --panel-border:  rgba(255,255,255,0.07);
+            --panel-hover:   rgba(255,255,255,0.04);
+            --accent:        #6366f1;
+            --accent-2:      #a855f7;
+            --accent-glow:   rgba(99,102,241,0.25);
+            --success:       #10b981;
+            --warning:       #f59e0b;
+            --danger:        #ef4444;
+            --text-primary:  #f1f5f9;
+            --text-secondary:#94a3b8;
+            --text-muted:    #475569;
+            --border:        rgba(255,255,255,0.08);
+            --radius-lg:     16px;
+            --radius-md:     10px;
+            --radius-sm:     6px;
+            --transition:    0.2s ease;
+        }
+
+        /* ── Reset ─────────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ── Background mesh ───────────────────────────────────────── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 50% at 20% -5%, rgba(99,102,241,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 100%, rgba(168,85,247,0.08) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .page-wrap {
+            position: relative;
+            z-index: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 24px 80px;
+        }
+
+        /* ── Header ────────────────────────────────────────────────── */
+        .page-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 48px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .brand-name {
+            font-family: 'Outfit', sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #e2e8f0, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            transition: var(--transition);
+        }
+        .back-link:hover {
+            color: var(--text-primary);
+            border-color: rgba(255,255,255,0.2);
+            background: var(--panel-hover);
+        }
+
+        /* ── Hero ──────────────────────────────────────────────────── */
+        .hero {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(99,102,241,0.12);
+            border: 1px solid rgba(99,102,241,0.3);
+            color: #a5b4fc;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            padding: 4px 12px;
+            border-radius: 999px;
+            margin-bottom: 20px;
+        }
+
+        .hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: clamp(28px, 5vw, 44px);
+            font-weight: 800;
+            line-height: 1.2;
+            background: linear-gradient(135deg, #f1f5f9 0%, #a5b4fc 50%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 14px;
+        }
+
+        .hero p {
+            font-size: 16px;
+            color: var(--text-secondary);
+            max-width: 540px;
+            margin: 0 auto;
+        }
+
+        /* ── Upload Zone ───────────────────────────────────────────── */
+        .upload-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-lg);
+            padding: 32px;
+            margin-bottom: 32px;
+        }
+
+        .card-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .card-title i { color: var(--accent); }
+
+        .drop-zone {
+            border: 2px dashed rgba(99,102,241,0.35);
+            border-radius: var(--radius-lg);
+            padding: 56px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+            background: rgba(99,102,241,0.03);
+        }
+
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            border-color: var(--accent);
+            background: rgba(99,102,241,0.07);
+        }
+
+        .drop-zone.drag-over {
+            transform: scale(1.01);
+            box-shadow: 0 0 0 4px var(--accent-glow);
+        }
+
+        .drop-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: block;
+        }
+
+        .drop-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .drop-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .file-types {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .file-badge {
+            background: rgba(99,102,241,0.12);
+            border: 1px solid rgba(99,102,241,0.25);
+            color: #a5b4fc;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 999px;
+            letter-spacing: 0.05em;
+        }
+
+        #file-input { display: none; }
+
+        /* ── Options row ───────────────────────────────────────────── */
+        .options-row {
+            display: flex;
+            gap: 16px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .option-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .option-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .option-group select {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+            transition: var(--transition);
+            min-width: 140px;
+        }
+        .option-group select:hover { border-color: rgba(255,255,255,0.2); }
+        .option-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+        .btn-process {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, var(--accent), #4f46e5);
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 10px 28px;
+            border-radius: var(--radius-md);
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+            box-shadow: 0 4px 14px var(--accent-glow);
+            margin-left: auto;
+        }
+        .btn-process:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99,102,241,0.4);
+        }
+        .btn-process:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* ── Selected file preview ─────────────────────────────────── */
+        #file-preview {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            background: rgba(99,102,241,0.08);
+            border: 1px solid rgba(99,102,241,0.2);
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            margin-top: 16px;
+        }
+
+        .file-preview-icon { font-size: 22px; color: var(--accent); }
+
+        .file-preview-info { flex: 1; }
+        .file-preview-name { font-size: 14px; font-weight: 600; }
+        .file-preview-size { font-size: 12px; color: var(--text-secondary); }
+
+        .btn-remove {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px 8px;
+            transition: var(--transition);
+            border-radius: var(--radius-sm);
+        }
+        .btn-remove:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+
+        /* ── Processing State ──────────────────────────────────────── */
+        #processing-state {
+            display: none;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-lg);
+            padding: 48px 32px;
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .spinner-ring {
+            width: 64px;
+            height: 64px;
+            border: 3px solid rgba(99,102,241,0.15);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin: 0 auto 24px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .processing-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .processing-sub {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+
+        .pipeline-steps {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .step-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            transition: all 0.4s ease;
+        }
+        .step-chip.active {
+            border-color: var(--accent);
+            color: #a5b4fc;
+            background: rgba(99,102,241,0.12);
+            box-shadow: 0 0 12px var(--accent-glow);
+        }
+        .step-chip.done {
+            border-color: rgba(16,185,129,0.4);
+            color: #34d399;
+            background: rgba(16,185,129,0.08);
+        }
+
+        /* ── Results ───────────────────────────────────────────────── */
+        #results-section {
+            display: none;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .result-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .result-title .badge-success {
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(16,185,129,0.12);
+            border: 1px solid rgba(16,185,129,0.3);
+            color: #34d399;
+            padding: 3px 10px;
+            border-radius: 999px;
+        }
+
+        .btn-download, .btn-reset {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 18px;
+            border-radius: var(--radius-md);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            text-decoration: none;
+        }
+
+        .btn-download {
+            background: rgba(16,185,129,0.12);
+            border: 1px solid rgba(16,185,129,0.3);
+            color: #34d399;
+        }
+        .btn-download:hover { background: rgba(16,185,129,0.2); }
+
+        .btn-reset {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .btn-reset:hover { color: var(--text-primary); background: var(--panel-hover); }
+
+        /* ── Stats Grid ────────────────────────────────────────────── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-md);
+            padding: 20px 20px 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ── Tabs ──────────────────────────────────────────────────── */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 4px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            flex: 1;
+            min-width: 100px;
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .tab-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+
+        .tab-btn.active {
+            background: var(--accent);
+            color: #fff;
+            box-shadow: 0 2px 8px var(--accent-glow);
+        }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* ── Clauses List ──────────────────────────────────────────── */
+        .clause-item {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-md);
+            margin-bottom: 10px;
+            overflow: hidden;
+            transition: var(--transition);
+        }
+        .clause-item:hover { border-color: rgba(99,102,241,0.3); }
+
+        .clause-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .clause-num {
+            min-width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent), #4f46e5);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .clause-title-text {
+            flex: 1;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .clause-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .clause-toggle { color: var(--text-muted); transition: transform 0.2s; }
+        .clause-item.open .clause-toggle { transform: rotate(180deg); }
+
+        .clause-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.35s ease;
+        }
+        .clause-item.open .clause-body { max-height: 600px; }
+
+        .clause-content {
+            padding: 0 18px 18px;
+            font-size: 13.5px;
+            color: var(--text-secondary);
+            line-height: 1.8;
+            border-top: 1px solid var(--border);
+            padding-top: 16px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* ── Pages List ────────────────────────────────────────────── */
+        .page-item {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-md);
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 18px;
+            cursor: pointer;
+        }
+
+        .page-num-badge {
+            background: rgba(255,255,255,0.07);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            color: var(--text-secondary);
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .page-source-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 999px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .source-docx { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
+        .source-pdf  { background: rgba(239,68,68,0.12);  color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+        .source-ocr  { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.25); }
+
+        .page-confidence {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        .page-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .page-item.open .page-body { max-height: 400px; }
+
+        .page-text {
+            padding: 14px 18px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            border-top: 1px solid var(--border);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 380px;
+            overflow-y: auto;
+            font-family: 'Inter', monospace;
+        }
+
+        /* ── Warnings ──────────────────────────────────────────────── */
+        .warning-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            background: rgba(245,158,11,0.07);
+            border: 1px solid rgba(245,158,11,0.2);
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            font-size: 13.5px;
+            color: #fcd34d;
+        }
+        .warning-item i { flex-shrink: 0; margin-top: 2px; color: var(--warning); }
+
+        .no-warnings {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #34d399;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 16px;
+            background: rgba(16,185,129,0.05);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: var(--radius-md);
+        }
+
+        /* ── Log Panel ─────────────────────────────────────────────── */
+        .log-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            margin-top: 24px;
+        }
+
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .log-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .log-title i { color: var(--success); }
+
+        .log-path {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'Courier New', monospace;
+            background: rgba(255,255,255,0.04);
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+        }
+
+        /* ── Error State ───────────────────────────────────────────── */
+        #error-state {
+            display: none;
+            background: rgba(239,68,68,0.05);
+            border: 1px solid rgba(239,68,68,0.25);
+            border-radius: var(--radius-lg);
+            padding: 28px 32px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .error-icon { font-size: 40px; color: var(--danger); margin-bottom: 12px; }
+        .error-title { font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 700; margin-bottom: 8px; color: #fca5a5; }
+        .error-message { font-size: 14px; color: var(--text-secondary); }
+
+        /* ── Empty State ───────────────────────────────────────────── */
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--text-muted);
+        }
+        .empty-state i { font-size: 40px; margin-bottom: 12px; display: block; opacity: 0.4; }
+        .empty-state p { font-size: 14px; }
+
+        /* ── Utilities ─────────────────────────────────────────────── */
+        .text-accent { color: var(--accent); }
+        .mt-8 { margin-top: 8px; }
+
+        @media (max-width: 600px) {
+            .page-header { flex-direction: column; align-items: flex-start; }
+            .result-header { flex-direction: column; }
+            .options-row { flex-direction: column; }
+            .btn-process { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+    <!-- Header -->
+    <header class="page-header">
+        <div class="brand">
+            <div class="brand-icon"><i class="fa-solid fa-file-waveform"></i></div>
+            <div class="brand-name">Document Processor</div>
+        </div>
+        <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
+    </header>
+
+    <!-- Hero -->
+    <div class="hero">
+        <div class="hero-badge"><i class="fa-solid fa-flask"></i> Test Mode</div>
+        <h1>Phân tích tài liệu hợp đồng</h1>
+        <p>Upload file PDF, DOCX hoặc ảnh — hệ thống sẽ trích xuất điều khoản tự động và lưu log kết quả.</p>
+    </div>
+
+    <!-- Upload Card -->
+    <div class="upload-card" id="upload-card">
+        <div class="card-title">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+            Upload Tài Liệu
+        </div>
+
+        <!-- Drop Zone -->
+        <div class="drop-zone" id="drop-zone">
+            <span class="drop-icon"><i class="fa-solid fa-file-arrow-up"></i></span>
+            <div class="drop-title">Kéo thả file vào đây</div>
+            <div class="drop-subtitle">hoặc <span class="text-accent" style="cursor:pointer" onclick="document.getElementById('file-input').click()">click để chọn file</span></div>
+            <div class="file-types">
+                <span class="file-badge">PDF</span>
+                <span class="file-badge">DOCX</span>
+                <span class="file-badge">PNG</span>
+                <span class="file-badge">JPG</span>
+                <span class="file-badge">JPEG</span>
+            </div>
+            <input type="file" id="file-input" accept=".pdf,.docx,.png,.jpg,.jpeg">
+        </div>
+
+        <!-- File Preview -->
+        <div id="file-preview">
+            <i class="fa-solid fa-file file-preview-icon" id="preview-icon"></i>
+            <div class="file-preview-info">
+                <div class="file-preview-name" id="preview-name">—</div>
+                <div class="file-preview-size" id="preview-size">—</div>
+            </div>
+            <button class="btn-remove" id="btn-remove" title="Xoá file"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Options + Submit -->
+        <div class="options-row">
+            <div class="option-group">
+                <label for="ocr-lang"><i class="fa-solid fa-language"></i> Ngôn ngữ OCR</label>
+                <select id="ocr-lang" name="ocr_lang">
+                    <option value="vi" selected>🇻🇳 Tiếng Việt</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="ch">🇨🇳 Chinese</option>
+                </select>
+            </div>
+            <button class="btn-process" id="btn-process" disabled>
+                <i class="fa-solid fa-microchip"></i> Bắt đầu xử lý
+            </button>
+        </div>
+    </div>
+
+    <!-- Processing State -->
+    <div id="processing-state">
+        <div class="spinner-ring"></div>
+        <div class="processing-title">Đang xử lý tài liệu...</div>
+        <div class="processing-sub" id="processing-filename">Vui lòng đợi, quá trình có thể mất vài giây</div>
+        <div class="pipeline-steps">
+            <div class="step-chip" id="step-load"><i class="fa-solid fa-folder-open"></i> Load File</div>
+            <div class="step-chip" id="step-extract"><i class="fa-solid fa-text-width"></i> Extract</div>
+            <div class="step-chip" id="step-ocr"><i class="fa-solid fa-eye"></i> OCR</div>
+            <div class="step-chip" id="step-normalize"><i class="fa-solid fa-broom"></i> Normalize</div>
+            <div class="step-chip" id="step-split"><i class="fa-solid fa-scissors"></i> Split Clauses</div>
+            <div class="step-chip" id="step-done"><i class="fa-solid fa-circle-check"></i> Done</div>
+        </div>
+    </div>
+
+    <!-- Error State -->
+    <div id="error-state">
+        <div class="error-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <div class="error-title">Xử lý thất bại</div>
+        <div class="error-message" id="error-message">Đã xảy ra lỗi không xác định.</div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="results-section">
+        <div class="result-header">
+            <div class="result-title">
+                <i class="fa-solid fa-check-circle" style="color: var(--success)"></i>
+                Kết quả phân tích
+                <span class="badge-success">Thành công</span>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn-download" id="btn-download">
+                    <i class="fa-solid fa-download"></i> Download JSON
+                </button>
+                <button class="btn-reset" id="btn-reset">
+                    <i class="fa-solid fa-rotate-left"></i> Upload khác
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label"><i class="fa-solid fa-file"></i> Tên file</div>
+                <div class="stat-value" id="res-filename" style="font-size:16px; font-weight:600; margin-top:4px;">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="fa-solid fa-book-open"></i> Số trang</div>
+                <div class="stat-value" id="res-pages">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="fa-solid fa-list-check"></i> Điều khoản</div>
+                <div class="stat-value" id="res-clauses">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="fa-solid fa-eye"></i> OCR</div>
+                <div class="stat-value" id="res-ocr" style="font-size:16px; font-weight:600; margin-top:4px;">—</div>
+                <div class="stat-sub" id="res-confidence"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><i class="fa-solid fa-stopwatch"></i> Thời gian</div>
+                <div class="stat-value" id="res-time">—</div>
+                <div class="stat-sub">giây</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="clauses" id="tab-clauses">
+                <i class="fa-solid fa-list-check"></i> Điều khoản
+                <span id="tab-clauses-count" style="background:rgba(255,255,255,0.1);border-radius:999px;padding:1px 7px;font-size:11px;"></span>
+            </button>
+            <button class="tab-btn" data-tab="pages" id="tab-pages">
+                <i class="fa-solid fa-file-lines"></i> Nội dung trang
+                <span id="tab-pages-count" style="background:rgba(255,255,255,0.1);border-radius:999px;padding:1px 7px;font-size:11px;"></span>
+            </button>
+            <button class="tab-btn" data-tab="warnings" id="tab-warnings">
+                <i class="fa-solid fa-triangle-exclamation"></i> Cảnh báo
+                <span id="tab-warnings-count" style="background:rgba(255,255,255,0.1);border-radius:999px;padding:1px 7px;font-size:11px;"></span>
+            </button>
+        </div>
+
+        <!-- Tab: Clauses -->
+        <div class="tab-content active" id="tab-content-clauses">
+            <div id="clauses-list"></div>
+        </div>
+
+        <!-- Tab: Pages -->
+        <div class="tab-content" id="tab-content-pages">
+            <div id="pages-list"></div>
+        </div>
+
+        <!-- Tab: Warnings -->
+        <div class="tab-content" id="tab-content-warnings">
+            <div id="warnings-list"></div>
+        </div>
+
+        <!-- Log info -->
+        <div class="log-panel">
+            <div class="log-header">
+                <div class="log-title"><i class="fa-solid fa-file-code"></i> Kết quả đã lưu vào log</div>
+                <div class="log-path" id="log-path">—</div>
+            </div>
+            <p style="font-size:13px; color: var(--text-muted);">
+                File log chứa toàn bộ output JSON từ <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;">DocumentService</code> — bao gồm metadata, pages, clauses và warnings.
+            </p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    /* ── State ─────────────────────────────────────────────────── */
+    let selectedFile = null;
+    let resultData   = null;
+
+    /* ── DOM refs ──────────────────────────────────────────────── */
+    const dropZone      = document.getElementById('drop-zone');
+    const fileInput     = document.getElementById('file-input');
+    const filePreview   = document.getElementById('file-preview');
+    const previewName   = document.getElementById('preview-name');
+    const previewSize   = document.getElementById('preview-size');
+    const previewIcon   = document.getElementById('preview-icon');
+    const btnRemove     = document.getElementById('btn-remove');
+    const btnProcess    = document.getElementById('btn-process');
+    const uploadCard    = document.getElementById('upload-card');
+    const processingEl  = document.getElementById('processing-state');
+    const errorEl       = document.getElementById('error-state');
+    const resultsEl     = document.getElementById('results-section');
+
+    /* ── File icon map ─────────────────────────────────────────── */
+    const FILE_ICONS = {
+        pdf:  'fa-file-pdf',
+        docx: 'fa-file-word',
+        doc:  'fa-file-word',
+        png:  'fa-file-image',
+        jpg:  'fa-file-image',
+        jpeg: 'fa-file-image',
+    };
+
+    /* ── Drag & drop ───────────────────────────────────────────── */
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+    });
+    dropZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+
+    function setFile(file) {
+        selectedFile = file;
+        const ext = file.name.split('.').pop().toLowerCase();
+        previewIcon.className = `fa-solid ${FILE_ICONS[ext] || 'fa-file'} file-preview-icon`;
+        previewName.textContent = file.name;
+        previewSize.textContent = formatBytes(file.size);
+        filePreview.style.display = 'flex';
+        btnProcess.disabled = false;
+    }
+
+    btnRemove.addEventListener('click', e => {
+        e.stopPropagation();
+        clearFile();
+    });
+
+    function clearFile() {
+        selectedFile = null;
+        fileInput.value = '';
+        filePreview.style.display = 'none';
+        btnProcess.disabled = true;
+    }
+
+    function formatBytes(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+        return (b/1024/1024).toFixed(2) + ' MB';
+    }
+
+    /* ── Pipeline animation ────────────────────────────────────── */
+    const STEPS = ['load', 'extract', 'ocr', 'normalize', 'split', 'done'];
+    let stepTimer = null;
+
+    function animatePipeline() {
+        let i = 0;
+        STEPS.forEach(s => document.getElementById('step-' + s).className = 'step-chip');
+        stepTimer = setInterval(() => {
+            if (i > 0) document.getElementById('step-' + STEPS[i-1]).className = 'step-chip done';
+            if (i < STEPS.length) {
+                document.getElementById('step-' + STEPS[i]).className = 'step-chip active';
+                i++;
+            } else {
+                clearInterval(stepTimer);
+            }
+        }, 600);
+    }
+
+    function stopAnimation() {
+        clearInterval(stepTimer);
+        STEPS.forEach(s => document.getElementById('step-' + s).className = 'step-chip done');
+    }
+
+    /* ── Submit ────────────────────────────────────────────────── */
+    btnProcess.addEventListener('click', async () => {
+        if (!selectedFile) return;
+
+        // Show processing
+        uploadCard.style.display   = 'none';
+        processingEl.style.display = 'block';
+        errorEl.style.display      = 'none';
+        resultsEl.style.display    = 'none';
+        document.getElementById('processing-filename').textContent = selectedFile.name;
+        animatePipeline();
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('ocr_lang', document.getElementById('ocr-lang').value);
+
+        const startTime = performance.now();
+
+        try {
+            const resp = await fetch('/doc-processor/upload/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                body: formData,
+            });
+
+            const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({ error: resp.statusText }));
+                throw new Error(err.error || `HTTP ${resp.status}`);
+            }
+
+            const data = await resp.json();
+            resultData = data;
+
+            stopAnimation();
+            setTimeout(() => {
+                processingEl.style.display = 'none';
+                renderResults(data, parseFloat(elapsed));
+                resultsEl.style.display = 'block';
+            }, 400);
+
+        } catch (err) {
+            stopAnimation();
+            processingEl.style.display = 'none';
+            errorEl.style.display = 'block';
+            document.getElementById('error-message').textContent = err.message;
+        }
+    });
+
+    /* ── Render results ────────────────────────────────────────── */
+    function renderResults(data, elapsed) {
+        const info = data.document_info;
+
+        document.getElementById('res-filename').textContent  = info.file_name;
+        document.getElementById('res-pages').textContent     = info.page_count;
+        document.getElementById('res-clauses').textContent   = data.clauses.length;
+        document.getElementById('res-time').textContent      = elapsed;
+        document.getElementById('res-ocr').textContent       = info.ocr_used ? '✓ Có' : '✗ Không';
+        document.getElementById('res-confidence').textContent = info.ocr_used
+            ? `Confidence: ${(info.avg_confidence * 100).toFixed(1)}%`
+            : '';
+        document.getElementById('log-path').textContent = data.log_path || '—';
+
+        // Counts on tabs
+        document.getElementById('tab-clauses-count').textContent  = data.clauses.length;
+        document.getElementById('tab-pages-count').textContent    = data.pages.length;
+        document.getElementById('tab-warnings-count').textContent = data.warnings.length;
+
+        renderClauses(data.clauses);
+        renderPages(data.pages);
+        renderWarnings(data.warnings);
+    }
+
+    function renderClauses(clauses) {
+        const el = document.getElementById('clauses-list');
+        if (!clauses.length) {
+            el.innerHTML = `<div class="empty-state"><i class="fa-solid fa-list-check"></i><p>Không tìm thấy điều khoản nào.</p></div>`;
+            return;
+        }
+        el.innerHTML = clauses.map(c => `
+            <div class="clause-item" onclick="toggleItem(this)">
+                <div class="clause-header">
+                    <div class="clause-num">${c.id}</div>
+                    <div class="clause-title-text">${escHtml(c.title)}</div>
+                    <div class="clause-meta">
+                        <i class="fa-regular fa-file-lines"></i>
+                        ${c.start_page === c.end_page ? 'Trang ' + c.start_page : 'Trang ' + c.start_page + '–' + c.end_page}
+                    </div>
+                    <i class="fa-solid fa-chevron-down clause-toggle"></i>
+                </div>
+                <div class="clause-body">
+                    <div class="clause-content">${escHtml(c.content)}</div>
+                </div>
+            </div>`).join('');
+    }
+
+    function renderPages(pages) {
+        const el = document.getElementById('pages-list');
+        if (!pages.length) {
+            el.innerHTML = `<div class="empty-state"><i class="fa-solid fa-file-lines"></i><p>Không có trang nào.</p></div>`;
+            return;
+        }
+        el.innerHTML = pages.map(p => `
+            <div class="page-item" onclick="toggleItem(this)">
+                <div class="page-header">
+                    <span class="page-num-badge">Trang ${p.page_number}</span>
+                    <span class="page-source-badge source-${p.source}">${p.source.toUpperCase()}</span>
+                    ${p.source === 'ocr' ? `<span class="page-confidence"><i class="fa-solid fa-chart-simple"></i> ${(p.confidence*100).toFixed(1)}%</span>` : ''}
+                    <i class="fa-solid fa-chevron-down clause-toggle" style="margin-left:auto; color:var(--text-muted); transition:transform 0.2s;"></i>
+                </div>
+                <div class="page-body">
+                    <div class="page-text">${escHtml(p.text || '(Trống)')}</div>
+                </div>
+            </div>`).join('');
+    }
+
+    function renderWarnings(warnings) {
+        const el = document.getElementById('warnings-list');
+        if (!warnings.length) {
+            el.innerHTML = `<div class="no-warnings"><i class="fa-solid fa-circle-check"></i> Không có cảnh báo nào — tài liệu được xử lý tốt.</div>`;
+            return;
+        }
+        el.innerHTML = warnings.map(w => `
+            <div class="warning-item">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span>${escHtml(w)}</span>
+            </div>`).join('');
+    }
+
+    /* ── Accordion toggle ──────────────────────────────────────── */
+    function toggleItem(el) { el.classList.toggle('open'); }
+
+    /* ── Tabs ──────────────────────────────────────────────────── */
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-content-' + btn.dataset.tab).classList.add('active');
+        });
+    });
+
+    /* ── Download JSON ─────────────────────────────────────────── */
+    document.getElementById('btn-download').addEventListener('click', () => {
+        if (!resultData) return;
+        const blob = new Blob([JSON.stringify(resultData, null, 2)], { type: 'application/json' });
+        const a    = document.createElement('a');
+        a.href     = URL.createObjectURL(blob);
+        a.download = (resultData.document_info?.file_name || 'result').replace(/\.[^.]+$/, '') + '_processed.json';
+        a.click();
+    });
+
+    /* ── Reset ─────────────────────────────────────────────────── */
+    document.getElementById('btn-reset').addEventListener('click', () => {
+        resultData = null;
+        clearFile();
+        resultsEl.style.display    = 'none';
+        errorEl.style.display      = 'none';
+        uploadCard.style.display   = 'block';
+    });
+
+    /* ── CSRF helper ───────────────────────────────────────────── */
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return v ? v.pop() : '';
+    }
+
+    /* ── HTML escape ───────────────────────────────────────────── */
+    function escHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+</script>
+
+</body>
+</html>
