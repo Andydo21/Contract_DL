@@ -6,13 +6,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from contracts.models import Contract, ContractVersion, Clause
-from .services import SummarizeService, ExtractEntityService
+from .services import SummarizeService, ExtractEntityService, ClauseExtractService
 from .repositories import ContractSummaryRepository, ExtractedEntityRepository
 
 logger = logging.getLogger("ai_extract")
 
 summarize_svc = SummarizeService()
 extract_svc = ExtractEntityService()
+clause_extract_svc = ClauseExtractService()
 
 
 def _error(msg: str, status: int = 400) -> JsonResponse:
@@ -242,4 +243,102 @@ def api_get_entities(request, contract_id: int):
         "version_id": version.id,
         "count": len(data),
         "entities": data,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Extract Clauses endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_extract_clauses(request, contract_id: int):
+    """
+    POST /api/ai/contracts/<contract_id>/extract-clauses/
+    Use AI to split raw contract text into Clause rows in the DB.
+
+    Optional JSON body:
+      {
+        "version_id": <int>,    # default: latest
+        "re_extract": true      # delete existing clauses first
+      }
+    """
+    try:
+        body = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        body = {}
+
+    version_id = body.get("version_id")
+    re_extract = bool(body.get("re_extract", False))
+
+    try:
+        contract = Contract.objects.prefetch_related("versions__clauses").get(id=contract_id)
+    except Contract.DoesNotExist:
+        return _error(f"Contract {contract_id} not found.", 404)
+
+    if version_id:
+        try:
+            version = contract.versions.get(id=version_id)
+        except ContractVersion.DoesNotExist:
+            return _error(f"Version {version_id} not found.", 404)
+    else:
+        version = contract.latest_version
+        if not version:
+            return _error("Contract has no version yet.", 400)
+
+    try:
+        result = clause_extract_svc.extract_version(version, re_extract=re_extract)
+        return JsonResponse(result, status=200)
+    except ValueError as e:
+        return _error(str(e), 400)
+    except RuntimeError as e:
+        logger.exception("Extract clauses runtime error")
+        return _error(str(e), 502)
+    except Exception:
+        logger.exception("Unexpected error in api_extract_clauses")
+        return _error("Internal server error.", 500)
+
+
+@require_http_methods(["GET"])
+def api_get_clauses(request, contract_id: int):
+    """
+    GET /api/ai/contracts/<contract_id>/clauses/
+    List Clause rows for the latest (or specified) version.
+
+    Query params: ?version_id=<int>
+    """
+    version_id = request.GET.get("version_id")
+
+    try:
+        contract = Contract.objects.prefetch_related("versions__clauses").get(id=contract_id)
+    except Contract.DoesNotExist:
+        return _error(f"Contract {contract_id} not found.", 404)
+
+    if version_id:
+        try:
+            version = contract.versions.get(id=int(version_id))
+        except (ContractVersion.DoesNotExist, ValueError):
+            return _error(f"Version {version_id} not found.", 404)
+    else:
+        version = contract.latest_version
+        if not version:
+            return _error("Contract has no version.", 404)
+
+    clauses = list(version.clauses.all())
+    data = [
+        {
+            "id": cl.id,
+            "clause_title": cl.clause_title,
+            "clause_type": cl.clause_type,
+            "content_length": len(cl.clause_content),
+            "clause_content": cl.clause_content,
+        }
+        for cl in clauses
+    ]
+
+    return JsonResponse({
+        "contract_id": contract.id,
+        "version_id": version.id,
+        "count": len(data),
+        "clauses": data,
     })

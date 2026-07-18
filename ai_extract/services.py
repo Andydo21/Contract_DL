@@ -4,8 +4,9 @@ ai_extract/services.py
 Business-logic layer for AI Extract & Summarize.
 
 Calls kaggle_qwen_service (at settings.KAGGLE_QWEN_SERVICE_URL) via HTTP:
-  • POST /api/v1/summarize        → saves to ai_extract.ContractSummary
-  • POST /api/v1/extract_entities → saves to contracts.ExtractedEntity (same table as rule-based entities)
+  • POST /api/v1/summarize          → saves to ai_extract.ContractSummary
+  • POST /api/v1/extract_entities   → saves to contracts.ExtractedEntity (same table as rule-based entities)
+  • POST /api/v1/extract_clauses    → saves to contracts.Clause
 """
 
 import logging
@@ -13,6 +14,7 @@ import requests
 from django.conf import settings
 
 from contracts.models import Contract, ContractVersion, Clause
+from contracts.repositories import ClauseRepository
 from .repositories import ContractSummaryRepository, ExtractedEntityRepository
 
 logger = logging.getLogger("ai_extract")
@@ -257,3 +259,145 @@ class ExtractEntityService:
             logger.info(f"[extract] Saved {saved_count} free-text ExtractedEntity rows")
 
         return {"entities": raw_entities, "saved_count": saved_count}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Clause Extract Service
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClauseExtractService:
+    """
+    Extract and split contract clauses from raw text using Kaggle AI,
+    then save them to contracts.Clause (same table used by rule-based splitting).
+
+    Strategy: send the full raw text of a ContractVersion to the AI, which
+    returns a JSON list of {title, content, clause_type} objects.
+    Existing clauses for the version are optionally deleted before re-saving.
+    """
+
+    def extract_version(self, version: ContractVersion, re_extract: bool = False) -> dict:
+        """
+        Run AI clause extraction for a ContractVersion.
+
+        Args:
+            version:     The ContractVersion to process.
+            re_extract:  If True, delete existing clauses for this version first.
+
+        Returns:
+            {"version_id", "contract_id", "total_clauses", "clauses"}
+        """
+        # Gather raw text from all ContractFile content stored in ContractContext,
+        # or fall back to reconstructing from existing clauses.
+        raw_text = self._get_raw_text(version)
+        if not raw_text:
+            raise ValueError(
+                f"ContractVersion {version.id} has no raw text available. "
+                "Upload a file or provide raw content first."
+            )
+
+        if re_extract:
+            deleted_count = version.clauses.all().delete()[0]
+            logger.info(
+                f"[clause_extract] Deleted {deleted_count} existing clauses "
+                f"for version {version.id}"
+            )
+
+        url = f"{_kaggle_url()}/api/v1/extract_clauses"
+        logger.info(
+            f"[clause_extract] POST {url} – version_id={version.id}, "
+            f"text_len={len(raw_text)}"
+        )
+
+        try:
+            resp = requests.post(
+                url,
+                json={"text": raw_text},
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"kaggle_qwen_service /api/v1/extract_clauses error: {e}")
+
+        raw_clauses = data.get("clauses", [])
+        if not raw_clauses:
+            raise ValueError(
+                "AI returned no clauses. The text may be too short or unstructured."
+            )
+
+        saved_clauses = []
+        clause_repo = ClauseRepository()
+        for item in raw_clauses:
+            title = (item.get("title") or "").strip()
+            content = (item.get("content") or "").strip()
+            clause_type = (item.get("clause_type") or "").strip() or None
+
+            if not title or not content:
+                logger.warning(
+                    f"[clause_extract] Skipping empty clause item: {item}"
+                )
+                continue
+
+            clause = clause_repo.create_clause(version, title, content)
+            # Optionally set clause_type if returned by AI
+            if clause_type:
+                clause.clause_type = clause_type
+                clause.save(update_fields=["clause_type"])
+
+            saved_clauses.append({
+                "clause_id": clause.id,
+                "clause_title": clause.clause_title,
+                "clause_type": clause.clause_type,
+                "content_length": len(clause.clause_content),
+            })
+
+        logger.info(
+            f"[clause_extract] Saved {len(saved_clauses)} Clause rows "
+            f"for version {version.id}"
+        )
+
+        return {
+            "version_id": version.id,
+            "contract_id": version.contract.id,
+            "total_clauses": len(saved_clauses),
+            "clauses": saved_clauses,
+        }
+
+    def extract_contract(self, contract_id: int, re_extract: bool = False) -> dict:
+        """Convenience wrapper – uses the latest version."""
+        try:
+            contract = Contract.objects.prefetch_related("versions__clauses").get(
+                id=contract_id
+            )
+        except Contract.DoesNotExist:
+            raise ValueError(f"Contract {contract_id} not found.")
+
+        version = contract.latest_version
+        if not version:
+            raise ValueError(f"Contract {contract_id} has no version yet.")
+
+        return self.extract_version(version, re_extract=re_extract)
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _get_raw_text(version: ContractVersion) -> str:
+        """
+        Reconstruct raw contract text for the version.
+        Priority:
+          1. Concatenate ContractContext.content rows (context_type="raw_text")
+          2. Fall back to joining existing clause title + content
+        """
+        # 1. Try ContractContext with context_type="raw_text"
+        contexts = version.contexts.filter(context_type="raw_text").order_by("id")
+        if contexts.exists():
+            return "\n\n".join(c.content for c in contexts)
+
+        # 2. Fall back to reconstructing from existing clauses
+        clauses = list(version.clauses.all())
+        if clauses:
+            return "\n\n".join(
+                f"{cl.clause_title}\n{cl.clause_content}" for cl in clauses
+            )
+
+        return ""

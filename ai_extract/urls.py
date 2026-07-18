@@ -30,6 +30,20 @@ urlpatterns = [
         name="ai_get_entities",
     ),
 
+    # ── Extract Clauses ─────────────────────────────────────────────────────
+    # POST  /api/ai/contracts/<id>/extract-clauses/  → AI clause splitting & save
+    path(
+        "contracts/<int:contract_id>/extract-clauses/",
+        views.api_extract_clauses,
+        name="ai_extract_clauses",
+    ),
+    # GET   /api/ai/contracts/<id>/clauses/           → list saved clauses
+    path(
+        "contracts/<int:contract_id>/clauses/",
+        views.api_get_clauses,
+        name="ai_get_clauses",
+    ),
+
     # ── Free-text extraction (no contract binding) ──────────────────────────
     # POST  /api/ai/extract-from-text/
     path(
