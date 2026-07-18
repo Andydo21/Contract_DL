@@ -38,7 +38,8 @@ class ExtractedEntityRepository:
     as rule-based entities (contracts_extractedentity), distinguished by entity_type.
 
     Kaggle AI entity_type conventions:
-      COMPANY_NAME, TAX_CODE, CONTRACT_VALUE, DATE_EFFECTIVE, DATE_EXPIRE
+      COMPANY_NAME, TAX_CODE, CONTRACT_VALUE, DATE_EFFECTIVE, DATE_EXPIRE,
+      DURATION, PAYMENT_TERM, PENALTY, OBLIGATION
     """
 
     # Confidence score assigned to AI-extracted entities
@@ -98,6 +99,7 @@ class ExtractedEntityRepository:
         kaggle_types = [
             "COMPANY_NAME", "TAX_CODE", "CONTRACT_VALUE",
             "DATE_EFFECTIVE", "DATE_EXPIRE",
+            "DURATION", "PAYMENT_TERM", "PENALTY", "OBLIGATION",
         ]
         count, _ = ExtractedEntity.objects.filter(
             clause__version=version,
