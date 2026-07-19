@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileDropText = document.getElementById('file-drop-text');
 
     let currentContractId = null;
+    let allContracts = [];
 
     // Load Contracts list
     async function loadContracts(selectedId = null) {
@@ -22,80 +23,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error("Failed to fetch contracts");
             const data = await res.json();
             
+            allContracts = data;
             renderStats(data);
             
-            if (data.length === 0) {
-                listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted)">
-                    <i class="fa-regular fa-folder-open" style="font-size: 32px; margin-bottom: 12px;"></i>
-                    <p>No contracts uploaded yet.</p>
-                </div>`;
-                return;
-            }
-
-            listContainer.innerHTML = '';
-            data.forEach(c => {
-                const card = document.createElement('div');
-                card.className = `contract-card ${selectedId == c.id ? 'active' : ''}`;
-                card.dataset.id = c.id;
-
-                // Risk display
-                let riskClass = 'score-low';
-                let indicatorClass = 'bg-low';
-                let riskLabel = 'Low Risk';
+            const searchInput = document.getElementById('contract-search-input');
+            const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+            const filtered = query 
+                ? allContracts.filter(c => {
+                    const code = (c.contract_code || '').toLowerCase();
+                    const title = (c.title || '').toLowerCase();
+                    const status = (c.status || '').toLowerCase();
+                    return code.includes(query) || title.includes(query) || status.includes(query);
+                  })
+                : allContracts;
                 
-                if (c.risk_score !== null) {
-                    if (c.risk_score >= 80) {
-                        riskClass = 'score-high';
-                        indicatorClass = 'bg-high';
-                        riskLabel = `Score: ${c.risk_score}% (High)`;
-                    } else if (c.risk_score >= 50) {
-                        riskClass = 'score-medium';
-                        indicatorClass = 'bg-medium';
-                        riskLabel = `Score: ${c.risk_score}% (Medium)`;
-                    } else {
-                        riskClass = 'score-low';
-                        indicatorClass = 'bg-low';
-                        riskLabel = `Score: ${c.risk_score}% (Low)`;
-                    }
-                } else {
-                    riskLabel = 'Pending AI Run';
-                    riskClass = 'score-low';
-                    indicatorClass = 'bg-low';
-                    if (c.status === 'ANALYZING') {
-                        riskLabel = 'Analyzing...';
-                    }
-                }
-
-                card.innerHTML = `
-                    <div class="card-top">
-                        <span class="card-code">${c.contract_code}</span>
-                        <span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span>
-                    </div>
-                    <div class="card-title">${c.title}</div>
-                    <div class="card-footer">
-                        <span>$${c.contract_value !== null && c.contract_value !== undefined ? c.contract_value.toLocaleString() : '0'}</span>
-                        <div class="card-score ${riskClass}">
-                            <div class="score-indicator ${indicatorClass}"></div>
-                            <span>${riskLabel}</span>
-                        </div>
-                    </div>
-                `;
-                
-                card.addEventListener('click', () => {
-                    document.querySelectorAll('.contract-card').forEach(cc => cc.classList.remove('active'));
-                    card.classList.add('active');
-                    showContractDetail(c.id);
-                });
-
-                listContainer.appendChild(card);
-            });
-
-            // Auto-select active if set
-            if (selectedId) {
-                const activeCard = listContainer.querySelector(`[data-id="${selectedId}"]`);
-                if (activeCard) activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-
+            renderContractsList(filtered, selectedId || currentContractId);
         } catch (err) {
             console.error(err);
             listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--risk-high)">
@@ -103,6 +45,113 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p>Error loading registry database.</p>
             </div>`;
         }
+    }
+
+    function renderContractsList(contracts, selectedId = null) {
+        if (contracts.length === 0) {
+            listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted)">
+                <i class="fa-regular fa-folder-open" style="font-size: 32px; margin-bottom: 12px;"></i>
+                <p>No matching contracts found.</p>
+            </div>`;
+            return;
+        }
+
+        listContainer.innerHTML = '';
+        contracts.forEach(c => {
+            const card = document.createElement('div');
+            card.className = `contract-card ${selectedId == c.id ? 'active' : ''}`;
+            card.dataset.id = c.id;
+
+            // Risk display
+            let riskClass = 'score-low';
+            let indicatorClass = 'bg-low';
+            let riskLabel = 'Low Risk';
+            
+            if (c.risk_score !== null) {
+                if (c.risk_score >= 80) {
+                    riskClass = 'score-high';
+                    indicatorClass = 'bg-high';
+                    riskLabel = `Score: ${c.risk_score}% (High)`;
+                } else if (c.risk_score >= 50) {
+                    riskClass = 'score-medium';
+                    indicatorClass = 'bg-medium';
+                    riskLabel = `Score: ${c.risk_score}% (Medium)`;
+                } else {
+                    riskClass = 'score-low';
+                    indicatorClass = 'bg-low';
+                    riskLabel = `Score: ${c.risk_score}% (Low)`;
+                }
+            } else {
+                riskLabel = 'Pending AI Run';
+                riskClass = 'score-low';
+                indicatorClass = 'bg-low';
+                if (c.status === 'ANALYZING') {
+                    riskLabel = 'Analyzing...';
+                }
+            }
+
+            card.innerHTML = `
+                <div class="card-top">
+                    <span class="card-code">${c.contract_code}</span>
+                    <span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span>
+                </div>
+                <div class="card-title">${c.title}</div>
+                <div class="card-footer">
+                    <span>$${c.contract_value !== null && c.contract_value !== undefined ? c.contract_value.toLocaleString() : '0'}</span>
+                    <div class="card-score ${riskClass}">
+                        <div class="score-indicator ${indicatorClass}"></div>
+                        <span>${riskLabel}</span>
+                    </div>
+                </div>
+            `;
+            
+            card.addEventListener('click', () => {
+                document.querySelectorAll('.contract-card').forEach(cc => cc.classList.remove('active'));
+                card.classList.add('active');
+                showContractDetail(c.id);
+            });
+
+            listContainer.appendChild(card);
+        });
+
+        // Auto-select active if set
+        if (selectedId) {
+            const activeCard = listContainer.querySelector(`[data-id="${selectedId}"]`);
+            if (activeCard) activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    // Search events Setup
+    const searchInput = document.getElementById('contract-search-input');
+    const clearSearchBtn = document.getElementById('btn-clear-search');
+    
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.toLowerCase().trim();
+            if (query) {
+                if (clearSearchBtn) clearSearchBtn.style.display = 'block';
+            } else {
+                if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+            }
+            
+            const filtered = allContracts.filter(c => {
+                const code = (c.contract_code || '').toLowerCase();
+                const title = (c.title || '').toLowerCase();
+                const status = (c.status || '').toLowerCase();
+                return code.includes(query) || title.includes(query) || status.includes(query);
+            });
+            
+            renderContractsList(filtered, currentContractId);
+        });
+    }
+    
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearSearchBtn.style.display = 'none';
+            renderContractsList(allContracts, currentContractId);
+            searchInput.focus();
+        });
     }
 
     // Stats calculator

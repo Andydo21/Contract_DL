@@ -1,11 +1,12 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
-    User, Contract, ContractVersion, ContractFile, Clause, RiskRule, 
+    User, Contract, ContractVersion, ContractFile, RiskRule, 
     AIAnalysis, RiskFinding, Review, AuditLog, Company, Permission, 
-    Role, Tag, ContractContext, ContextEmbedding, ExtractedEntity, 
+    Role, Tag, ContractContext, ContextEmbedding, 
     ContractParty, Notification
 )
+from ai_extract.models import Clause as AIClause, ExtractedEntity as AIExtractedEntity
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -25,7 +26,7 @@ class ContractFileInline(admin.TabularInline):
 
 
 class ClauseInline(admin.TabularInline):
-    model = Clause
+    model = AIClause
     extra = 1
 
 
@@ -43,12 +44,6 @@ class ContractAdmin(admin.ModelAdmin):
     search_fields = ('contract_code', 'title', 'contract_type')
     filter_horizontal = ('tags',)
 
-
-@admin.register(Clause)
-class ClauseAdmin(admin.ModelAdmin):
-    list_display = ('clause_title', 'version', 'clause_type', 'context')
-    list_filter = ('version__contract', 'clause_type')
-    search_fields = ('clause_title', 'clause_content')
 
 
 @admin.register(RiskRule)
@@ -125,11 +120,6 @@ class ContractContextAdmin(admin.ModelAdmin):
 class ContextEmbeddingAdmin(admin.ModelAdmin):
     list_display = ('context', 'vector_id', 'embedding_model')
 
-
-@admin.register(ExtractedEntity)
-class ExtractedEntityAdmin(admin.ModelAdmin):
-    list_display = ('clause', 'entity_type', 'entity_value', 'confidence_score')
-    list_filter = ('entity_type',)
 
 
 

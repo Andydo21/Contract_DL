@@ -349,7 +349,169 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Panel Tabs Switcher
+    const panelTabBtns = document.querySelectorAll('.panel-tab-btn');
+    panelTabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            panelTabBtns.forEach(b => {
+                b.classList.remove('active');
+                b.style.color = 'var(--text-muted)';
+            });
+            btn.classList.add('active');
+            btn.style.color = '#ffffff';
+            
+            const targetTab = btn.dataset.target;
+            const panes = document.querySelectorAll('.tab-content-wrapper > .tab-pane');
+            panes.forEach(pane => {
+                if (pane.id === targetTab) {
+                    pane.style.display = 'block';
+                    pane.classList.add('active');
+                } else {
+                    pane.style.display = 'none';
+                    pane.classList.remove('active');
+                }
+            });
+        });
+    });
+
+    // Manual / AI Extraction API Handlers
+    const btnManualExtract = document.getElementById('btn-manual-extract');
+    const btnAiExtract = document.getElementById('btn-ai-extract');
+    const vSelect = document.getElementById('version-select');
+    
+    if (btnManualExtract) {
+        btnManualExtract.addEventListener('click', async () => {
+            const contractId = btnManualExtract.dataset.contractId;
+            const versionId = vSelect ? vSelect.value : null;
+            
+            if (scannerLoader) {
+                scannerLoader.classList.add('active');
+                const scannerText = scannerLoader.querySelector('.scanner-text');
+                if (scannerText) scannerText.innerHTML = "RUNNING MANUAL EXTRACTION...";
+            }
+            
+            try {
+                const res = await fetch(`/api/contracts/${contractId}/manual-extract/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ version_id: versionId })
+                });
+                const data = await res.json();
+                
+                setTimeout(() => {
+                     if (scannerLoader) scannerLoader.classList.remove('active');
+                     if (data.success) {
+                         showToast("Trích xuất thủ công hoàn tất!", "success");
+                         setTimeout(() => window.location.reload(), 1500);
+                     } else {
+                         showToast(data.error || "Lỗi khi trích xuất thủ công.", "error");
+                     }
+                }, 2000);
+            } catch (err) {
+                if (scannerLoader) scannerLoader.classList.remove('active');
+                console.error(err);
+                showToast("Lỗi kết nối khi trích xuất thủ công.", "error");
+            }
+        });
+    }
+    
+    if (btnAiExtract) {
+        btnAiExtract.addEventListener('click', async () => {
+            const contractId = btnAiExtract.dataset.contractId;
+            const versionId = vSelect ? vSelect.value : null;
+            
+            if (scannerLoader) {
+                scannerLoader.classList.add('active');
+                const scannerText = scannerLoader.querySelector('.scanner-text');
+                if (scannerText) scannerText.innerHTML = "AI SCANNING CLAUSES & EXTRACTING ENTITIES...";
+            }
+            
+            try {
+                const res = await fetch(`/api/ai/contracts/${contractId}/extract-entities/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ version_id: versionId, re_extract: true })
+                });
+                const data = await res.json();
+                
+                setTimeout(() => {
+                     if (scannerLoader) scannerLoader.classList.remove('active');
+                     if (data.version_id) {
+                         showToast("Trích xuất AI hoàn tất!", "success");
+                         setTimeout(() => window.location.reload(), 1500);
+                     } else {
+                         showToast(data.error || "Lỗi khi trích xuất AI.", "error");
+                     }
+                }, 2500);
+            } catch (err) {
+                if (scannerLoader) scannerLoader.classList.remove('active');
+                console.error(err);
+                showToast("Lỗi kết nối khi trích xuất AI.", "error");
+            }
+        });
+    }
+
+    // 9. Generate AI Summary click handler
+    const btnGenerateSummary = document.getElementById('btn-generate-summary');
+    if (btnGenerateSummary) {
+        btnGenerateSummary.addEventListener('click', async () => {
+            const contractId = btnGenerateSummary.dataset.contractId;
+            const versionSelect = document.getElementById('version-select');
+            const versionId = versionSelect ? versionSelect.value : null;
+            
+            if (scannerLoader) {
+                scannerLoader.classList.add('active');
+                const scannerText = scannerLoader.querySelector('.scanner-text');
+                if (scannerText) scannerText.innerHTML = "GENERATING AI EXECUTIVE SUMMARY...";
+            }
+            
+            try {
+                const res = await fetch(`/api/ai/contracts/${contractId}/summarize/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ version_id: versionId })
+                });
+                const data = await res.json();
+                
+                setTimeout(() => {
+                     if (scannerLoader) scannerLoader.classList.remove('active');
+                     if (data.summary) {
+                         showToast("Tóm tắt AI hoàn tất!", "success");
+                         setTimeout(() => window.location.reload(), 1500);
+                     } else {
+                         showToast(data.error || "Lỗi khi tạo tóm tắt AI.", "error");
+                     }
+                }, 2000);
+            } catch (err) {
+                if (scannerLoader) scannerLoader.classList.remove('active');
+                console.error(err);
+                showToast("Lỗi kết nối khi tạo tóm tắt AI.", "error");
+            }
+        });
+    }
 });
+
+// Toggle folding/unfolding of clauses
+window.toggleClause = function(header) {
+    const item = header.parentElement;
+    item.classList.toggle('active');
+    const body = item.querySelector('.clause-item-body');
+    const icon = header.querySelector('i');
+    if (item.classList.contains('active')) {
+        body.style.display = 'block';
+        icon.style.transform = 'rotate(180deg)';
+    } else {
+        body.style.display = 'none';
+        icon.style.transform = 'rotate(0deg)';
+    }
+};
 
 // Toast notification helper
 window.showToast = function(message, type = 'error') {

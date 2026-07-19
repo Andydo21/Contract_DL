@@ -355,12 +355,23 @@
         </a>
 
         <!-- Header -->
-        <div class="page-header">
-            <h1 class="page-title">
-                <i class="fa-solid fa-building-shield" style="color: var(--tab-active)"></i>
-                Enterprise Identity Registry
-            </h1>
-            <p class="page-subtitle">Manage decentralized identity nodes, companies, and authorized personnel anchored on Hyperledger Fabric.</p>
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;">
+            <div>
+                <h1 class="page-title">
+                    <i class="fa-solid fa-building-shield" style="color: var(--tab-active)"></i>
+                    Enterprise Identity Registry
+                </h1>
+                <p class="page-subtitle">Manage decentralized identity nodes, companies, and authorized personnel anchored on Hyperledger Fabric.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 8px 16px; border-radius: 12px;">
+                <div style="text-align: right;">
+                    <div style="font-size: 13px; font-weight: 600; color: #fff;">{{ user.username }}</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">{{ user.role.role_name|default:"Staff" }}</div>
+                </div>
+                <a href="/logout/" style="color: #fda4af; font-size: 16px; transition: color 0.2s; margin-left: 8px;" title="Log Out">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </a>
+            </div>
         </div>
 
         <!-- Tabs Navigation -->

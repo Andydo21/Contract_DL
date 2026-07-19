@@ -1,4 +1,5 @@
-from .models import Contract, ContractVersion, ContractFile, Clause, RiskRule, AIAnalysis, RiskFinding, Review, AuditLog
+from .models import Contract, ContractVersion, ContractFile, RiskRule, AIAnalysis, RiskFinding, Review, AuditLog
+from ai_extract.models import Clause
 import os
 
 class RiskRepository:
@@ -77,11 +78,15 @@ class ContractRepository:
         return Contract.objects.all().order_by('-created_at')
         
     @staticmethod
+    def get_contracts_by_company(company):
+        return Contract.objects.filter(company=company).order_by('-created_at')
+        
+    @staticmethod
     def get_contract_by_id(contract_id):
         try:
             return Contract.objects.prefetch_related(
                 'versions__files',
-                'versions__clauses', 
+                'versions__ai_extract_clauses', 
                 'versions__ai_analyses__findings__rule', 
                 'versions__ai_analyses__reviews__user'
             ).get(id=contract_id)

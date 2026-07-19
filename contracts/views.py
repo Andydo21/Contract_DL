@@ -1,18 +1,46 @@
 import json
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth import login, logout, authenticate
+from django.contrib.auth.decorators import login_required
 from .services import ContractService, RiskService, AnalysisHistoryService
 
 contract_service = ContractService()
 risk_service = RiskService()
 analysis_history_service = AnalysisHistoryService()
 
+def manager_required(view_func):
+    def _wrapped_view(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('/login/')
+        user = request.user
+        if user.is_superuser:
+            return view_func(request, *args, **kwargs)
+        if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
+            return render(request, 'contracts/access_denied.html')
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+def api_manager_required(view_func):
+    def _wrapped_view(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return JsonResponse({'error': 'Unauthorized. Please log in.'}, status=401)
+        user = request.user
+        if user.is_superuser:
+            return view_func(request, *args, **kwargs)
+        if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
+            return JsonResponse({'error': 'Permission Denied: Only Managers can access this resource.'}, status=403)
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+@manager_required
 def dashboard(request):
     """Render the dashboard SPA template."""
     return render(request, 'contracts/dashboard.html')
 
 
+@manager_required
 def workflow_board(request):
     """Render the workflow management board page."""
     return render(request, 'contracts/workflow_board.html')
@@ -56,8 +84,18 @@ def api_approve_workflow_step(request, step_id):
         return JsonResponse({'error': str(e)}, status=400)
 
 
+@manager_required
 def contract_detail(request, contract_id):
     """Render the dedicated contract detail page."""
+    from .models import Contract
+    try:
+        contract_obj = Contract.objects.get(id=contract_id)
+        if not request.user.is_superuser and contract_obj.company != request.user.company:
+            return render(request, 'contracts/access_denied.html')
+    except Contract.DoesNotExist:
+        from django.http import Http404
+        raise Http404("Contract not found")
+        
     version_id = request.GET.get('version_id')
     details = contract_service.get_contract_details(contract_id, version_id=version_id)
     if not details:
@@ -66,15 +104,17 @@ def contract_detail(request, contract_id):
     return render(request, 'contracts/contract_detail.html', {'contract': details})
 
 
-
 @csrf_exempt
+@api_manager_required
 def api_contracts_list(request):
     """
     GET: Get list of all contracts.
     """
     if request.method == 'GET':
         try:
-            contracts = contract_service.list_all_contracts()
+            user = request.user
+            company = None if user.is_superuser else user.company
+            contracts = contract_service.list_all_contracts(company=company)
             return JsonResponse(contracts, safe=False)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
@@ -86,6 +126,7 @@ def api_contracts_list(request):
 
 
 @csrf_exempt
+@api_manager_required
 def api_create_contract(request):
     """
     POST: Create a contract, upload file/text, and trigger mock AI Analysis.
@@ -132,11 +173,20 @@ def api_create_contract(request):
 
 
 @csrf_exempt
+@api_manager_required
 def api_contract_detail(request, contract_id):
     """
     GET: Get full detail of a contract.
     """
     if request.method == 'GET':
+        from .models import Contract
+        try:
+            contract_obj = Contract.objects.get(id=contract_id)
+            if not request.user.is_superuser and contract_obj.company != request.user.company:
+                return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
+        except Contract.DoesNotExist:
+            return JsonResponse({'error': 'Contract not found.'}, status=404)
+
         version_id = request.GET.get('version_id')
         details = contract_service.get_contract_details(contract_id, version_id=version_id)
         if not details:
@@ -147,6 +197,7 @@ def api_contract_detail(request, contract_id):
 
 
 @csrf_exempt
+@api_manager_required
 def api_analyze_contract(request, contract_id):
     """
     POST: Run the AI analysis simulator for the given contract.
@@ -160,6 +211,10 @@ def api_analyze_contract(request, contract_id):
             except Exception:
                 pass
         try:
+            from .models import Contract
+            contract_obj = Contract.objects.get(id=contract_id)
+            if not request.user.is_superuser and contract_obj.company != request.user.company:
+                return JsonResponse({'error': 'Permission Denied.'}, status=403)
             contract = contract_service.analyze_contract(contract_id, version_id=version_id)
             return JsonResponse({
                 'success': True,
@@ -173,6 +228,38 @@ def api_analyze_contract(request, contract_id):
 
 
 @csrf_exempt
+@api_manager_required
+def api_manual_extract_contract(request, contract_id):
+    """
+    POST: Run manual/local heuristic contract clause and entity extraction.
+    """
+    if request.method == 'POST':
+        version_id = request.GET.get('version_id') or request.POST.get('version_id')
+        if not version_id and request.body:
+            try:
+                body = json.loads(request.body)
+                version_id = body.get('version_id')
+            except Exception:
+                pass
+        try:
+            from .models import Contract
+            contract_obj = Contract.objects.get(id=contract_id)
+            if not request.user.is_superuser and contract_obj.company != request.user.company:
+                return JsonResponse({'error': 'Permission Denied.'}, status=403)
+            contract = contract_service.manual_extract_contract(contract_id, version_id=version_id)
+            return JsonResponse({
+                'success': True,
+                'contract_id': contract.id,
+                'status': contract.status
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+            
+    return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+
+@csrf_exempt
+@api_manager_required
 def api_push_to_workflow(request, contract_id):
     """
     POST: Đẩy contract lên workflow-service để khởi tạo quy trình phê duyệt.
@@ -348,19 +435,23 @@ def api_risks_list(request):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
+@manager_required
 def analysis_history(request):
     """Render the AI analysis history page."""
     return render(request, 'contracts/analysis_history.html')
 
 
 @csrf_exempt
+@api_manager_required
 def api_analyses_list(request):
     """
     GET: Return full list of all AI analyses ordered by most recent.
     """
     if request.method == 'GET':
         try:
-            data = analysis_history_service.list_all_analyses()
+            user = request.user
+            company = None if user.is_superuser else user.company
+            data = analysis_history_service.list_all_analyses(company=company)
             return JsonResponse(data, safe=False)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
@@ -677,6 +768,7 @@ def api_blockchain_sign_step(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+@api_manager_required
 def api_download_file(request, file_id):
     from django.conf import settings
     import os
@@ -686,6 +778,8 @@ def api_download_file(request, file_id):
     
     try:
         cf = ContractFile.objects.get(id=file_id)
+        if not request.user.is_superuser and cf.version.contract.company != request.user.company:
+            return HttpResponse("Permission Denied: You do not have access to this file.", status=403)
     except ContractFile.DoesNotExist:
         raise Http404("File not found")
         
@@ -751,6 +845,7 @@ def api_blockchain_certificate(request, user_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+@login_required(login_url='/login/')
 def identity_registry(request):
     """Render the identity registry page."""
     return render(request, 'contracts/identity_registry.html')
@@ -947,8 +1042,135 @@ def api_users_list(request):
 def api_roles_list(request):
     """GET: Get list of all roles."""
     from .models import Role
+    # Ensure role MANAGER exists
+    Role.objects.get_or_create(role_name='MANAGER')
     roles = Role.objects.all().order_by('role_name')
     data = [{'id': r.id, 'role_name': r.role_name} for r in roles]
     return JsonResponse(data, safe=False)
+
+
+def login_user(request):
+    """Render and handle the login page."""
+    from .models import Role
+    Role.objects.get_or_create(role_name='MANAGER')
+    
+    if request.user.is_authenticated:
+        return redirect('/')
+        
+    error = None
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        next_url = request.POST.get('next', '/') or '/'
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            return redirect(next_url)
+        else:
+            error = "Tài khoản hoặc mật khẩu không chính xác."
+            
+    next_url = request.GET.get('next', '/')
+    return render(request, 'contracts/login.html', {
+        'error': error,
+        'next': next_url
+    })
+
+
+def signup_user(request):
+    """Render and handle the signup page."""
+    from .models import Company, Role, User
+    Role.objects.get_or_create(role_name='MANAGER')
+    
+    if request.user.is_authenticated:
+        return redirect('/')
+        
+    error = None
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+        company_id = request.POST.get('company_id')
+        role_id = request.POST.get('role_id')
+        
+        if not username or not email or not password or not company_id or not role_id:
+            error = "Vui lòng điền đầy đủ các trường thông tin."
+        elif User.objects.filter(username=username).exists():
+            error = "Tên đăng nhập đã tồn tại."
+        elif User.objects.filter(email=email).exists():
+            error = "Email đã được sử dụng."
+        else:
+            try:
+                company = Company.objects.get(id=company_id)
+                role = Role.objects.get(id=role_id)
+                
+                # Create the user in database
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=password,
+                    company=company,
+                    role=role,
+                    status='ACTIVE'
+                )
+                
+                # Register on the blockchain-service
+                try:
+                    import requests
+                    resp = requests.post(f"{_BC_URL}/user/register/", json={
+                        'user_id': user.id,
+                        'username': username,
+                        'company_id': company.id,
+                        'role': role.role_name,
+                        'status': 'ACTIVE',
+                        'sender': 'System'
+                    }, timeout=15)
+                    
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        user.tx_hash = data.get('tx_hash')
+                        user.block_number = data.get('block_number')
+                        user.block_hash = data.get('block_hash')
+                        user.save()
+                        
+                        # Automatically issue a digital certificate for the new user
+                        try:
+                            import random
+                            clean_company_name = "".join(x for x in company.company_name.upper() if x.isalnum() or x == ' ')
+                            serial_number = f"CERT-{clean_company_name.replace(' ', '-')[:8]}-{user.id:04d}-{random.randint(1000, 9999)}"
+                            requests.post(f"{_BC_URL}/certificates/create/", json={
+                                'user_id': user.id,
+                                'serial_number': serial_number,
+                                'issuer': 'ContractGuard CA',
+                                'valid_days': 365
+                            }, timeout=10)
+                        except Exception as cert_err:
+                            print(f"Warning: Failed to automatically issue certificate: {str(cert_err)}")
+                    else:
+                        user.status = 'ERROR'
+                        user.save()
+                except Exception as e:
+                    print(f"Warning: Failed to register user on blockchain: {str(e)}")
+                    user.status = 'ERROR'
+                    user.save()
+                
+                # Automatically log the user in after signing up
+                login(request, user)
+                return redirect('/')
+            except Exception as e:
+                error = f"Lỗi đăng ký: {str(e)}"
+                
+    companies = Company.objects.all().order_by('company_name')
+    roles = Role.objects.all().order_by('role_name')
+    return render(request, 'contracts/signup.html', {
+        'companies': companies,
+        'roles': roles,
+        'error': error
+    })
+
+
+def logout_user(request):
+    """Log the user out and redirect to the login page."""
+    logout(request)
+    return redirect('/login/')
 
 

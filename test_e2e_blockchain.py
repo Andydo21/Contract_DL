@@ -6,7 +6,7 @@ import uuid
 from django.utils import timezone
 
 # Setup Django environment
-sys.path.insert(0, '/app')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
@@ -27,6 +27,16 @@ def test_crypto_utils():
 def test_e2e_flow():
     print("=== Testing End-to-End Flow ===")
     client = Client()
+    
+    # Create and login a temporary superuser
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    username = f"testmgr_{uuid.uuid4().hex[:6]}"
+    password = "password123"
+    user = User.objects.create_superuser(username=username, password=password, email=f"{username}@example.com")
+    logged_in = client.login(username=username, password=password)
+    assert logged_in, "Failed to log in test user"
+    print(f"Logged in as temporary superuser: {username}")
     
     # 1. Create a contract and upload a file
     unique_code = f"TEST-{uuid.uuid4().hex[:6].upper()}"
@@ -128,8 +138,9 @@ def test_e2e_flow():
     assert tx_detail["tx_hash"] == tx_hash
     print("Verified: Transaction detail endpoint returned correct info.")
 
-    # Clean up test contract
+    # Clean up test contract and user
     contract.delete()
+    user.delete()
     print("\nE2E Flow passed successfully!\n")
 
 if __name__ == "__main__":

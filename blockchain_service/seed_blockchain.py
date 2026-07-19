@@ -20,9 +20,9 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 try:
     django.setup()
     from blockchain.models import (
-        BlockchainNetwork, SmartContract, BlockchainNode,
+        BlockchainNetwork, SmartContract,
         HashProof, BlockchainTransaction, BlockchainAudit,
-        SignatureCertificate, KeyManagement
+        SignatureCertificate
     )
     from django.utils import timezone
 except Exception as e:
@@ -85,21 +85,8 @@ def seed():
     if created:
         print("Created Ethereum SmartContract")
 
-    # 4. Ensure Blockchain Nodes
-    if not BlockchainNode.objects.filter(network=net).exists():
-        for i, (name, org) in enumerate([
-            ("Peer0Org1", "Org1MSP"),
-            ("Peer1Org1", "Org1MSP"),
-            ("Peer0Org2", "Org2MSP"),
-        ]):
-            BlockchainNode.objects.create(
-                network=net,
-                node_name=name,
-                endpoint=f"fabric-peer{i}:705{i+1}",
-                organization=org,
-                status="ACTIVE"
-            )
-        print("Created 3 Blockchain Nodes")
+    # 4. Ensure Blockchain Nodes (Skipped - model removed)
+    pass
 
     # 5. Seed SignatureCertificates for mock users (user_id = 1..5)
     user_ids = [1, 2, 3, 4, 5]
@@ -120,20 +107,8 @@ def seed():
         if created:
             print(f"  Certificate: {serial}")
 
-    # 6. Seed KeyManagement entries (per company_id)
-    for company_id in range(1, 6):
-        KeyManagement.objects.get_or_create(
-            company_id=company_id,
-            key_alias=f"company_{company_id}_signing_key",
-            defaults={
-                "key_provider": "HSM-SoftToken",
-                "key_reference": f"arn:aws:kms:ap-southeast-1:123456789:key/company-{company_id}-rsa",
-                "algorithm": "RSA-2048",
-                "key_version": 1,
-                "status": "ACTIVE"
-            }
-        )
-    print("Created KeyManagement entries for 5 companies")
+    # 6. Seed KeyManagement entries (Skipped - model removed)
+    pass
 
     # 7. Seed HashProofs and BlockchainTransactions for contract versions
     # version_ids as known from web service seeding
@@ -208,11 +183,9 @@ def seed():
     print("\n=== Blockchain seeding complete! ===")
     print(f"  Networks: {BlockchainNetwork.objects.count()}")
     print(f"  SmartContracts: {SmartContract.objects.count()}")
-    print(f"  Nodes: {BlockchainNode.objects.count()}")
     print(f"  Certificates: {SignatureCertificate.objects.count()}")
     print(f"  HashProofs: {HashProof.objects.count()}")
     print(f"  Transactions: {BlockchainTransaction.objects.count()}")
-    print(f"  KeyManagement: {KeyManagement.objects.count()}")
 
 
 if __name__ == "__main__":

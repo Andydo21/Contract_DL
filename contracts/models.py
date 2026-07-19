@@ -117,7 +117,9 @@ class Contract(models.Model):
         if latest:
             if hasattr(latest, '_prefetched_objects_cache') and 'clauses' in latest._prefetched_objects_cache:
                 return latest.clauses
+            from ai_extract.models import Clause
             return Clause.objects.filter(version=latest)
+        from ai_extract.models import Clause
         return Clause.objects.none()
 
     @property
@@ -193,38 +195,7 @@ class ContextEmbedding(models.Model):
         return f"Embedding for context {self.context_id}"
 
 
-class Clause(models.Model):
-    version = models.ForeignKey(ContractVersion, on_delete=models.CASCADE, related_name='clauses', verbose_name="Contract Version")
-    context = models.ForeignKey(ContractContext, on_delete=models.SET_NULL, null=True, blank=True, related_name='clauses', verbose_name="Contract Context")
-    clause_type = models.CharField(max_length=100, blank=True, null=True, verbose_name="Clause Type")
-    clause_title = models.CharField(max_length=255, verbose_name="Clause Title")
-    clause_content = models.TextField(verbose_name="Clause Content")
 
-    class Meta:
-        verbose_name = 'Clause'
-        verbose_name_plural = 'Clauses'
-
-    def __str__(self):
-        return f"{self.clause_title} (v{self.version.version_number})"
-
-    @property
-    def contract(self):
-        return self.version.contract
-
-
-class ExtractedEntity(models.Model):
-    clause = models.ForeignKey(Clause, on_delete=models.CASCADE, related_name='extracted_entities', verbose_name="Clause")
-    entity_type = models.CharField(max_length=100, verbose_name="Entity Type")
-    entity_value = models.TextField(verbose_name="Entity Value")
-    normalized_value = models.TextField(blank=True, null=True, verbose_name="Normalized Value")
-    confidence_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0, verbose_name="Confidence Score")
-
-    class Meta:
-        verbose_name = 'Extracted Entity'
-        verbose_name_plural = 'Extracted Entities'
-
-    def __str__(self):
-        return f"{self.entity_type}: {self.entity_value[:30]}"
 
 
 class RiskRule(models.Model):
@@ -276,7 +247,7 @@ class RiskFinding(models.Model):
         ('LOW', 'Low'),
     )
     analysis = models.ForeignKey(AIAnalysis, on_delete=models.CASCADE, related_name='findings', verbose_name="AI Analysis")
-    clause = models.ForeignKey(Clause, on_delete=models.SET_NULL, null=True, blank=True, related_name='findings', verbose_name="Associated Clause")
+    clause = models.ForeignKey("ai_extract.Clause", on_delete=models.SET_NULL, null=True, blank=True, related_name='findings', verbose_name="Associated Clause")
     rule = models.ForeignKey(RiskRule, on_delete=models.PROTECT, related_name='findings', verbose_name="Risk Rule")
     risk_score = models.DecimalField(max_digits=5, decimal_places=2, default=0.0, verbose_name="Risk Score")
     risk_level = models.CharField(max_length=20, choices=RISK_LEVEL_CHOICES, default='MEDIUM', verbose_name="Risk Level")

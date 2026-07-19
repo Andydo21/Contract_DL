@@ -768,3 +768,38 @@ textarea.form-control {
     background: rgba(99, 102, 241, 0.06) !important;
 }
 
+/* Panel Tab styling */
+.panel-tab-btn {
+    transition: var(--transition);
+    border: 1px solid transparent !important;
+}
+
+.panel-tab-btn.active {
+    background: rgba(99, 102, 241, 0.1) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(99, 102, 241, 0.2) !important;
+}
+
+.panel-tab-btn:not(.active):hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+/* Entity badge colors */
+.entity-type-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.entity-type-company_name { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+.entity-type-tax_code { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); }
+.entity-type-contract_value { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+.entity-type-date_effective { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+.entity-type-date_expire { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+.entity-type-party { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+.entity-type-action { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
+

@@ -8,6 +8,7 @@ from .repositories import (
     RiskRepository, AIAnalysisRepository, RiskFindingRepository,
     ReviewRepository, AuditLogRepository
 )
+from document_processor.services.document_service import DocumentService
 
 User = get_user_model()
 
@@ -63,8 +64,12 @@ class AnalysisHistoryService:
     def __init__(self):
         self.analysis_repo = AIAnalysisRepository()
 
-    def list_all_analyses(self):
-        analyses = self.analysis_repo.get_all_analyses()
+    def list_all_analyses(self, company=None):
+        if company:
+            from .models import AIAnalysis
+            analyses = AIAnalysis.objects.filter(version__contract__company=company).order_by('-created_at')
+        else:
+            analyses = self.analysis_repo.get_all_analyses()
         result = []
         for a in analyses:
             # Deduplicate findings by risk name
@@ -115,8 +120,11 @@ class ContractService:
         self.review_repo = ReviewRepository()
         self.audit_repo = AuditLogRepository()
 
-    def list_all_contracts(self):
-        contracts = self.contract_repo.get_all_contracts()
+    def list_all_contracts(self, company=None):
+        if company:
+            contracts = self.contract_repo.get_contracts_by_company(company)
+        else:
+            contracts = self.contract_repo.get_all_contracts()
         data = []
         for c in contracts:
             latest_analysis = c.ai_analyses.first()
@@ -155,10 +163,23 @@ class ContractService:
         latest_file = version.files.first()
         latest_analysis = version.ai_analyses.first()
         
-        clauses_data = [
-            {'id': cl.id, 'title': cl.clause_title, 'content': cl.clause_content}
-            for cl in version.clauses.all()
-        ]
+        clauses_data = []
+        for cl in version.ai_extract_clauses.all():
+            entities_list = [
+                {
+                    'id': ee.id,
+                    'entity_type': ee.entity_type,
+                    'entity_value': ee.entity_value,
+                    'confidence_score': float(ee.confidence_score)
+                }
+                for ee in cl.ai_extract_entities.all()
+            ]
+            clauses_data.append({
+                'id': cl.id,
+                'title': cl.clause_title,
+                'content': cl.clause_content,
+                'entities': entities_list
+            })
         
         reviews_data = []
         if latest_analysis:
@@ -198,11 +219,17 @@ class ContractService:
                 for f in latest_analysis.findings.all()
             ]
             
-        # Read original text if available (decrypting first)
+        # Read original text if available (reconstructing from ContractContext first)
         raw_content = ""
-        if latest_file and latest_file.file_path:
+        from .models import ContractContext
+        contexts = version.contexts.filter(context_type='raw_text').order_by('id')
+        if contexts.exists():
+            raw_content = "\n\n".join([ctx.content for ctx in contexts])
+            
+        if not raw_content and latest_file and latest_file.file_path:
             media_prefix = settings.MEDIA_URL
-            rel_path = latest_file.file_path
+            import urllib.parse
+            rel_path = urllib.parse.unquote(latest_file.file_path)
             if rel_path.startswith(media_prefix):
                 rel_path = rel_path[len(media_prefix):]
             
@@ -232,6 +259,17 @@ class ContractService:
                 'overall_score': float(v_analysis.overall_score) if (v_analysis and v_analysis.overall_score is not None) else None,
                 'risk_level': v_analysis.risk_level if v_analysis else 'NONE',
             })
+
+        # Fetch AI summary if exists for this version
+        from ai_extract.models import ContractSummary
+        summary_obj = ContractSummary.objects.filter(version=version).first()
+        summary_data = {
+            'id': summary_obj.id,
+            'summary': summary_obj.summary,
+            'model_id': summary_obj.model_id,
+            'created_at': summary_obj.created_at.isoformat(),
+            'updated_at': summary_obj.updated_at.isoformat(),
+        } if summary_obj else None
             
         return {
             'id': c.id,
@@ -251,7 +289,8 @@ class ContractService:
             'active_version_id': version.id,
             'active_version_number': version.version_number,
             'active_version_change_summary': version.change_summary,
-            'versions': versions_list
+            'versions': versions_list,
+            'ai_summary': summary_data
         }
 
     def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):
@@ -299,10 +338,7 @@ class ContractService:
             
         # Extract and save clauses immediately upon creation
         try:
-            raw_text = self._get_raw_content(contract, version)
-            parsed_clauses = self._split_clauses(raw_text)
-            for c_data in parsed_clauses:
-                self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+            self.extract_and_save_clauses_via_processor(version)
         except Exception as e:
             import logging
             logger = logging.getLogger("django")
@@ -348,10 +384,7 @@ class ContractService:
             self.file_repo.create_file_record(version, saved_file_path)
             
         try:
-            raw_text = self._get_raw_content(contract, version)
-            parsed_clauses = self._split_clauses(raw_text)
-            for c_data in parsed_clauses:
-                self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+            self.extract_and_save_clauses_via_processor(version)
         except Exception as e:
             import logging
             logger = logging.getLogger("django")
@@ -378,11 +411,41 @@ class ContractService:
             if not version:
                 version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
         
-        version.clauses.all().delete()
+        version.ai_extract_clauses.all().delete()
         version.ai_analyses.all().delete()
         
         self._run_ai_analysis_via_api(contract, version)
         
+        return contract
+
+    def manual_extract_contract(self, contract_id, version_id=None):
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+            
+        from .models import ContractVersion
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+            if not version:
+                version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
+        
+        # Clear existing clauses (which will cascade delete local entities)
+        from ai_extract.models import Clause
+        Clause.objects.filter(version=version).delete()
+        
+        # Run local rules/document processor clause splitting
+        self.extract_and_save_clauses_via_processor(version, force_rule_based=True)
+        for cl in Clause.objects.filter(version=version):
+            # Extract local heuristic basic entities
+            self._extract_and_save_basic_entities(cl)
+            
+        contract.status = 'DRAFT'
+        contract.save()
         return contract
 
     def submit_expert_review(self, analysis_id, comment, final_risk_level):
@@ -495,118 +558,33 @@ class ContractService:
         except requests.RequestException as e:
             raise RuntimeError(f"Workflow service error: {e}")
 
-    def _get_raw_content(self, contract, version=None):
-        if not version:
-            version = contract.latest_version
-        if not version:
-            return ""
-        latest_file = version.files.first()
-        if not latest_file or not latest_file.file_path:
-            return ""
-        
-        import os
-        from django.conf import settings
-        rel_path = latest_file.file_path
-        url_prefix = settings.MEDIA_URL
-        if rel_path.startswith(url_prefix):
-            rel_path = rel_path[len(url_prefix):]
-        physical_path = os.path.join(settings.MEDIA_ROOT, rel_path)
-        
-        if os.path.exists(physical_path):
-            try:
-                from .crypto_utils import decrypt_pdf
-                with open(physical_path, 'rb') as f:
-                    encrypted_bytes = f.read()
-                decrypted_bytes = decrypt_pdf(encrypted_bytes)
-                return decrypted_bytes.decode('utf-8', errors='ignore')
-            except Exception:
-                pass
-        return ""
-
-    def _split_clauses(self, raw_text):
-        import re
-        if not raw_text or not raw_text.strip():
-            return []
-            
-        # Standardize newlines
-        text = raw_text.replace('\r\n', '\n').replace('\r', '\n')
-        
-        # Heading match pattern (e.g. Điều 1:, Article 2., Section 3, Clause 4, 1. Title)
-        pattern = r'(?m)^(?=(?:Điều|Article|Section|Paragraph|Clause|\d+)\s*[:\.\-\d\s]+)'
-        
-        parts = re.split(pattern, text)
-        parts = [p.strip() for p in parts if p.strip()]
-        
-        clauses = []
-        for i, part in enumerate(parts):
-            lines = part.split('\n')
-            title = lines[0].strip()
-            
-            # Check if we can extract a heading prefix like "1. Title. Content"
-            match = re.match(r'^((?:Điều|Article|Section|Paragraph|Clause|\d+)\s*[:\.\-\d\s]+[^.\n]+?)\.(.*)', part, re.DOTALL)
-            if match and len(match.group(1)) < 80:
-                title = match.group(1).strip()
-                content = match.group(2).strip()
-            elif len(title) > 80 or len(lines) == 1:
-                title = f"Clause {i+1}"
-                content = part
-            else:
-                content = "\n".join(lines[1:]).strip()
-                if not content:
-                    content = title
-                    title = f"Clause {i+1}"
-            
-            clauses.append({
-                "title": title,
-                "content": content
-            })
-            
-        # Fallback to paragraph-based splitting if no structural headers matched
-        if len(clauses) <= 1:
-            paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-            clauses = []
-            for i, p in enumerate(paragraphs):
-                lines = p.split('\n')
-                first_line = lines[0].strip()
-                if len(first_line) < 60 and (":" in first_line or "-" in first_line or first_line.isupper()):
-                    title = first_line
-                    content = "\n".join(lines[1:]).strip()
-                else:
-                    title = f"Clause {i+1}"
-                    content = p
-                
-                if not content:
-                    content = title
-                    title = f"Clause {i+1}"
-                    
-                clauses.append({
-                    "title": title,
-                    "content": content
-                })
-                
-        return clauses
+    def extract_and_save_clauses_via_processor(self, version, force_rule_based=False):
+        """
+        Delegates document processing, text extraction, page saving, and clause splitting
+        to the unified ClauseExtractService.
+        """
+        from ai_extract.services import ClauseExtractService
+        extractor = ClauseExtractService()
+        extractor.extract_version(version, re_extract=True, force_rule_based=force_rule_based)
 
     def _run_ai_analysis_via_api(self, contract, version):
         import requests
         from django.conf import settings
         from decimal import Decimal
         
-        # 1. Retrieve raw text and split dynamically
-        raw_text = self._get_raw_content(contract, version)
-        parsed_clauses = self._split_clauses(raw_text)
+        # 1. Run local rules/document processor clause splitting
+        self.extract_and_save_clauses_via_processor(version)
         
-        if not parsed_clauses:
+        # 2. Save clauses and immediately pre-extract basic entities (so they exist in the DB before AI analysis)
+        clauses = list(version.ai_extract_clauses.all())
+        if not clauses:
             raise ValueError("No clauses found in contract to analyze.")
             
-        # 2. Save clauses and immediately pre-extract basic entities (so they exist in the DB before AI analysis)
-        clauses = []
-        for c_data in parsed_clauses:
-            cl = self.clause_repo.create_clause(version, c_data["title"], c_data["content"])
+        for cl in clauses:
             self._extract_and_save_basic_entities(cl)
-            clauses.append(cl)
             
         # 3. Retrieve the newly saved ExtractedEntity records to pass in the API payload
-        from .models import ExtractedEntity
+        from ai_extract.models import ExtractedEntity
         db_entities = ExtractedEntity.objects.filter(clause__in=clauses)
         
         # Retrieve existing risk rules from the database to guide the prompt
@@ -708,7 +686,7 @@ class ContractService:
         contract.save()
 
     def _extract_and_save_basic_entities(self, clause):
-        from .models import ExtractedEntity
+        from ai_extract.models import ExtractedEntity
         content_lower = clause.clause_content.lower()
         
         # 1. Identify Parties

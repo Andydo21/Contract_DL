@@ -10,6 +10,7 @@ urlpatterns = [
     path('api/contracts/create/', views.api_create_contract, name='api_create_contract'),
     path('api/contracts/<int:contract_id>/', views.api_contract_detail, name='api_contract_detail'),
     path('api/contracts/<int:contract_id>/analyze/', views.api_analyze_contract, name='api_analyze_contract'),
+    path('api/contracts/<int:contract_id>/manual-extract/', views.api_manual_extract_contract, name='api_manual_extract_contract'),
     path('api/contracts/<int:contract_id>/workflow/', views.api_push_to_workflow, name='api_push_to_workflow'),
     path('api/contracts/<int:contract_id>/workflow/status/', views.api_workflow_status, name='api_workflow_status'),
     path('api/contracts/<int:contract_id>/versions/', views.api_contract_versions, name='api_contract_versions'),
@@ -39,4 +40,7 @@ urlpatterns = [
     path('api/identity/users/', views.api_users_list, name='api_users_list'),
     path('api/identity/users/register/', views.api_register_user, name='api_register_user'),
     path('api/identity/roles/', views.api_roles_list, name='api_roles_list'),
+    path('login/', views.login_user, name='login'),
+    path('signup/', views.signup_user, name='signup'),
+    path('logout/', views.logout_user, name='logout'),
 ]
