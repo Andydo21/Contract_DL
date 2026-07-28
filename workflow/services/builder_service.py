@@ -1,86 +1,142 @@
+from workflow.constants import StepMeta
+from workflow.exceptions import WorkflowServiceException
+
+
 class DynamicWorkflowBuilderService:
     """
-    Placeholder service for AI-powered dynamic workflow generation.
-    Returns mock data. Will be replaced with real AI inference later.
+    Generates a dynamic workflow pipeline from contract data and
+    a set of configurable business rules.
+
+    Currently returns deterministic mock data.  The public interface
+    (``build``) is stable and will accept the same arguments when
+    real AI-based step ordering is introduced.
     """
 
-    @staticmethod
-    def build(contract_data, business_rules=None):
+    def build(self, contract_data: dict, business_rules: dict = None) -> dict:
         """
-        Generate a mock dynamic workflow based on contract data and business rules.
-        In the future, this will use an AI model to dynamically construct
-        the workflow graph with optimal step ordering and owner assignment.
+        Generate a workflow pipeline for the given contract and rules.
 
         Args:
-            contract_data (dict): Contract metadata and content.
-            business_rules (dict): Optional business rules constraints.
+            contract_data:  Dict containing contract metadata (unused
+                            by the mock but forwarded to the future
+                            AI engine).
+            business_rules: Dict of boolean rule flags.
 
         Returns:
-            dict: Mock dynamic workflow payload.
+            dict with keys: workflow, total_estimated_days, generated_from.
+
+        Raises:
+            WorkflowServiceException: if step construction fails.
         """
-        business_rules = business_rules or {}
-        require_legal = business_rules.get('require_legal_review', True)
-        require_finance = business_rules.get('require_finance_review', True)
-        require_ceo = business_rules.get('require_ceo_approval', False)
-        auto_archive = business_rules.get('auto_archive', True)
+        try:
+            rules = business_rules or {}
+            steps, total_days = self._build_steps(rules)
+            return {
+                'workflow': steps,
+                'total_estimated_days': total_days,
+                'generated_from': 'mock_ai_builder_v1',
+            }
+        except Exception as exc:
+            raise WorkflowServiceException(
+                f"Builder service failed: {exc}"
+            ) from exc
 
+    # ── Private helpers ────────────────────────────────────────────────────
+
+    def _build_steps(self, rules: dict):
+        """Construct the ordered step list from business rule flags."""
         steps = []
-        day_offset = 0
+        total_days = 0
 
-        if require_legal:
-            steps.append({
-                'step': 'Legal Review',
-                'owner': 'Legal Department',
-                'estimated_days': 2,
-            })
-            day_offset += 2
+        if rules.get('require_legal_review', True):
+            steps.append(self._make_step(
+                StepMeta.LEGAL_REVIEW,
+                StepMeta.OWNER_LEGAL,
+                StepMeta.DAYS_LEGAL,
+            ))
+            total_days += StepMeta.DAYS_LEGAL
 
-        if require_finance:
-            steps.append({
-                'step': 'Finance Review',
-                'owner': 'Finance Department',
-                'estimated_days': 1,
-            })
-            day_offset += 1
+        # nda_required: insert NDA-specific review directly after Legal Review
+        if rules.get('nda_required', False):
+            steps.append(self._make_step(
+                StepMeta.NDA_REVIEW,
+                StepMeta.OWNER_LEGAL,
+                StepMeta.DAYS_NDA_REVIEW,
+            ))
+            total_days += StepMeta.DAYS_NDA_REVIEW
 
-        steps.append({
-            'step': 'Manager Approval',
-            'owner': 'Department Manager',
-            'estimated_days': 1,
-        })
-        day_offset += 1
+        # personal_data: insert a privacy / GDPR assessment step
+        if rules.get('personal_data', False):
+            steps.append(self._make_step(
+                StepMeta.PRIVACY_ASSESSMENT,
+                StepMeta.OWNER_DPO,
+                StepMeta.DAYS_PRIVACY_ASSESSMENT,
+            ))
+            total_days += StepMeta.DAYS_PRIVACY_ASSESSMENT
 
-        if require_ceo:
-            steps.append({
-                'step': 'Director Approval',
-                'owner': 'Director / VP',
-                'estimated_days': 2,
-            })
-            day_offset += 2
+        # international: insert a cross-border compliance review
+        if rules.get('international', False):
+            steps.append(self._make_step(
+                StepMeta.CROSS_BORDER_COMPLIANCE,
+                StepMeta.OWNER_COMPLIANCE,
+                StepMeta.DAYS_CROSS_BORDER,
+            ))
+            total_days += StepMeta.DAYS_CROSS_BORDER
 
-            steps.append({
-                'step': 'CEO Approval',
-                'owner': 'CEO',
-                'estimated_days': 1,
-            })
-            day_offset += 1
+        if rules.get('require_finance_review', True):
+            steps.append(self._make_step(
+                StepMeta.FINANCE_REVIEW,
+                StepMeta.OWNER_FINANCE,
+                StepMeta.DAYS_FINANCE,
+            ))
+            total_days += StepMeta.DAYS_FINANCE
 
-        steps.append({
-            'step': 'Contract Signing',
-            'owner': 'Authorized Signers',
-            'estimated_days': 1,
-        })
-        day_offset += 1
+        # Manager approval is always required
+        steps.append(self._make_step(
+            StepMeta.MANAGER_APPROVAL,
+            StepMeta.OWNER_MANAGER,
+            StepMeta.DAYS_MANAGER,
+        ))
+        total_days += StepMeta.DAYS_MANAGER
 
-        if auto_archive:
-            steps.append({
-                'step': 'Archive',
-                'owner': 'System',
-                'estimated_days': 0,
-            })
+        if rules.get('require_ceo_approval', False):
+            steps.append(self._make_step(
+                StepMeta.DIRECTOR_APPROVAL,
+                StepMeta.OWNER_DIRECTOR,
+                StepMeta.DAYS_DIRECTOR,
+            ))
+            total_days += StepMeta.DAYS_DIRECTOR
 
+            steps.append(self._make_step(
+                StepMeta.CEO_APPROVAL,
+                StepMeta.OWNER_CEO,
+                StepMeta.DAYS_CEO,
+            ))
+            total_days += StepMeta.DAYS_CEO
+
+        # Contract signing is always required
+        steps.append(self._make_step(
+            StepMeta.CONTRACT_SIGNING,
+            StepMeta.OWNER_SIGNERS,
+            StepMeta.DAYS_SIGNING,
+        ))
+        total_days += StepMeta.DAYS_SIGNING
+
+        if rules.get('auto_archive', True):
+            steps.append(self._make_step(
+                StepMeta.ARCHIVE,
+                StepMeta.OWNER_SYSTEM,
+                StepMeta.DAYS_ARCHIVE,
+            ))
+
+        return steps, total_days
+
+    @staticmethod
+    def _make_step(name: str, owner: str, estimated_days: int) -> dict:
+        """Create a single step dict in the canonical API format."""
         return {
-            'workflow': steps,
-            'total_estimated_days': day_offset,
-            'generated_from': 'mock_ai_builder_v1',
+            'step': name,
+            'owner': owner,
+            'estimated_days': estimated_days,
         }
+

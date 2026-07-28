@@ -41,7 +41,73 @@
 
     let currentWorkflowData = null;
 
+    /* ── Handoff Pre-population ── */
+    (function applyHandoff() {
+        if (typeof WorkflowHandoff === 'undefined') return;
+        const handoff = WorkflowHandoff.load();
+        if (!handoff) return;
+        WorkflowHandoff.clear();   // consume once
+
+        // Show a contextual banner
+        const header = document.querySelector('.topbar');
+        if (header) {
+            const srcLabel = handoff.source === 'recommendation' ? 'Recommendation' : 'Template';
+            const srcHref  = handoff.source === 'recommendation'
+                ? '/workflow/recommend/'
+                : (handoff.templateId ? '/workflow/templates/' : '/workflow/templates/');
+            const banner = document.createElement('div');
+            banner.id = 'handoff-banner';
+            banner.className = 'handoff-banner';
+            banner.innerHTML = `
+                <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                Pre-filled from <strong>${escSafe(handoff.workflowName || srcLabel)}</strong> —
+                you can freely edit all steps below.
+                <a href="${srcHref}" class="handoff-back-link">
+                    <i class="fa-solid fa-arrow-left"></i> Back to ${srcLabel}
+                </a>`;
+            header.insertAdjacentElement('afterend', banner);
+        }
+
+        // Pre-fill contract title and category if available
+        if (handoff.workflowName && titleInput) {
+            titleInput.value = handoff.workflowName;
+        }
+        if (handoff.category && typeInput) {
+            // Try to match the category to a select option
+            const opts = Array.from(typeInput.options);
+            const match = opts.find(function (o) {
+                return o.value.toLowerCase().includes(handoff.category.toLowerCase()) ||
+                       (o.text || '').toLowerCase().includes(handoff.category.toLowerCase());
+            });
+            if (match) typeInput.value = match.value;
+        }
+
+        // Pre-populate workflow output directly from the template steps
+        if (handoff.steps && handoff.steps.length > 0) {
+            currentWorkflowData = {
+                workflow: handoff.steps.map(function (s) {
+                    return {
+                        step: s.step,
+                        owner: s.owner,
+                        estimated_days: s.estimated_days,
+                        priority: s.priority || 'medium',
+                    };
+                }),
+                total_estimated_days: handoff.totalDays || 0,
+                generated_from: 'template_handoff',
+            };
+            // Render immediately so user sees the pre-filled steps
+            renderWorkflow();
+            U.showToast('Builder pre-filled from ' + (handoff.source === 'recommendation' ? 'recommendation' : 'template') + '.', 'info');
+        }
+    })();
+
+    function escSafe(str) {
+        return String(str || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     /* ── Collect Data ── */
+
     function collectContractData() {
         return {
             title: titleInput.value.trim(),

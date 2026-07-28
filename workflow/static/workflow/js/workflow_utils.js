@@ -179,16 +179,21 @@ var WorkflowUtils = (function () {
        ══════════════════════════════════════════ */
 
     var STEP_META = {
-        'legal review': { icon: 'fa-scale-balanced', owner: 'Legal Department', days: 2, desc: 'Review contract terms, clauses, and legal compliance', priority: 'high' },
-        'compliance check': { icon: 'fa-clipboard-check', owner: 'Compliance Team', days: 2, desc: 'Verify regulatory compliance and policy adherence', priority: 'high' },
-        'finance review': { icon: 'fa-coins', owner: 'Finance Department', days: 1, desc: 'Validate budget allocation and payment terms', priority: 'medium' },
-        'manager approval': { icon: 'fa-user-check', owner: 'Department Manager', days: 1, desc: 'Managerial sign-off on department-level obligations', priority: 'medium' },
-        'director approval': { icon: 'fa-user-tie', owner: 'Director / VP', days: 2, desc: 'Executive review for high-impact contracts', priority: 'high' },
-        'ceo approval': { icon: 'fa-crown', owner: 'CEO', days: 1, desc: 'Final executive authorization for enterprise agreements', priority: 'critical' },
-        'contract signing': { icon: 'fa-signature', owner: 'Authorized Signers', days: 1, desc: 'Digital or physical contract execution and attestation', priority: 'high' },
-        'sign & archive': { icon: 'fa-signature', owner: 'Authorized Signers', days: 1, desc: 'Sign the contract and archive the final version', priority: 'high' },
-        'archive': { icon: 'fa-box-archive', owner: 'System', days: 0, desc: 'Secure storage and indexing in the contract repository', priority: 'low' },
+        'legal review':             { icon: 'fa-scale-balanced',    owner: 'Legal Department',          days: 2, desc: 'Review contract terms, clauses, and legal compliance',                    priority: 'high' },
+        'compliance check':         { icon: 'fa-clipboard-check',   owner: 'Compliance Team',           days: 2, desc: 'Verify regulatory compliance and policy adherence',                       priority: 'high' },
+        'finance review':           { icon: 'fa-coins',             owner: 'Finance Department',        days: 1, desc: 'Validate budget allocation and payment terms',                            priority: 'medium' },
+        'manager approval':         { icon: 'fa-user-check',        owner: 'Department Manager',        days: 1, desc: 'Managerial sign-off on department-level obligations',                    priority: 'medium' },
+        'director approval':        { icon: 'fa-user-tie',          owner: 'Director / VP',             days: 2, desc: 'Executive review for high-impact contracts',                             priority: 'high' },
+        'ceo approval':             { icon: 'fa-crown',             owner: 'CEO',                       days: 1, desc: 'Final executive authorization for enterprise agreements',                 priority: 'critical' },
+        'contract signing':         { icon: 'fa-signature',         owner: 'Authorized Signers',        days: 1, desc: 'Digital or physical contract execution and attestation',                 priority: 'high' },
+        'sign & archive':           { icon: 'fa-signature',         owner: 'Authorized Signers',        days: 1, desc: 'Sign the contract and archive the final version',                        priority: 'high' },
+        'archive':                  { icon: 'fa-box-archive',       owner: 'System',                    days: 0, desc: 'Secure storage and indexing in the contract repository',                  priority: 'low' },
+        // Business-rule-triggered steps
+        'nda review':               { icon: 'fa-file-shield',       owner: 'Legal Department',          days: 1, desc: 'Verify NDA clauses, confidentiality scope, and term duration',           priority: 'high' },
+        'privacy assessment':       { icon: 'fa-user-shield',       owner: 'Data Protection Officer',   days: 2, desc: 'GDPR / data protection impact assessment for personal data handling',    priority: 'high' },
+        'cross-border compliance':  { icon: 'fa-earth-americas',    owner: 'Compliance Team',           days: 2, desc: 'Review export controls, international trade laws, and cross-jurisdiction obligations', priority: 'high' },
     };
+
 
     function getStepMeta(stepName) {
         var key = (stepName || '').toLowerCase().trim();

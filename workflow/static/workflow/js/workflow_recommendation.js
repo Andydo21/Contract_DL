@@ -214,6 +214,7 @@
                 body: JSON.stringify(payload),
             });
             renderResult(data, payload);
+            renderIntegrationBar(data, payload);
             U.showToast('Recommendation generated successfully!', 'success');
         } catch (err) {
             // Handle Errors
@@ -225,5 +226,83 @@
             btnRecommend.querySelector('.btn-text').textContent = 'Generate Recommendation';
         }
     });
+
+    /* ── Integration Action Bar ── */
+    function renderIntegrationBar(data, payload) {
+        // Remove any previous bar
+        const existing = document.getElementById('rec-integration-bar');
+        if (existing) existing.remove();
+
+        // Build step objects with owner + days from WorkflowUtils metadata
+        const steps = (data.steps || []).map(function (stepName) {
+            const meta = U.getStepMeta(stepName);
+            return {
+                step: meta.name,
+                owner: meta.owner,
+                estimated_days: meta.days,
+                priority: meta.priority,
+            };
+        });
+
+        const departments = Array.from(new Set(
+            steps
+                .map(function (s) { return s.owner; })
+                .filter(function (o) { return o && o.toLowerCase() !== 'system'; })
+        ));
+
+        const totalDays = steps.reduce(function (sum, s) { return sum + s.estimated_days; }, 0);
+
+        const bar = document.createElement('div');
+        bar.id = 'rec-integration-bar';
+        bar.className = 'integration-bar';
+        bar.innerHTML = `
+            <div class="integration-bar-label">
+                <i class="fa-solid fa-circle-check" style="color:var(--green)"></i>
+                Recommendation ready — what would you like to do next?
+            </div>
+            <div class="integration-bar-actions">
+                <a href="/workflow/templates/" class="int-btn int-btn-secondary" id="int-btn-templates"
+                   title="Browse matching templates">
+                    <i class="fa-solid fa-layer-group"></i> View Templates
+                </a>
+                <button type="button" class="int-btn int-btn-primary" id="int-btn-customize"
+                        title="Open this recommendation in the Workflow Builder">
+                    <i class="fa-solid fa-cubes"></i> Customize in Builder
+                </button>
+                <button type="button" class="int-btn int-btn-ghost" id="int-btn-export"
+                        title="Export recommendation as JSON">
+                    <i class="fa-solid fa-file-export"></i> Export JSON
+                </button>
+            </div>`;
+
+        resultContent.appendChild(bar);
+
+        // Customize → save handoff then navigate
+        document.getElementById('int-btn-customize').addEventListener('click', function () {
+            WorkflowHandoff.save({
+                source: 'recommendation',
+                action: 'customize',
+                templateId: null,
+                workflowName: data.workflow_name || 'Recommended Workflow',
+                category: payload.contract_type || '',
+                steps: steps,
+                departments: departments,
+                totalDays: totalDays,
+            });
+            window.location.href = '/workflow/builder/';
+        });
+
+        // Export JSON
+        document.getElementById('int-btn-export').addEventListener('click', function () {
+            U.downloadJSON({
+                workflow_name: data.workflow_name,
+                confidence: data.confidence,
+                reasoning: data.reasoning,
+                steps: steps,
+                total_estimated_days: totalDays,
+                departments: departments,
+            }, 'recommendation_' + (payload.contract_type || 'workflow') + '.json');
+        });
+    }
 
 })();

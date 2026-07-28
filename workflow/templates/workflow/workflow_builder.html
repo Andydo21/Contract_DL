@@ -300,7 +300,17 @@
 
     <div class="wf-toast-container" id="toast-container" aria-live="polite"></div>
 
+    <style>
+    /* Handoff banner — injected by workflow_builder.js when arriving from another page */
+    .handoff-banner{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:11px 24px;background:rgba(99,102,241,.07);border-bottom:1px solid rgba(99,102,241,.18);font-size:13px;color:var(--text-secondary);margin-bottom:0}
+    .handoff-banner i{color:var(--accent)}
+    .handoff-banner strong{color:var(--text-main);font-weight:600}
+    .handoff-back-link{display:inline-flex;align-items:center;gap:5px;margin-left:auto;color:var(--accent);text-decoration:none;font-size:12px;font-weight:600;padding:4px 10px;border:1px solid rgba(99,102,241,.25);border-radius:6px;transition:all .2s ease}
+    .handoff-back-link:hover{background:rgba(99,102,241,.10)}
+    </style>
+
     <script src="{% static 'workflow/js/workflow_utils.js' %}"></script>
+    <script src="{% static 'workflow/js/workflow_handoff.js' %}"></script>
     <script src="{% static 'workflow/js/workflow_builder.js' %}"></script>
 </body>
 

@@ -1,0 +1,254 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Templates – Contract Guard AI</title>
+    <meta name="description" content="Browse, create, duplicate, import and export reusable workflow templates for contract management.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'workflow/css/workflow_templates.css' %}">
+</head>
+<body>
+<div class="app-shell">
+
+    <!-- ───── Sidebar ───── -->
+    <aside class="sidebar" role="navigation" aria-label="Main navigation">
+        <div class="sidebar-logo">
+            <i class="fa-solid fa-shield-halved logo-icon"></i>
+            <span class="logo-text">Contract Guard</span>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="{% url 'dashboard' %}" class="nav-item" id="nav-dashboard">
+                <i class="fa-solid fa-gauge-high"></i><span>Dashboard</span>
+            </a>
+            <a href="{% url 'analysis_history' %}" class="nav-item" id="nav-history">
+                <i class="fa-solid fa-clock-rotate-left"></i><span>Analysis History</span>
+            </a>
+            <a href="{% url 'workflow_board' %}" class="nav-item" id="nav-workflows">
+                <i class="fa-solid fa-diagram-project"></i><span>Workflows</span>
+            </a>
+            <a href="{% url 'workflow_dashboard' %}" class="nav-item active" id="nav-workflow-ai">
+                <i class="fa-solid fa-wand-magic-sparkles"></i><span>Workflow AI</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sidebar-user">
+                <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                <div class="user-info">
+                    <div class="user-name">{{ user.username|default:"Admin" }}</div>
+                    <div class="user-role">{{ user.role.role_name|default:"Legal Officer" }}</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ───── Main Content ───── -->
+    <main class="main-content" role="main">
+
+        <!-- Topbar -->
+        <header class="topbar">
+            <div>
+                <nav class="breadcrumb" aria-label="Breadcrumb">
+                    <a href="{% url 'workflow_dashboard' %}"><i class="fa-solid fa-wand-magic-sparkles"></i> Workflow AI</a>
+                    <i class="fa-solid fa-chevron-right"></i>
+                    <span>Templates</span>
+                </nav>
+                <h1 class="page-title"><i class="fa-solid fa-layer-group"></i> Workflow Templates</h1>
+                <p class="page-subtitle">Reusable workflow definitions for every contract scenario</p>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-secondary" id="btn-import" aria-label="Import template from JSON">
+                    <i class="fa-solid fa-file-import"></i> Import JSON
+                </button>
+                <button class="btn btn-primary" id="btn-create" aria-label="Create new template">
+                    <i class="fa-solid fa-plus"></i> New Template
+                </button>
+            </div>
+        </header>
+
+        <!-- ───── Toolbar ───── -->
+        <div class="templates-toolbar">
+            <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="search" class="search-input" id="tpl-search"
+                       placeholder="Search templates…" autocomplete="off" aria-label="Search templates">
+            </div>
+            <div class="filter-pills" id="filter-pills" role="group" aria-label="Filter by category">
+                <button class="filter-pill active" data-cat="all">All</button>
+                <button class="filter-pill" data-cat="Service">Service</button>
+                <button class="filter-pill" data-cat="HR">HR</button>
+                <button class="filter-pill" data-cat="Legal">Legal</button>
+                <button class="filter-pill" data-cat="Procurement">Procurement</button>
+                <button class="filter-pill" data-cat="Technology">Technology</button>
+                <button class="filter-pill" data-cat="Custom">Custom</button>
+            </div>
+            <div class="count-badge" id="count-badge"><span id="tpl-count">0</span> templates</div>
+        </div>
+
+        <!-- ───── Templates Grid ───── -->
+        <div class="templates-grid" id="templates-grid" aria-live="polite"></div>
+        <div class="templates-empty" id="templates-empty">
+            <i class="fa-solid fa-folder-open"></i>
+            <h3>No templates found</h3>
+            <p>Try changing your search or filter, or create a new template.</p>
+        </div>
+
+    </main>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     Preview Drawer
+     ═══════════════════════════════════════════ -->
+<div class="drawer-overlay" id="drawer-overlay" aria-hidden="true"></div>
+<aside class="preview-drawer" id="preview-drawer" role="complementary" aria-label="Template preview">
+    <div class="drawer-header">
+        <div>
+            <div class="drawer-title" id="drawer-title">Template Name</div>
+            <div class="drawer-subtitle" id="drawer-subtitle">Category · N steps · N days</div>
+        </div>
+        <button class="drawer-close" id="drawer-close" aria-label="Close preview">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+        <!-- Summary -->
+        <div class="drawer-summary">
+            <div class="ds-item">
+                <div class="ds-value" id="ds-steps">—</div>
+                <div class="ds-label">Steps</div>
+            </div>
+            <div class="ds-item">
+                <div class="ds-value" id="ds-days">—</div>
+                <div class="ds-label">Est. Days</div>
+            </div>
+            <div class="ds-item">
+                <div class="ds-value" id="ds-depts">—</div>
+                <div class="ds-label">Departments</div>
+            </div>
+        </div>
+
+        <!-- Description -->
+        <div class="drawer-section-title"><i class="fa-solid fa-align-left"></i> Description</div>
+        <p id="ds-description" style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-bottom:24px"></p>
+
+        <!-- Timeline -->
+        <div class="drawer-section-title"><i class="fa-solid fa-list-ol"></i> Workflow Timeline</div>
+        <div class="drawer-timeline" id="drawer-timeline"></div>
+
+        <!-- Departments -->
+        <div class="drawer-section-title"><i class="fa-solid fa-building"></i> Departments Involved</div>
+        <div class="drawer-depts" id="drawer-depts"></div>
+    </div>
+    <div class="drawer-footer">
+        <button class="btn btn-primary" id="drawer-btn-customize"><i class="fa-solid fa-cubes"></i> Customize</button>
+        <button class="btn btn-secondary" id="drawer-btn-export"><i class="fa-solid fa-file-export"></i> Export JSON</button>
+        <button class="btn btn-secondary" id="drawer-btn-copy"><i class="fa-solid fa-copy"></i> Copy JSON</button>
+        <button class="btn btn-secondary" id="drawer-btn-duplicate"><i class="fa-solid fa-clone"></i> Duplicate</button>
+    </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════
+     Create Template Modal
+     ═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="create-modal" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div class="modal-title" id="create-modal-title"><i class="fa-solid fa-plus"></i> New Workflow Template</div>
+            <button class="modal-close" data-modal="create-modal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="create-form" novalidate>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="f-name">Template Name <span class="required">*</span></label>
+                        <input type="text" id="f-name" class="form-control" placeholder="e.g. Service Agreement" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="f-category">Category <span class="required">*</span></label>
+                        <select id="f-category" class="form-control">
+                            <option value="">Select category</option>
+                            <option value="Service">Service</option>
+                            <option value="HR">HR</option>
+                            <option value="Legal">Legal</option>
+                            <option value="Procurement">Procurement</option>
+                            <option value="Technology">Technology</option>
+                            <option value="Custom">Custom</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="f-desc">Description</label>
+                    <textarea id="f-desc" class="form-control form-textarea" placeholder="Describe the purpose of this workflow template…"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="f-dept">Department</label>
+                        <input type="text" id="f-dept" class="form-control" placeholder="e.g. Legal Department" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="f-duration">Est. Duration (days)</label>
+                        <input type="number" id="f-duration" class="form-control" placeholder="e.g. 7" min="1">
+                    </div>
+                </div>
+
+                <!-- Step Builder -->
+                <div class="form-group">
+                    <label class="form-label">Workflow Steps <span class="required">*</span></label>
+                    <div class="step-builder" id="step-builder">
+                        <!-- Step rows injected by JS -->
+                    </div>
+                    <button type="button" class="btn-add-step" id="btn-add-step">
+                        <i class="fa-solid fa-plus-circle"></i> Add Step
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" data-modal="create-modal">Cancel</button>
+            <button class="btn btn-primary" id="btn-create-submit"><i class="fa-solid fa-check"></i> Create Template</button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     Import Template Modal
+     ═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="import-modal" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div class="modal-title" id="import-modal-title"><i class="fa-solid fa-file-import"></i> Import Workflow Template</div>
+            <button class="modal-close" data-modal="import-modal" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="import-area" id="import-drop-zone">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <p>Drag & drop a JSON file here</p>
+                <small>or paste JSON directly below</small>
+                <input type="file" id="import-file-input" accept=".json" style="display:none">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="import-json-raw">Paste JSON</label>
+                <textarea id="import-json-raw" class="form-control form-textarea"
+                          style="min-height:160px;font-size:12px;font-family:'Courier New',monospace"
+                          placeholder='{"name":"My Template","steps":[...]}'></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" data-modal="import-modal">Cancel</button>
+            <button class="btn btn-primary" id="btn-import-submit"><i class="fa-solid fa-file-import"></i> Import</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="wf-toast-container" id="toast-container" aria-live="polite"></div>
+
+<script src="{% static 'workflow/js/workflow_utils.js' %}"></script>
+<script src="{% static 'workflow/js/workflow_handoff.js' %}"></script>
+<script src="{% static 'workflow/js/workflow_templates.js' %}"></script>
+</body>
+</html>
