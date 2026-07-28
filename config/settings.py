@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     # Custom Apps
     "contracts.apps.ContractsConfig",
     "ai_extract.apps.AiExtractConfig",
+    "workflow.apps.WorkflowConfig",
 ]
 
 MIDDLEWARE = [

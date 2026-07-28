@@ -1,0 +1,307 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Workflow Builder – Contract Guard AI</title>
+    <meta name="description" content="AI-powered dynamic workflow builder for contract approval pipelines.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'workflow/css/workflow_builder.css' %}">
+</head>
+
+<body>
+    <div class="app-shell">
+
+        <!-- ───── Sidebar ───── -->
+        <aside class="sidebar" role="navigation" aria-label="Main navigation">
+            <div class="sidebar-logo">
+                <i class="fa-solid fa-shield-halved logo-icon"></i>
+                <span class="logo-text">Contract Guard</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{% url 'dashboard' %}" class="nav-item"><i
+                        class="fa-solid fa-gauge-high"></i><span>Dashboard</span></a>
+                <a href="{% url 'analysis_history' %}" class="nav-item"><i
+                        class="fa-solid fa-clock-rotate-left"></i><span>Analysis History</span></a>
+                <a href="{% url 'workflow_board' %}" class="nav-item"><i
+                        class="fa-solid fa-diagram-project"></i><span>Workflows</span></a>
+                <a href="{% url 'workflow_dashboard' %}" class="nav-item active"><i
+                        class="fa-solid fa-wand-magic-sparkles"></i><span>Workflow AI</span></a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                    <div class="user-info">
+                        <div class="user-name">{{ user.username|default:"Admin" }}</div>
+                        <div class="user-role">{{ user.role.role_name|default:"Legal Officer" }}</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ───── Main ───── -->
+        <main class="main-content" role="main">
+
+            <!-- Topbar -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <div class="breadcrumb" aria-label="Breadcrumb">
+                        <a href="{% url 'workflow_dashboard' %}"><i class="fa-solid fa-wand-magic-sparkles"></i>
+                            Workflow AI</a>
+                        <i class="fa-solid fa-chevron-right"></i>
+                        <span aria-current="page">Builder</span>
+                    </div>
+                    <h1 class="page-title"><i class="fa-solid fa-cubes"></i> Dynamic Workflow Builder</h1>
+                    <p class="page-subtitle">Generate workflows automatically based on contract characteristics</p>
+                </div>
+                <div class="topbar-right">
+                    <a href="{% url 'workflow_dashboard' %}" class="btn-back"><i class="fa-solid fa-arrow-left"></i>
+                        Back</a>
+                </div>
+            </header>
+
+            <!-- ───── Three-Column Layout ───── -->
+            <div class="builder-layout">
+
+                <!-- ───── Panel 1: Contract Input ───── -->
+                <div class="panel input-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon"><i class="fa-solid fa-file-contract"></i></div>
+                        <div>
+                            <h2 class="panel-title">Contract Input</h2>
+                            <p class="panel-subtitle">Enter contract details</p>
+                        </div>
+                    </div>
+                    <form id="builder-form" class="builder-form" novalidate>
+                        <div class="form-group">
+                            <label class="form-label" for="build-title">Contract Title</label>
+                            <input type="text" id="build-title" name="title" class="form-control"
+                                placeholder="e.g. Vendor Supply Agreement">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="build-type">Contract Type</label>
+                                <select id="build-type" name="contract_type" class="form-control">
+                                    <option value="">Select type...</option>
+                                    <option value="procurement">Procurement</option>
+                                    <option value="service">Service Agreement</option>
+                                    <option value="nda">NDA / Non-Disclosure</option>
+                                    <option value="lease">Lease / Rental</option>
+                                    <option value="employment">Employment</option>
+                                    <option value="partnership">Partnership</option>
+                                    <option value="licensing">Software Licensing</option>
+                                    <option value="consulting">Consulting</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="build-department">Department</label>
+                                <select id="build-department" name="department" class="form-control">
+                                    <option value="">Select...</option>
+                                    <option value="legal">Legal</option>
+                                    <option value="finance">Finance</option>
+                                    <option value="engineering">Engineering</option>
+                                    <option value="operations">Operations</option>
+                                    <option value="hr">Human Resources</option>
+                                    <option value="marketing">Marketing</option>
+                                    <option value="sales">Sales</option>
+                                    <option value="procurement">Procurement</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="build-value">Contract Value ($)</label>
+                                <input type="text" id="build-value" name="contract_value" class="form-control"
+                                    placeholder="0" inputmode="numeric">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="build-risk">Risk Level</label>
+                                <select id="build-risk" name="risk_level" class="form-control">
+                                    <option value="LOW">Low</option>
+                                    <option value="MEDIUM" selected>Medium</option>
+                                    <option value="HIGH">High</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="build-content">Contract Content</label>
+                            <textarea id="build-content" name="content" class="form-control form-textarea"
+                                placeholder="Paste contract clauses or key terms..."></textarea>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ───── Panel 2: Business Rules ───── -->
+                <div class="panel rules-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon rules-icon"><i class="fa-solid fa-gears"></i></div>
+                        <div>
+                            <h2 class="panel-title">Business Rules</h2>
+                            <p class="panel-subtitle">Configure approval constraints</p>
+                        </div>
+                    </div>
+
+                    <div class="rules-list" role="group" aria-label="Business rules toggles">
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-scale-balanced rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">Legal Review</div>
+                                    <div class="rule-desc">Route through legal department</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-legal"><input type="checkbox" id="rule-legal" checked><span
+                                    class="toggle-track"><span class="toggle-thumb"></span></span></label>
+                        </div>
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-coins rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">Finance Review</div>
+                                    <div class="rule-desc">Route through finance department</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-finance"><input type="checkbox" id="rule-finance"
+                                    checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+                        </div>
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-crown rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">CEO Approval</div>
+                                    <div class="rule-desc">Escalate to executive level</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-ceo"><input type="checkbox" id="rule-ceo"><span
+                                    class="toggle-track"><span class="toggle-thumb"></span></span></label>
+                        </div>
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-box-archive rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">Auto Archive</div>
+                                    <div class="rule-desc">Archive on completion</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-archive"><input type="checkbox" id="rule-archive"
+                                    checked><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+                        </div>
+
+                        <div class="rules-divider"><span>Additional Rules</span></div>
+
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-globe rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">International Contract</div>
+                                    <div class="rule-desc">Cross-border compliance checks</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-international"><input type="checkbox"
+                                    id="rule-international"><span class="toggle-track"><span
+                                        class="toggle-thumb"></span></span></label>
+                        </div>
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-user-shield rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">Contains Personal Data</div>
+                                    <div class="rule-desc">GDPR / privacy review required</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-personal-data"><input type="checkbox"
+                                    id="rule-personal-data"><span class="toggle-track"><span
+                                        class="toggle-thumb"></span></span></label>
+                        </div>
+                        <div class="rule-item">
+                            <div class="rule-info"><i class="fa-solid fa-file-shield rule-ico"></i>
+                                <div>
+                                    <div class="rule-name">NDA Required</div>
+                                    <div class="rule-desc">Add non-disclosure step</div>
+                                </div>
+                            </div>
+                            <label class="toggle" for="rule-nda"><input type="checkbox" id="rule-nda"><span
+                                    class="toggle-track"><span class="toggle-thumb"></span></span></label>
+                        </div>
+                    </div>
+
+                    <div class="rules-actions">
+                        <button type="button" class="btn btn-generate" id="btn-generate" aria-label="Generate workflow">
+                            <i class="fa-solid fa-wand-magic-sparkles btn-icon"></i>
+                            <span class="btn-text">Generate Workflow</span>
+                        </button>
+                        <button type="button" class="btn btn-reset" id="btn-reset" aria-label="Reset builder">
+                            <i class="fa-solid fa-rotate-left"></i>
+                            <span>Reset</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ───── Panel 3: Workflow Preview ───── -->
+                <div class="panel output-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon output-icon"><i class="fa-solid fa-timeline"></i></div>
+                        <div>
+                            <h2 class="panel-title">Workflow Preview</h2>
+                            <p class="panel-subtitle">AI-generated approval pipeline</p>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="state-empty" id="output-empty">
+                        <div class="empty-illustration">
+                            <div class="empty-circle">
+                                <div class="empty-circle-inner"><i class="fa-solid fa-cubes"></i></div>
+                            </div>
+                            <div class="empty-dots"><span></span><span></span><span></span></div>
+                        </div>
+                        <h3>No workflow generated</h3>
+                        <p>Configure contract details and business rules, then click <strong>Generate Workflow</strong>.
+                        </p>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div class="state-loading wf-hidden" id="output-loading">
+                        <div class="loading-spinner">
+                            <div class="spinner-ring"></div><i class="fa-solid fa-cubes spinner-icon"></i>
+                        </div>
+                        <p class="wf-loading-text">Building Workflow...</p>
+                        <div class="skeleton-cards">
+                            <div class="skeleton-card">
+                                <div class="skeleton-bar long"></div>
+                                <div class="skeleton-bar short"></div>
+                            </div>
+                            <div class="skeleton-card">
+                                <div class="skeleton-bar medium"></div>
+                                <div class="skeleton-bar short"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result -->
+                    <div class="output-result wf-hidden" id="output-result">
+                        <div class="output-summary" id="output-summary"></div>
+                        <div class="output-steps" id="output-steps"></div>
+                        <div class="output-actions">
+                            <button type="button" class="btn btn-export" id="btn-export" aria-label="Export JSON"><i
+                                    class="fa-solid fa-download"></i><span>Export JSON</span></button>
+                            <button type="button" class="btn btn-copy" id="btn-copy" aria-label="Copy JSON"><i
+                                    class="fa-solid fa-copy"></i><span>Copy JSON</span></button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+    <div class="wf-toast-container" id="toast-container" aria-live="polite"></div>
+
+    <script src="{% static 'workflow/js/workflow_utils.js' %}"></script>
+    <script src="{% static 'workflow/js/workflow_builder.js' %}"></script>
+</body>
+
+</html>

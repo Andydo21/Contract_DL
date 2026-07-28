@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('contracts.urls')),
     path('api/ai/', include('ai_extract.urls')),
+    path('workflow/', include('workflow.urls')),
 ]
 
 if settings.DEBUG:

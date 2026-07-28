@@ -1,0 +1,185 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow AI – Contract Guard AI</title>
+    <meta name="description"
+        content="AI-powered workflow recommendation and dynamic workflow builder for contract management.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'workflow/css/workflow_dashboard.css' %}">
+</head>
+
+<body>
+    <div class="app-shell">
+
+        <!-- ───── Sidebar ───── -->
+        <aside class="sidebar" role="navigation" aria-label="Main navigation">
+            <div class="sidebar-logo">
+                <i class="fa-solid fa-shield-halved logo-icon"></i>
+                <span class="logo-text">Contract Guard</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{% url 'dashboard' %}" class="nav-item" id="nav-dashboard">
+                    <i class="fa-solid fa-gauge-high"></i><span>Dashboard</span>
+                </a>
+                <a href="{% url 'analysis_history' %}" class="nav-item" id="nav-history">
+                    <i class="fa-solid fa-clock-rotate-left"></i><span>Analysis History</span>
+                </a>
+                <a href="{% url 'workflow_board' %}" class="nav-item" id="nav-workflows">
+                    <i class="fa-solid fa-diagram-project"></i><span>Workflows</span>
+                </a>
+                <a href="{% url 'workflow_dashboard' %}" class="nav-item active" id="nav-workflow-ai">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i><span>Workflow AI</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                    <div class="user-info">
+                        <div class="user-name">{{ user.username|default:"Admin" }}</div>
+                        <div class="user-role">{{ user.role.role_name|default:"Legal Officer" }}</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ───── Main Content ───── -->
+        <main class="main-content" role="main">
+
+            <!-- Topbar -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 class="page-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Workflow AI</h1>
+                    <p class="page-subtitle">Intelligent contract workflow management powered by AI</p>
+                </div>
+                <div class="topbar-right">
+                    <div class="ai-badge"><i class="fa-solid fa-microchip"></i><span>AI-Powered</span></div>
+                </div>
+            </header>
+
+            <!-- ───── Welcome Banner ───── -->
+            <section class="welcome-banner" id="welcome-banner">
+                <div class="banner-glow"></div>
+                <div class="banner-content">
+                    <div class="banner-icon-wrap"><i class="fa-solid fa-brain"></i></div>
+                    <div class="banner-text">
+                        <h2 class="banner-title">Welcome to Workflow AI</h2>
+                        <p class="banner-desc">Leverage AI to recommend optimal approval workflows, dynamically build
+                            custom pipelines, and accelerate your contract lifecycle. Select a feature below to get
+                            started.</p>
+                    </div>
+                </div>
+                <button class="banner-dismiss" id="banner-dismiss" aria-label="Dismiss banner"><i
+                        class="fa-solid fa-xmark"></i></button>
+            </section>
+
+            <!-- ───── Statistics Cards ───── -->
+            <section class="stats-grid" aria-label="Workflow statistics">
+                <div class="stat-card" id="stat-templates">
+                    <div class="stat-icon-wrap stat-icon-purple"><i class="fa-solid fa-layer-group"></i></div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="sv-templates">12</div>
+                        <div class="stat-label">Total Templates</div>
+                    </div>
+                    <div class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> +3</div>
+                </div>
+                <div class="stat-card" id="stat-recommended">
+                    <div class="stat-icon-wrap stat-icon-cyan"><i class="fa-solid fa-lightbulb"></i></div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="sv-recommended">8</div>
+                        <div class="stat-label">Recommended Today</div>
+                    </div>
+                    <div class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> +2</div>
+                </div>
+                <div class="stat-card" id="stat-dynamic">
+                    <div class="stat-icon-wrap stat-icon-violet"><i class="fa-solid fa-cubes"></i></div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="sv-dynamic">24</div>
+                        <div class="stat-label">Dynamic Workflows</div>
+                    </div>
+                    <div class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> +5</div>
+                </div>
+                <div class="stat-card" id="stat-confidence">
+                    <div class="stat-icon-wrap stat-icon-green"><i class="fa-solid fa-chart-line"></i></div>
+                    <div class="stat-body">
+                        <div class="stat-value" id="sv-confidence">91<span class="stat-unit">%</span></div>
+                        <div class="stat-label">Avg. Confidence</div>
+                    </div>
+                    <div class="stat-trend up"><i class="fa-solid fa-arrow-trend-up"></i> +1.2%</div>
+                </div>
+            </section>
+
+            <!-- ───── Two-Column: Features + Activity ───── -->
+            <div class="dashboard-grid">
+
+                <!-- Quick Actions -->
+                <section class="panel quick-actions-panel" aria-label="Quick actions">
+                    <div class="panel-header">
+                        <div class="panel-icon"><i class="fa-solid fa-bolt"></i></div>
+                        <h2 class="panel-title">Quick Actions</h2>
+                    </div>
+                    <div class="actions-grid">
+                        <a href="{% url 'workflow_recommendation' %}" class="action-card recommend-action"
+                            id="action-recommend">
+                            <div class="action-icon-wrap recommend-icon-bg"><i class="fa-solid fa-lightbulb"></i></div>
+                            <div class="action-body">
+                                <h3 class="action-title">Workflow Recommendation</h3>
+                                <p class="action-desc">AI recommends the best approval pipeline for your contract based
+                                    on type, value, and risk.</p>
+                            </div>
+                            <div class="action-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                        </a>
+                        <a href="{% url 'workflow_builder' %}" class="action-card builder-action" id="action-builder">
+                            <div class="action-icon-wrap builder-icon-bg"><i class="fa-solid fa-cubes"></i></div>
+                            <div class="action-body">
+                                <h3 class="action-title">Dynamic Workflow Builder</h3>
+                                <p class="action-desc">Generate custom approval workflows automatically based on
+                                    configurable business rules.</p>
+                            </div>
+                            <div class="action-arrow"><i class="fa-solid fa-arrow-right"></i></div>
+                        </a>
+                        <div class="action-card disabled-action" id="action-settings">
+                            <div class="action-icon-wrap settings-icon-bg"><i class="fa-solid fa-sliders"></i></div>
+                            <div class="action-body">
+                                <h3 class="action-title">AI Settings <span class="coming-soon-badge">Coming Soon</span>
+                                </h3>
+                                <p class="action-desc">Configure AI model parameters, confidence thresholds, and
+                                    notification preferences.</p>
+                            </div>
+                            <div class="action-arrow"><i class="fa-solid fa-lock"></i></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recent Activity -->
+                <section class="panel activity-panel" aria-label="Recent activity">
+                    <div class="panel-header">
+                        <div class="panel-icon activity-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                        <h2 class="panel-title">Recent Activity</h2>
+                    </div>
+                    <div class="activity-list" id="activity-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="wf-toast-container" id="toast-container" aria-live="polite"></div>
+
+    <script src="{% static 'workflow/js/workflow_utils.js' %}"></script>
+    <script src="{% static 'workflow/js/workflow_dashboard.js' %}"></script>
+</body>
+
+</html>

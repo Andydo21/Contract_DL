@@ -1,0 +1,274 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Recommendation – Contract Guard AI</title>
+    <meta name="description" content="AI-powered workflow recommendation engine for contract approval pipelines.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'workflow/css/workflow_recommendation.css' %}">
+</head>
+
+<body>
+    <div class="app-shell">
+
+        <!-- ───── Sidebar ───── -->
+        <aside class="sidebar" role="navigation" aria-label="Main navigation">
+            <div class="sidebar-logo">
+                <i class="fa-solid fa-shield-halved logo-icon"></i>
+                <span class="logo-text">Contract Guard</span>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{% url 'dashboard' %}" class="nav-item"><i
+                        class="fa-solid fa-gauge-high"></i><span>Dashboard</span></a>
+                <a href="{% url 'analysis_history' %}" class="nav-item"><i
+                        class="fa-solid fa-clock-rotate-left"></i><span>Analysis History</span></a>
+                <a href="{% url 'workflow_board' %}" class="nav-item"><i
+                        class="fa-solid fa-diagram-project"></i><span>Workflows</span></a>
+                <a href="{% url 'workflow_dashboard' %}" class="nav-item active"><i
+                        class="fa-solid fa-wand-magic-sparkles"></i><span>Workflow AI</span></a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sidebar-user">
+                    <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                    <div class="user-info">
+                        <div class="user-name">{{ user.username|default:"Admin" }}</div>
+                        <div class="user-role">{{ user.role.role_name|default:"Legal Officer" }}</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ───── Main ───── -->
+        <main class="main-content" role="main">
+
+            <!-- Topbar -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <div class="breadcrumb" aria-label="Breadcrumb">
+                        <a href="{% url 'workflow_dashboard' %}"><i class="fa-solid fa-wand-magic-sparkles"></i>
+                            Workflow AI</a>
+                        <i class="fa-solid fa-chevron-right"></i>
+                        <span aria-current="page">Recommendation</span>
+                    </div>
+                    <h1 class="page-title"><i class="fa-solid fa-lightbulb"></i> Workflow Recommendation</h1>
+                    <p class="page-subtitle">AI recommends the optimal approval workflow for your contract</p>
+                </div>
+                <div class="topbar-right">
+                    <a href="{% url 'workflow_dashboard' %}" class="btn-back"><i class="fa-solid fa-arrow-left"></i>
+                        Back</a>
+                </div>
+            </header>
+
+            <!-- ───── Two-Column Layout ───── -->
+            <div class="rec-layout">
+
+                <!-- ───── LEFT: Input Panel ───── -->
+                <div class="panel input-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon"><i class="fa-solid fa-file-contract"></i></div>
+                        <div>
+                            <h2 class="panel-title">Contract Information</h2>
+                            <p class="panel-subtitle">Enter contract details for AI analysis</p>
+                        </div>
+                    </div>
+
+                    <form id="recommend-form" class="rec-form" novalidate>
+                        <div class="form-group">
+                            <label class="form-label" for="rec-title">Contract Title <span
+                                    class="required">*</span></label>
+                            <input type="text" id="rec-title" name="title" class="form-control"
+                                placeholder="e.g. Enterprise Software License Agreement" required aria-required="true">
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="rec-type">Contract Type <span
+                                        class="required">*</span></label>
+                                <select id="rec-type" name="contract_type" class="form-control" required
+                                    aria-required="true">
+                                    <option value="">Select type...</option>
+                                    <option value="procurement">Procurement</option>
+                                    <option value="service">Service Agreement</option>
+                                    <option value="nda">NDA / Non-Disclosure</option>
+                                    <option value="lease">Lease / Rental</option>
+                                    <option value="employment">Employment</option>
+                                    <option value="partnership">Partnership</option>
+                                    <option value="licensing">Software Licensing</option>
+                                    <option value="consulting">Consulting</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="rec-department">Department</label>
+                                <select id="rec-department" name="department" class="form-control">
+                                    <option value="">Select department...</option>
+                                    <option value="legal">Legal</option>
+                                    <option value="finance">Finance</option>
+                                    <option value="engineering">Engineering</option>
+                                    <option value="operations">Operations</option>
+                                    <option value="hr">Human Resources</option>
+                                    <option value="marketing">Marketing</option>
+                                    <option value="sales">Sales</option>
+                                    <option value="procurement">Procurement</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="rec-value">Contract Value ($)</label>
+                                <input type="text" id="rec-value" name="contract_value" class="form-control"
+                                    placeholder="0" inputmode="numeric">
+                                <div class="field-hint" id="rec-value-formatted"></div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="rec-risk">Risk Level</label>
+                                <div class="risk-select-wrap">
+                                    <select id="rec-risk" name="risk_level" class="form-control">
+                                        <option value="LOW">Low</option>
+                                        <option value="MEDIUM" selected>Medium</option>
+                                        <option value="HIGH">High</option>
+                                    </select>
+                                    <span class="risk-badge" id="rec-risk-badge">MEDIUM</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="rec-content">Contract Content</label>
+                            <textarea id="rec-content" name="content" class="form-control form-textarea"
+                                placeholder="Paste contract content or key clauses here for analysis..."
+                                maxlength="10000"></textarea>
+                            <div class="textarea-footer">
+                                <span class="char-counter"><span id="rec-char-count">0</span> / 10,000</span>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-recommend" id="btn-recommend" disabled
+                            aria-label="Generate AI recommendation">
+                            <i class="fa-solid fa-wand-magic-sparkles btn-icon"></i>
+                            <span class="btn-text">Generate Recommendation</span>
+                        </button>
+                    </form>
+                </div>
+
+                <!-- ───── RIGHT: Result Panel ───── -->
+                <div class="panel result-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon result-icon"><i class="fa-solid fa-lightbulb"></i></div>
+                        <div>
+                            <h2 class="panel-title">Recommendation Result</h2>
+                            <p class="panel-subtitle">AI-generated workflow suggestion</p>
+                        </div>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div class="state-empty" id="result-empty">
+                        <div class="empty-illustration">
+                            <div class="empty-circle">
+                                <div class="empty-circle-inner"><i class="fa-solid fa-robot"></i></div>
+                            </div>
+                            <div class="empty-dots"><span></span><span></span><span></span></div>
+                        </div>
+                        <h3>No recommendation yet</h3>
+                        <p>Fill in the contract details and click <strong>Generate Recommendation</strong> to receive an
+                            AI-powered workflow suggestion.</p>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div class="state-loading wf-hidden" id="result-loading">
+                        <div class="loading-spinner">
+                            <div class="spinner-ring"></div><i class="fa-solid fa-brain spinner-icon"></i>
+                        </div>
+                        <p class="wf-loading-text">Generating AI Recommendation...</p>
+                        <div class="skeleton-cards">
+                            <div class="skeleton-card">
+                                <div class="skeleton-bar long"></div>
+                                <div class="skeleton-bar short"></div>
+                            </div>
+                            <div class="skeleton-card">
+                                <div class="skeleton-bar medium"></div>
+                                <div class="skeleton-bar long"></div>
+                                <div class="skeleton-bar short"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Content -->
+                    <div class="result-content wf-hidden" id="result-content">
+
+                        <!-- Header Card: Name + Confidence + Meta -->
+                        <div class="result-hero" id="result-hero">
+                            <div class="rh-top">
+                                <div class="rh-name-row">
+                                    <i class="fa-solid fa-diagram-project rh-icon"></i>
+                                    <h3 id="res-workflow-name"></h3>
+                                </div>
+                                <span class="rh-category-badge" id="res-category">Procurement</span>
+                            </div>
+                            <div class="rh-confidence">
+                                <div class="rh-conf-header">
+                                    <span>AI Confidence</span>
+                                    <span class="rh-conf-value" id="res-confidence-val">0%</span>
+                                </div>
+                                <div class="rh-conf-track">
+                                    <div class="rh-conf-fill" id="res-confidence-fill"></div>
+                                </div>
+                            </div>
+                            <div class="rh-meta-grid">
+                                <div class="rh-meta-item"><i class="fa-solid fa-calendar-days"></i>
+                                    <div><span class="rh-meta-label">Est. Duration</span><span class="rh-meta-value"
+                                            id="res-duration">—</span></div>
+                                </div>
+                                <div class="rh-meta-item"><i class="fa-solid fa-layer-group"></i>
+                                    <div><span class="rh-meta-label">Approval Level</span><span class="rh-meta-value"
+                                            id="res-approval-level">—</span></div>
+                                </div>
+                                <div class="rh-meta-item"><i class="fa-solid fa-shield-halved"></i>
+                                    <div><span class="rh-meta-label">Risk Level</span><span class="rh-meta-value"
+                                            id="res-risk-level">—</span></div>
+                                </div>
+                                <div class="rh-meta-item"><i class="fa-solid fa-building"></i>
+                                    <div><span class="rh-meta-label">Departments</span><span class="rh-meta-value"
+                                            id="res-departments">—</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Reasoning -->
+                        <div class="result-section">
+                            <h4 class="result-section-title"><i class="fa-solid fa-list-check"></i> Reasoning</h4>
+                            <div class="reasoning-grid" id="reasoning-grid"></div>
+                        </div>
+
+                        <!-- Timeline -->
+                        <div class="result-section">
+                            <h4 class="result-section-title"><i class="fa-solid fa-timeline"></i> Approval Steps</h4>
+                            <div class="rec-timeline" id="rec-timeline"></div>
+                        </div>
+
+                        <!-- Summary -->
+                        <div class="result-summary" id="result-summary"></div>
+
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div class="wf-toast-container" id="toast-container" aria-live="polite"></div>
+
+    <script src="{% static 'workflow/js/workflow_utils.js' %}"></script>
+    <script src="{% static 'workflow/js/workflow_recommendation.js' %}"></script>
+</body>
+
+</html>
