@@ -225,7 +225,8 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.style.color = '#ffffff';
             
             const targetTab = btn.dataset.tab;
-            const panes = document.querySelectorAll('.tab-pane');
+            const uploadModal = document.getElementById('upload-version-modal');
+            const panes = uploadModal ? uploadModal.querySelectorAll('.tab-pane') : document.querySelectorAll('#upload-version-modal .tab-pane');
             panes.forEach(pane => {
                 if (pane.id === targetTab) {
                     pane.style.display = 'block';
@@ -288,12 +289,30 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const analyzeBtn = document.getElementById('btn-detail-reanalyze') || document.getElementById('btn-detail-trigger-analysis');
-            if (!analyzeBtn) {
-                alert("Contract ID not found on page.");
+            const contractId = uploadForm.dataset.contractId || (document.getElementById('btn-detail-reanalyze') || document.getElementById('btn-detail-trigger-analysis') || {}).dataset?.contractId;
+            if (!contractId) {
+                showToast("Không tìm thấy ID hợp đồng trên trang.", "error");
                 return;
             }
-            const contractId = analyzeBtn.dataset.contractId;
+
+            const activeTabPane = uploadForm.querySelector('.tab-pane.active');
+            const isFileTab = activeTabPane && activeTabPane.id === 'file-tab';
+            
+            const formData = new FormData(uploadForm);
+            if (isFileTab) {
+                formData.delete('raw_content');
+                if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                    showToast("Vui lòng chọn một tập tin hợp đồng (.pdf, .docx, .txt).", "warning");
+                    return;
+                }
+            } else {
+                formData.delete('file');
+                const rawContentVal = (uploadForm.raw_content ? uploadForm.raw_content.value : '').trim();
+                if (!rawContentVal) {
+                    showToast("Vui lòng nhập nội dung văn bản hợp đồng.", "warning");
+                    return;
+                }
+            }
             
             if (uploadModal) uploadModal.classList.remove('active');
             
@@ -301,14 +320,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 scannerLoader.classList.add('active');
                 const scannerText = scannerLoader.querySelector('.scanner-text');
                 if (scannerText) scannerText.innerHTML = "UPLOADING & SCANNING NEW VERSION...";
-            }
-            
-            const formData = new FormData(uploadForm);
-            const activeTabPane = document.querySelector('.tab-pane.active');
-            if (activeTabPane.id === 'file-tab') {
-                formData.delete('raw_content');
-            } else {
-                formData.delete('file');
             }
             
             try {

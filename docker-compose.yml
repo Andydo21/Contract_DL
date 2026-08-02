@@ -28,8 +28,10 @@ services:
     container_name: riskdl_ai
     restart: always
     environment:
-      - KAGGLE_AI_URL=https://rummage-triangle-figurine.ngrok-free.dev
+      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
       - HF_TOKEN=${HF_TOKEN}
+    ports:
+      - "8001:8000"
     volumes:
       - ./ai_service:/app
     networks:
@@ -44,7 +46,7 @@ services:
     environment:
       - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
     ports:
-      - "8001:8000"
+      - "8004:8000"
     volumes:
       - ./ai_summary:/app
     networks:

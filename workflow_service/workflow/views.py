@@ -1,9 +1,9 @@
 import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.utils import timezone
-from .models import Workflow, WorkflowStep, Approval
+from .services import WorkflowService
 
+workflow_service = WorkflowService()
 
 def index(request):
     return JsonResponse({"status": "healthy", "service": "workflow_service"})
@@ -14,7 +14,7 @@ def list_all_workflows(request):
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    workflows = Workflow.objects.all().order_by("-id")
+    workflows = workflow_service.list_all_workflows()
     result = []
     for wf in workflows:
         result.append({
@@ -22,6 +22,8 @@ def list_all_workflows(request):
             "version_id":    wf.version_id,
             "workflow_name": wf.workflow_name,
             "status":        wf.status,
+            "workflow_type": wf.workflow_type,
+            "reasons":       wf.reasons,
             "started_at":    wf.started_at.isoformat() if wf.started_at else None,
             "completed_at":  wf.completed_at.isoformat() if wf.completed_at else None,
             "steps": [
@@ -29,8 +31,10 @@ def list_all_workflows(request):
                     "id":           st.id,
                     "step_order":   st.step_order,
                     "step_name":    st.step_name,
+                    "role_id":      st.role_id,
                     "status":       st.status,
                     "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+                    "comment":      st.approvals.order_by('-id').first().comment if st.approvals.exists() else None,
                 }
                 for st in wf.steps.order_by("step_order")
             ],
@@ -53,42 +57,34 @@ def create_workflow(request):
     workflow_name = body.get("workflow_name", "Contract Approval Workflow")
     steps_data    = body.get("steps", [])
 
+    contract_text = body.get("contract_text", "")
+    clause_types  = body.get("clause_types", [])
+    contract_type = body.get("contract_type", "")
+
     if not version_id:
         return JsonResponse({"error": "version_id is required"}, status=400)
 
-    # Chỉ cho phép 1 workflow active per version
-    if Workflow.objects.filter(version_id=version_id, status__in=["PENDING", "IN_PROGRESS"]).exists():
-        return JsonResponse({"error": "A workflow is already active for this contract version"}, status=409)
-
-    workflow = Workflow.objects.create(
-        version_id=version_id,
-        workflow_name=workflow_name,
-        status="PENDING",
-        started_at=timezone.now(),
-    )
-
-    if not steps_data:
-        steps_data = [
-            {"step_order": 1, "step_name": "Legal Review"},
-            {"step_order": 2, "step_name": "Manager Approval"},
-            {"step_order": 3, "step_name": "Sign & Archive"},
-        ]
-
-    for s in steps_data:
-        WorkflowStep.objects.create(
-            workflow=workflow,
-            step_order=s.get("step_order", 1),
-            step_name=s.get("step_name", "Review"),
-            status="PENDING",
+    try:
+        workflow = workflow_service.create_workflow(
+            version_id=version_id,
+            workflow_name=workflow_name,
+            contract_text=contract_text,
+            clause_types=clause_types,
+            contract_type=contract_type,
+            steps_data=steps_data
         )
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=409 if "active" in str(ve) else 400)
 
     return JsonResponse({
         "success":       True,
         "workflow_id":   workflow.id,
         "workflow_name": workflow.workflow_name,
         "status":        workflow.status,
+        "workflow_type": workflow.workflow_type,
+        "reasons":       workflow.reasons,
         "steps": [
-            {"id": st.id, "step_order": st.step_order, "step_name": st.step_name, "status": st.status}
+            {"id": st.id, "step_order": st.step_order, "step_name": st.step_name, "role_id": st.role_id, "status": st.status}
             for st in workflow.steps.order_by("step_order")
         ],
     }, status=201)
@@ -99,7 +95,7 @@ def get_workflow(request, version_id):
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    workflow = Workflow.objects.filter(version_id=version_id).order_by("-id").first()
+    workflow = workflow_service.get_workflow(version_id)
     if not workflow:
         return JsonResponse({"error": "No workflow found for this version"}, status=404)
 
@@ -107,6 +103,8 @@ def get_workflow(request, version_id):
         "workflow_id":   workflow.id,
         "workflow_name": workflow.workflow_name,
         "status":        workflow.status,
+        "workflow_type": workflow.workflow_type,
+        "reasons":       workflow.reasons,
         "started_at":    workflow.started_at.isoformat() if workflow.started_at else None,
         "completed_at":  workflow.completed_at.isoformat() if workflow.completed_at else None,
         "steps": [
@@ -114,8 +112,43 @@ def get_workflow(request, version_id):
                 "id":           st.id,
                 "step_order":   st.step_order,
                 "step_name":    st.step_name,
+                "role_id":      st.role_id,
                 "status":       st.status,
                 "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+                "comment":      st.approvals.order_by('-id').first().comment if st.approvals.exists() else None,
+            }
+            for st in workflow.steps.order_by("step_order")
+        ],
+    })
+
+
+def get_workflow_by_id_view(request, workflow_id):
+    """GET /workflows/detail/<workflow_id>/ — Lấy chi tiết workflow theo workflow_id."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    workflow = workflow_service.get_workflow_by_id(workflow_id)
+    if not workflow:
+        return JsonResponse({"error": "Workflow not found"}, status=404)
+
+    return JsonResponse({
+        "workflow_id":   workflow.id,
+        "workflow_name": workflow.workflow_name,
+        "status":        workflow.status,
+        "workflow_type": workflow.workflow_type,
+        "reasons":       workflow.reasons,
+        "version_id":    workflow.version_id,
+        "started_at":    workflow.started_at.isoformat() if workflow.started_at else None,
+        "completed_at":  workflow.completed_at.isoformat() if workflow.completed_at else None,
+        "steps": [
+            {
+                "id":           st.id,
+                "step_order":   st.step_order,
+                "step_name":    st.step_name,
+                "role_id":      st.role_id,
+                "status":       st.status,
+                "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+                "comment":      st.approvals.order_by('-id').first().comment if st.approvals.exists() else None,
             }
             for st in workflow.steps.order_by("step_order")
         ],
@@ -133,48 +166,24 @@ def approve_step(request, step_id):
     except Exception:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
 
-    try:
-        step = WorkflowStep.objects.get(id=step_id)
-    except WorkflowStep.DoesNotExist:
-        return JsonResponse({"error": "Step not found"}, status=404)
-
     user_id = body.get("user_id", 1)
     comment = body.get("comment", "")
     action  = body.get("action", "APPROVED")
 
-    if action not in ("APPROVED", "REJECTED"):
-        return JsonResponse({"error": "action must be APPROVED or REJECTED"}, status=400)
-
-    Approval.objects.create(
-        step=step,
-        user_id=user_id,
-        status=action,
-        comment=comment,
-        approved_at=timezone.now(),
-    )
-
-    step.status       = action
-    step.completed_at = timezone.now()
-    step.save()
-
-    workflow = step.workflow
-
-    if action == "REJECTED":
-        workflow.status       = "REJECTED"
-        workflow.completed_at = timezone.now()
-        workflow.save()
-    else:
-        if all(s.status == "APPROVED" for s in workflow.steps.all()):
-            workflow.status       = "COMPLETED"
-            workflow.completed_at = timezone.now()
-            workflow.save()
-        else:
-            workflow.status = "IN_PROGRESS"
-            workflow.save()
+    try:
+        step = workflow_service.approve_step(
+            step_id=step_id,
+            user_id=user_id,
+            action=action,
+            comment=comment
+        )
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400 if "action" in str(ve) else 404)
 
     return JsonResponse({
         "success":         True,
         "step_id":         step.id,
         "step_status":     step.status,
-        "workflow_status": workflow.status,
+        "workflow_status": step.workflow.status,
+        "version_id":      step.workflow.version_id,
     })

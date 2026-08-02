@@ -4,11 +4,12 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
-from .services import ContractService, RiskService, AnalysisHistoryService
+from .services import ContractService, RiskService, AnalysisHistoryService, WorkflowService
 
 contract_service = ContractService()
 risk_service = RiskService()
 analysis_history_service = AnalysisHistoryService()
+workflow_service = WorkflowService()
 
 def manager_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
@@ -46,6 +47,42 @@ def workflow_board(request):
     return render(request, 'contracts/workflow_board.html')
 
 
+@manager_required
+def workflow_detail(request, workflow_id):
+    """Render the workflow detail and approval page."""
+    import requests as req
+    from django.conf import settings
+    from .models import ContractVersion
+    
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+    
+    try:
+        resp = req.get(f"{workflow_url}/workflows/detail/{workflow_id}/", timeout=10)
+        resp.raise_for_status()
+        workflow_data = resp.json()
+    except Exception as e:
+        from django.http import Http404
+        raise Http404(f"Workflow details not found or microservice offline: {e}")
+        
+    version_id = workflow_data.get('version_id')
+    contract = None
+    version_number = None
+    if version_id:
+        try:
+            version = ContractVersion.objects.get(id=version_id)
+            contract = version.contract
+            version_number = version.version_number
+        except ContractVersion.DoesNotExist:
+            pass
+            
+    context = {
+        'workflow': workflow_data,
+        'contract': contract,
+        'version_number': version_number,
+    }
+    return render(request, 'contracts/workflow_detail.html', context)
+
+
 @csrf_exempt
 def api_workflow_all(request):
     """GET: Proxy — lấy tất cả workflows từ workflow-service."""
@@ -67,11 +104,48 @@ def api_approve_workflow_step(request, step_id):
     from django.conf import settings
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Authentication required.'}, status=401)
+        
     workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+    
+    # 1. Fetch step to verify role permission
+    try:
+        resp = req.get(f"{workflow_url}/workflows/all/", timeout=10)
+        resp.raise_for_status()
+        workflows = resp.json().get("workflows", [])
+        step_obj = None
+        for wf in workflows:
+            for st in wf.get("steps", []):
+                if st.get("id") == step_id:
+                    step_obj = st
+                    break
+            if step_obj:
+                break
+        
+        if not step_obj:
+            return JsonResponse({'error': 'Step not found'}, status=404)
+            
+        req_role_id = step_obj.get("role_id")
+        user = request.user
+        
+        # Verify role permission
+        if not user.is_superuser:
+            if not user.role or (user.role.id != req_role_id and user.role.role_name.upper() != 'ADMIN'):
+                return JsonResponse({
+                    'error': 'Permission Denied: You do not have the required role to approve this step.'
+                }, status=403)
+    except Exception as e:
+        return JsonResponse({'error': f'Failed to verify permissions: {e}'}, status=400)
+
     try:
         body = json.loads(request.body)
     except Exception:
         body = {}
+        
+    # Force use the logged-in user's ID
+    body['user_id'] = request.user.id
+    
     try:
         resp = req.post(
             f"{workflow_url}/workflows/steps/{step_id}/approve/",
@@ -79,7 +153,27 @@ def api_approve_workflow_step(request, step_id):
             timeout=10,
         )
         resp.raise_for_status()
-        return JsonResponse(resp.json())
+        resp_data = resp.json()
+        
+        # Synchronize contract status based on microservice workflow completion/rejection
+        if resp_data.get('success'):
+            wf_status = resp_data.get('workflow_status')
+            version_id = resp_data.get('version_id')
+            if wf_status and version_id:
+                from .models import ContractVersion
+                try:
+                    version = ContractVersion.objects.get(id=version_id)
+                    contract = version.contract
+                    if wf_status == 'COMPLETED':
+                        contract.status = 'APPROVED'
+                        contract.save()
+                    elif wf_status == 'REJECTED':
+                        contract.status = 'REJECTED'
+                        contract.save()
+                except ContractVersion.DoesNotExist:
+                    pass
+                    
+        return JsonResponse(resp_data)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
@@ -273,7 +367,7 @@ def api_push_to_workflow(request, contract_id):
             except Exception:
                 pass
         try:
-            result = contract_service.push_to_workflow(contract_id, version_id=version_id)
+            result = workflow_service.push_to_workflow(contract_id, version_id=version_id)
             return JsonResponse({'success': True, **result})
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
@@ -288,7 +382,7 @@ def api_workflow_status(request, contract_id):
     if request.method == 'GET':
         version_id = request.GET.get('version_id')
         try:
-            result = contract_service.get_workflow_status(contract_id, version_id=version_id)
+            result = workflow_service.get_workflow_status(contract_id, version_id=version_id)
             if result is None:
                 return JsonResponse({'workflow': None})
             return JsonResponse({'workflow': result})
@@ -775,6 +869,7 @@ def api_download_file(request, file_id):
     from django.http import HttpResponse, Http404
     from .models import ContractFile
     from .crypto_utils import decrypt_pdf
+    from .pdf_utils import generate_pdf_from_text
     
     try:
         cf = ContractFile.objects.get(id=file_id)
@@ -789,23 +884,116 @@ def api_download_file(request, file_id):
         rel_path = rel_path[len(media_prefix):]
         
     physical_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
-    if not os.path.exists(physical_path):
-        raise Http404("Physical file not found")
-        
+    decrypted_data = None
+    if os.path.exists(physical_path):
+        try:
+            with open(physical_path, 'rb') as f:
+                encrypted_data = f.read()
+            decrypted_data = decrypt_pdf(encrypted_data)
+        except Exception:
+            decrypted_data = None
+
+    if decrypted_data is not None:
+        if cf.file_name.lower().endswith('.pdf') and decrypted_data.startswith(b'%PDF'):
+            response = HttpResponse(decrypted_data, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{cf.file_name}"'
+            return response
+        else:
+            try:
+                text_str = decrypted_data.decode('utf-8', errors='ignore')
+            except Exception:
+                text_str = str(decrypted_data)
+    else:
+        details = contract_service.get_contract_details(cf.version.contract.id, version_id=cf.version.id) or {}
+        text_str = details.get('raw_content') or cf.version.contract.title or ''
+
+    pdf_bytes = generate_pdf_from_text(
+        title=cf.version.contract.title or cf.file_name,
+        contract_code=cf.version.contract.contract_code,
+        text_content=text_str
+    )
+    pdf_filename = os.path.splitext(cf.file_name)[0] + ".pdf"
+    if not pdf_filename.lower().endswith('.pdf'):
+        pdf_filename += '.pdf'
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{pdf_filename}"'
+    return response
+
+
+@api_manager_required
+def api_download_contract_pdf(request, contract_id):
+    from django.conf import settings
+    import os
+    from django.http import HttpResponse, Http404
+    from .models import Contract, ContractVersion
+    from .crypto_utils import decrypt_pdf
+    from .pdf_utils import generate_pdf_from_text
+
     try:
-        with open(physical_path, 'rb') as f:
-            encrypted_data = f.read()
-        decrypted_data = decrypt_pdf(encrypted_data)
-    except Exception as e:
-        return HttpResponse(f"Error decrypting file: {str(e)}", status=500)
-        
-    response = HttpResponse(decrypted_data, content_type='application/octet-stream')
-    if cf.file_name.lower().endswith('.pdf'):
-        response['Content-Type'] = 'application/pdf'
-    elif cf.file_name.lower().endswith('.txt'):
-        response['Content-Type'] = 'text/plain'
-        
-    response['Content-Disposition'] = f'attachment; filename="{cf.file_name}"'
+        c = Contract.objects.get(id=contract_id)
+        if not request.user.is_superuser and c.company != request.user.company:
+            return HttpResponse("Permission Denied: You do not have access to this contract.", status=403)
+    except Contract.DoesNotExist:
+        raise Http404("Contract not found")
+
+    version_id = request.GET.get('version_id')
+    if version_id:
+        try:
+            version = c.versions.get(id=version_id)
+        except ContractVersion.DoesNotExist:
+            version = c.latest_version
+    else:
+        version = c.latest_version
+
+    if not version:
+        raise Http404("Version not found")
+
+    latest_file = version.files.first()
+
+    if latest_file:
+        rel_path = latest_file.file_path
+        media_prefix = settings.MEDIA_URL
+        if rel_path.startswith(media_prefix):
+            rel_path = rel_path[len(media_prefix):]
+        physical_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
+        if os.path.exists(physical_path):
+            try:
+                with open(physical_path, 'rb') as f:
+                    encrypted_data = f.read()
+                decrypted_data = decrypt_pdf(encrypted_data)
+                if latest_file.file_name.lower().endswith('.pdf') and decrypted_data.startswith(b'%PDF'):
+                    response = HttpResponse(decrypted_data, content_type='application/pdf')
+                    response['Content-Disposition'] = f'attachment; filename="{latest_file.file_name}"'
+                    return response
+                else:
+                    try:
+                        text_str = decrypted_data.decode('utf-8', errors='ignore')
+                    except Exception:
+                        text_str = str(decrypted_data)
+                    pdf_bytes = generate_pdf_from_text(
+                        title=c.title,
+                        contract_code=c.contract_code,
+                        text_content=text_str
+                    )
+                    filename = f"{c.contract_code or 'contract'}_v{version.version_number}.pdf"
+                    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+                    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                    return response
+            except Exception as e:
+                return HttpResponse(f"Error reading file: {str(e)}", status=500)
+
+    details = contract_service.get_contract_details(c.id, version_id=version.id) or {}
+    raw_content = details.get('raw_content') or c.title or ''
+
+    pdf_bytes = generate_pdf_from_text(
+        title=c.title,
+        contract_code=c.contract_code,
+        text_content=raw_content
+    )
+
+    filename = f"{c.contract_code or 'contract'}_v{version.version_number}.pdf"
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 

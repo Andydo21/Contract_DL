@@ -236,6 +236,8 @@ body {
     overflow-y: auto;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-auto-rows: max-content;
+    align-items: start;
     gap: 18px;
     align-content: start;
     padding-bottom: 12px;
@@ -344,6 +346,117 @@ body {
 .badge-COMPLETED { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
 .badge-REJECTED { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
 
+/* Workflow Type Row & Badge */
+.wf-type-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: -6px;
+    margin-bottom: 2px;
+}
+
+.wf-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+}
+
+.wf-type-badge.type-wf_executive {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.25);
+    color: #fca5a5;
+}
+
+.wf-type-badge.type-wf_employment {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.25);
+    color: #86efac;
+}
+
+.wf-type-badge.type-wf_nda {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.25);
+    color: #c7d2fe;
+}
+
+.wf-type-badge.type-wf_service {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.25);
+    color: #fde047;
+}
+
+.wf-type-badge.type-wf_procurement {
+    background: rgba(6, 182, 212, 0.12);
+    border-color: rgba(6, 182, 212, 0.25);
+    color: #a5f3fc;
+}
+
+.wf-type-badge.type-wf_vendor {
+    background: rgba(236, 72, 153, 0.12);
+    border-color: rgba(236, 72, 153, 0.25);
+    color: #fbcfe8;
+}
+
+.wf-type-badge.type-wf_purchase {
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+    color: #ddd6fe;
+}
+
+.wf-type-badge.type-wf_general {
+    background: rgba(100, 116, 139, 0.12);
+    border-color: rgba(100, 116, 139, 0.25);
+    color: #cbd5e1;
+}
+
+/* AI Reasoning box */
+.wf-reasons-box {
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: var(--transition);
+}
+
+.wf-reasons-box:hover {
+    background: rgba(0, 0, 0, 0.25);
+    border-color: rgba(99, 102, 241, 0.15);
+}
+
+.wf-reasons-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #a5b4fc;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wf-reasons-body {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.reason-item {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--text-sec);
+}
+
 /* Card Meta */
 .wf-meta {
     font-size: 11.5px;
@@ -430,6 +543,18 @@ body {
 }
 
 .btn-step-action:hover { background: rgba(99,102,241,0.25); color: #fff; }
+
+.btn-step-action:disabled {
+    background: rgba(255,255,255,0.03);
+    color: var(--text-muted);
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+.btn-step-action:disabled:hover {
+    background: rgba(255,255,255,0.03);
+    color: var(--text-muted);
+}
 
 /* ── Approve Modal ──────────────────────── */
 .modal-overlay {

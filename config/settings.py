@@ -143,6 +143,13 @@ AI_SERVICE_URL = os.environ.get(
 # Kaggle Qwen AI Extract & Summarize Service
 # Points to the kaggle-qwen-service Docker container (or ngrok URL when Kaggle notebook is running)
 KAGGLE_QWEN_SERVICE_URL = os.environ.get(
-    "KAGGLE_QWEN_SERVICE_URL", "http://kaggle-qwen-service:8000"
+    "KAGGLE_QWEN_SERVICE_URL",
+    os.environ.get("KAGGLE_AI_URL", "http://kaggle-qwen-service:8000")
 )
+
+# Workflow Service URL
+WORKFLOW_SERVICE_URL = os.environ.get(
+    "WORKFLOW_SERVICE_URL", "http://localhost:8003"
+)
+
 

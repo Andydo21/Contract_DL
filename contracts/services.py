@@ -280,7 +280,7 @@ class ContractService:
             'end_date': c.end_date.isoformat() if c.end_date else None,
             'contract_value': float(c.contract_value) if c.contract_value else None,
             'status': c.status,
-            'file_path': f"/api/contracts/files/{latest_file.id}/download/" if latest_file else None,
+            'file_path': f"/api/contracts/{c.id}/download-pdf/?version_id={version.id}",
             'raw_content': raw_content,
             'clauses': clauses_data,
             'analysis': analysis_data,
@@ -471,92 +471,7 @@ class ContractService:
         
         return review
 
-    def push_to_workflow(self, contract_id, version_id=None):
-        """Đẩy contract lên workflow-service để tạo quy trình phê duyệt."""
-        import requests
-        from django.conf import settings
 
-        contract = self.contract_repo.get_contract_by_id(contract_id)
-        if not contract:
-            raise ValueError("Contract not found.")
-
-        from .models import ContractVersion
-        if version_id:
-            try:
-                version = contract.versions.get(id=version_id)
-            except ContractVersion.DoesNotExist:
-                raise ValueError("Version not found.")
-        else:
-            version = contract.latest_version
-            if not version:
-                raise ValueError("Contract has no version to push.")
-
-        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-
-        payload = {
-            "version_id":    version.id,
-            "workflow_name": f"Approval Workflow – {contract.title}",
-            "steps": [
-                {"step_order": 1, "step_name": "Legal Review"},
-                {"step_order": 2, "step_name": "Manager Approval"},
-                {"step_order": 3, "step_name": "Sign & Archive"},
-            ],
-        }
-
-        try:
-            resp = requests.post(
-                f"{workflow_url}/workflows/",
-                json=payload,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            result = resp.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"Workflow service error: {e}")
-
-        # Cập nhật trạng thái contract
-        contract.status = 'PENDING_WORKFLOW'
-        contract.save()
-
-        admin_user = User.objects.filter(is_superuser=True).first()
-        self.audit_repo.log_action(admin_user, "PUSHED_TO_WORKFLOW", "Contract", contract.id)
-
-        return {
-            "contract_id":   contract.id,
-            "workflow_id":   result.get("workflow_id"),
-            "workflow_name": result.get("workflow_name"),
-            "status":        result.get("status"),
-            "steps":         result.get("steps", []),
-        }
-
-    def get_workflow_status(self, contract_id, version_id=None):
-        """Lấy trạng thái workflow từ workflow-service."""
-        import requests
-        from django.conf import settings
-
-        contract = self.contract_repo.get_contract_by_id(contract_id)
-        if not contract:
-            raise ValueError("Contract not found.")
-
-        from .models import ContractVersion
-        if version_id:
-            try:
-                version = contract.versions.get(id=version_id)
-            except ContractVersion.DoesNotExist:
-                raise ValueError("Version not found.")
-        else:
-            version = contract.latest_version
-
-        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-
-        try:
-            resp = requests.get(f"{workflow_url}/workflows/{version.id}/", timeout=10)
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"Workflow service error: {e}")
 
     def extract_and_save_clauses_via_processor(self, version, force_rule_based=False):
         """
@@ -746,3 +661,135 @@ class ContractService:
                 entity_value=act_val,
                 defaults={"normalized_value": act_norm, "confidence_score": Decimal("0.90")}
             )
+
+
+class WorkflowService:
+    def __init__(self):
+        self.contract_repo = ContractRepository()
+        self.audit_repo = AuditLogRepository()
+
+    def push_to_workflow(self, contract_id, version_id=None):
+        """Đẩy contract lên workflow-service để tạo quy trình phê duyệt."""
+        import requests
+        import os
+        import urllib.parse
+        from django.conf import settings
+        from .models import ContractVersion, ContractContext
+
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+            if not version:
+                raise ValueError("Contract has no version to push.")
+
+        # Extract full contract text
+        raw_content = ""
+        contexts = version.contexts.filter(context_type='raw_text').order_by('id')
+        if contexts.exists():
+            raw_content = "\n\n".join([ctx.content for ctx in contexts])
+            
+        if not raw_content:
+            latest_file = version.files.first()
+            if latest_file and latest_file.file_path:
+                media_prefix = settings.MEDIA_URL
+                rel_path = urllib.parse.unquote(latest_file.file_path)
+                if rel_path.startswith(media_prefix):
+                    rel_path = rel_path[len(media_prefix):]
+                
+                full_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
+                if os.path.exists(full_path):
+                    try:
+                        from .crypto_utils import decrypt_pdf
+                        with open(full_path, 'rb') as f:
+                            encrypted_bytes = f.read()
+                        decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                        raw_content = decrypted_bytes.decode('utf-8', errors='ignore')
+                    except Exception:
+                        pass
+        
+        if not raw_content:
+            clauses = version.ai_extract_clauses.all()
+            if clauses.exists():
+                raw_content = "\n\n".join([f"--- {cl.clause_title} ---\n{cl.clause_content}" for cl in clauses])
+
+        # Extract clause types
+        clause_types = list(
+            version.ai_extract_clauses.values_list('clause_type', flat=True)
+            .exclude(clause_type__isnull=True)
+            .distinct()
+        )
+
+        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+
+        payload = {
+            "version_id":    version.id,
+            "workflow_name": f"Approval Workflow – {contract.title}",
+            "contract_text": raw_content,
+            "clause_types":  clause_types,
+            "contract_type": contract.contract_type or "",
+        }
+
+        try:
+            resp = requests.post(
+                f"{workflow_url}/workflows/",
+                json=payload,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Workflow service error: {e}")
+
+        # Cập nhật trạng thái contract
+        contract.status = 'PENDING_WORKFLOW'
+        contract.save()
+
+        admin_user = User.objects.filter(is_superuser=True).first()
+        self.audit_repo.log_action(admin_user, "PUSHED_TO_WORKFLOW", "Contract", contract.id)
+
+        return {
+            "contract_id":   contract.id,
+            "workflow_id":   result.get("workflow_id"),
+            "workflow_name": result.get("workflow_name"),
+            "status":        result.get("status"),
+            "steps":         result.get("steps", []),
+        }
+
+    def get_workflow_status(self, contract_id, version_id=None):
+        """Lấy trạng thái workflow từ workflow-service."""
+        import requests
+        from django.conf import settings
+        from .models import ContractVersion
+
+        contract = self.contract_repo.get_contract_by_id(contract_id)
+        if not contract:
+            raise ValueError("Contract not found.")
+
+        if version_id:
+            try:
+                version = contract.versions.get(id=version_id)
+            except ContractVersion.DoesNotExist:
+                raise ValueError("Version not found.")
+        else:
+            version = contract.latest_version
+            if not version:
+                return None
+
+        workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
+
+        try:
+            resp = requests.get(f"{workflow_url}/workflows/{version.id}/", timeout=10)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            raise RuntimeError(f"Workflow service error: {e}")

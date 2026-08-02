@@ -23,6 +23,8 @@ class Workflow(models.Model):
     version_id = models.BigIntegerField(verbose_name="Contract Version ID")
     workflow_name = models.CharField(max_length=255, verbose_name="Workflow Name")
     status = models.CharField(max_length=50, verbose_name="Status")
+    workflow_type = models.CharField(max_length=100, blank=True, null=True, verbose_name="Workflow Type")
+    reasons = models.TextField(blank=True, null=True, verbose_name="AI Recommendation Reasons")
     started_at = models.DateTimeField(blank=True, null=True, verbose_name="Started At")
     completed_at = models.DateTimeField(blank=True, null=True, verbose_name="Completed At")
 
@@ -40,6 +42,7 @@ class WorkflowStep(models.Model):
     step_order = models.IntegerField(verbose_name="Step Order")
     step_name = models.CharField(max_length=255, verbose_name="Step Name")
     status = models.CharField(max_length=50, verbose_name="Status")
+    description = models.TextField(blank=True, null=True, verbose_name="Description")
     completed_at = models.DateTimeField(blank=True, null=True, verbose_name="Completed At")
 
     class Meta:

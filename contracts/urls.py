@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('workflows/', views.workflow_board, name='workflow_board'),
+    path('workflows/<int:workflow_id>/', views.workflow_detail, name='workflow_detail'),
     path('contracts/<int:contract_id>/', views.contract_detail, name='contract_detail'),
     path('analyses/', views.analysis_history, name='analysis_history'),
     path('api/contracts/', views.api_contracts_list, name='api_contracts_list'),
@@ -26,6 +27,7 @@ urlpatterns = [
     path('api/blockchain/proof/<int:version_id>/', views.api_blockchain_proof, name='api_blockchain_proof'),
     path('api/blockchain/certificate/<int:user_id>/', views.api_blockchain_certificate, name='api_blockchain_certificate'),
     path('api/contracts/files/<int:file_id>/download/', views.api_download_file, name='api_download_file'),
+    path('api/contracts/<int:contract_id>/download-pdf/', views.api_download_contract_pdf, name='api_download_contract_pdf'),
     path('api/analyses/', views.api_analyses_list, name='api_analyses_list'),
     path('api/analyses/<int:analysis_id>/review/', views.api_submit_review, name='api_submit_review'),
     path('api/risks/', views.api_risks_list, name='api_risks_list'),

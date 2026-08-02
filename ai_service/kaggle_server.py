@@ -1,67 +1,58 @@
-"""
-Kaggle Notebook Server - Logic HOÀN TOÀN dựa trên main.py
-==========================================================
-Chỉ khác main.py ở 2 điểm:
-  1. Load merged model trực tiếp (float16, không cần 4-bit + PEFT)
-     vì Kaggle có GPU T4 x2 đủ VRAM.
-  2. Thêm ngrok để expose URL công khai.
-
-Cách dùng:
-  - Paste Cell 1 → Cell 4 lần lượt vào Kaggle notebook
-  - Chạy tuần tự từng cell
-  - Cell 4 in ra URL → copy vào docker-compose.yml: KAGGLE_AI_URL=<url>
-"""
-
-# =========================================================================
-# CELL 1 - Cài thư viện
-# =========================================================================
-# !pip install -q fastapi uvicorn pyngrok
-
-# =========================================================================
-# CELL 2 - Load model (load merged model thẳng, không cần PEFT)
-# =========================================================================
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch, json, re, logging, threading, uvicorn
-from typing import List, Optional
+import os
+import nest_asyncio
+import uvicorn
+from pyngrok import ngrok
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import List, Optional
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import json
+import re
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("kaggle_ai_service")
+# 1. Cấu hình Ngrok
+NGROK_AUTH_TOKEN = "2z2Jys005c289EvZifDWi1ViBBr_7nZ6ASrHHT7qpoJ3DgmQU" # Thay token của bạn vào đây
+ngrok.set_auth_token(NGROK_AUTH_TOKEN)
 
-MODEL_NAME = "Doan2108/contract-risk-qwen2.5-3b-merged"
-HF_TOKEN = ""  # Set via Kaggle Secrets: Add HF_TOKEN in notebook secrets
+# 2. Khởi tạo FastAPI
+app = FastAPI(title="Unified Kaggle AI Service")
 
-# Global variables for model (giống main.py)
-model = None
-tokenizer = None
+# 3. Load Model từ HuggingFace
+MODEL_ID = "Doan2108/contract-risk-qwen2.5-3b-merged"
 
-logger.info(f"Loading tokenizer for {MODEL_NAME}...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=HF_TOKEN)
+print(f"Loading tokenizer {MODEL_ID}...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
-# Kaggle có GPU T4 x2 (tổng ~32GB VRAM) → dùng float16 thay 4-bit
-logger.info(f"Loading model {MODEL_NAME} with float16...")
+print(f"Loading model {MODEL_ID}...")
+# Cấu hình load float16 trực tiếp (phù hợp với GPU của Kaggle)
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
+    MODEL_ID,
     torch_dtype=torch.float16,
-    device_map="auto",
-    token=HF_TOKEN,
+    device_map="auto"
 )
+
+# Hoặc nếu muốn dùng 4-bit để tiết kiệm VRAM:
+# bnb_config = BitsAndBytesConfig(
+#     load_in_4bit=True,
+#     bnb_4bit_use_double_quant=True,
+#     bnb_4bit_quant_type="nf4",
+#     bnb_4bit_compute_dtype=torch.float16,
+# )
+# model = AutoModelForCausalLM.from_pretrained(
+#     MODEL_ID,
+#     quantization_config=bnb_config,
+#     device_map="auto"
+# )
+
 model.eval()
-logger.info("Successfully loaded model!")
+print("Model loaded successfully!")
 
-
-# =========================================================================
-# CELL 3 - Schemas + Helper + Inference (copy từ main.py)
-# =========================================================================
-
-
-# --- Pydantic schemas (copy từ main.py) ---
+# 4. Pydantic Models
 class ClauseInput(BaseModel):
     title: str
     content: str
 
-
+# --- Risk Analysis Schemas ---
 class ExtractedEntityInput(BaseModel):
     clause_title: str
     entity_type: str
@@ -69,17 +60,14 @@ class ExtractedEntityInput(BaseModel):
     normalized_value: str = ""
     confidence_score: float = 1.0
 
-
 class RiskRuleInput(BaseModel):
     name: str
     description: Optional[str] = ""
-
 
 class AnalyzeRequest(BaseModel):
     clauses: List[ClauseInput]
     extracted_entities: List[ExtractedEntityInput] = []
     risk_rules: List[RiskRuleInput] = []
-
 
 class FindingOutput(BaseModel):
     clause_title: str
@@ -89,7 +77,6 @@ class FindingOutput(BaseModel):
     recommendation: str
     disadvantaged_party: Optional[str] = None
 
-
 class EntityOutput(BaseModel):
     clause_title: str
     entity_type: str
@@ -97,31 +84,51 @@ class EntityOutput(BaseModel):
     normalized_value: str = ""
     confidence_score: float = 1.0
 
-
 class AnalyzeResponse(BaseModel):
     overall_score: int
     summary: str
     findings: List[FindingOutput]
     entities: List[EntityOutput] = []
 
+# --- AI Summary Schemas ---
+class SummarizeRequest(BaseModel):
+    clauses: List[ClauseInput]
+    contract_metadata: dict = {}
 
-# --- copy từ main.py ---
-def clean_and_parse_json(text: str) -> dict:
-    text = text.strip()
-    match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
-    if match:
-        text = match.group(1).strip()
-    else:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            text = text[start : end + 1]
-    return json.loads(text)
+class SummarizeResponse(BaseModel):
+    summary: str
+
+# --- AI Extract Schemas ---
+class EntityExtractRequest(BaseModel):
+    text: str
+    system_prompt: Optional[str] = None
+
+class EntityExtractResponse(BaseModel):
+    entities: dict
+    raw_response: Optional[str] = None
+
+class ClauseEntityExtractRequest(BaseModel):
+    clauses: List[ClauseInput]
+
+class ClauseEntityResult(BaseModel):
+    clause_title: str
+    entities: dict
+    error: Optional[str] = None
+
+class BatchEntityExtractResponse(BaseModel):
+    results: List[ClauseEntityResult]
+
+class ClauseExtractOutput(BaseModel):
+    title: str
+    content: str
+    clause_type: Optional[str] = None
+
+class ExtractClausesResponse(BaseModel):
+    clauses: List[ClauseExtractOutput]
 
 
-# --- copy từ main.py (hàm _infer_local) ---
-def _infer_local(messages: list) -> str:
-    """Chạy inference trên GPU local bằng tokenizer + model.generate()."""
+# 5. Core Inference Functions
+def infer(messages: list) -> str:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     inputs = tokenizer.apply_chat_template(
         messages,
@@ -145,11 +152,26 @@ def _infer_local(messages: list) -> str:
             pad_token_id=tokenizer.eos_token_id,
         )
 
-    generated_ids = outputs[0][input_ids.shape[1] :]
+    generated_ids = outputs[0][input_ids.shape[1]:]
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
+def clean_json(text: str) -> dict:
+    text = text.strip()
+    match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+    else:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+    try:
+        return json.loads(text)
+    except:
+        return {}
 
-# --- copy từ main.py (hàm run_ai_analysis) ---
+
+# --- Core Risk Analysis Function ---
 def run_ai_analysis(
     clauses: List[ClauseInput],
     extracted_entities: List[ExtractedEntityInput],
@@ -159,7 +181,6 @@ def run_ai_analysis(
     total_score = 0
     scores_count = 0
 
-    # Format existing system risk rules to instruct the model to reuse them
     rules_instruction = ""
     if risk_rules:
         rules_instruction = "\n\nDanh sách các loại rủi ro hiện có trong hệ thống (hãy phân loại 'risk_category' trùng khớp với một trong số các tên này nếu điều khoản vi phạm, KHÔNG tự tạo thêm tên rủi ro mới nếu đã có sẵn tương đương):\n"
@@ -168,34 +189,29 @@ def run_ai_analysis(
 
     for c in clauses:
         prompt_content = f"Phân tích rủi ro cho điều khoản hợp đồng sau:\n\nTIÊU ĐỀ: {c.title}\nNỘI DUNG:\n{c.content}"
-
-        # Prompt matching ChatML format used during Qwen fine-tuning
         prompt = [
             {
                 "role": "system",
                 "content": "Bạn là chuyên gia phân tích rủi ro hợp đồng pháp lý tại Việt Nam. "
                 "Hãy đóng vai trò là một Luật sư cực kỳ nghiêm khắc, kỹ tính và luôn bảo vệ quyền lợi của Bên thuê/Bên mua. "
                 "Nhiệm vụ của bạn là đọc kỹ điều khoản hợp đồng và phát hiện tất cả các lỗi, điểm bất lợi, rủi ro tiềm ẩn hoặc sự bất đối xứng quyền lợi. "
+                "Hãy đảm bảo tất cả phần giải thích (explanation), khuyến nghị (recommendation) và phân loại rủi ro (risk_category) đều được viết hoàn toàn bằng tiếng Việt chuẩn xác. "
                 "Luôn trả về JSON thuần túy với các trường sau: "
-                "\"risk_category\" (str: Ví dụ 'Limitation of Liability Risk', 'Payment Risk', 'Unbalanced Termination Clause', hoặc tên rủi ro phù hợp), "
+                "\"risk_category\" (str: Phân loại rủi ro bằng tiếng Việt, ví dụ: 'Rủi ro Giới hạn Trách nhiệm', 'Rủi ro Thanh toán', 'Điều khoản Chấm dứt Bất lợi', hoặc tên rủi ro phù hợp), "
                 "\"severity\" (str: 'NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'), "
                 '"risk_score" (int 0-100), '
                 '"explanation" (str: Giải thích chi tiết bằng tiếng Việt lý do điều khoản này có rủi ro hoặc bất lợi), '
                 '"recommendation" (str: Đề xuất sửa đổi cụ thể bằng tiếng Việt để giảm thiểu rủi ro), '
                 "\"disadvantaged_party\" (str: Bên gặp bất lợi, ví dụ 'Bên B', hoặc null). "
-                f'Hãy suy luận cực kỳ chặt chẽ để tìm ra rủi ro. Nếu điều khoản thực sự hoàn toàn an toàn và không có bất kỳ rủi ro nào, hãy đặt "severity": "NONE", "risk_score": 0, "risk_category": "Safe" và "disadvantaged_party": null.{rules_instruction}',
+                f'Hãy suy luận cực kỳ chặt chẽ để tìm ra rủi ro. Nếu điều khoản thực sự hoàn toàn an toàn và không có bất kỳ rủi ro nào, hãy đặt "severity": "NONE", "risk_score": 0, "risk_category": "An toàn" và "disadvantaged_party": null.{rules_instruction}',
             },
             {"role": "user", "content": prompt_content},
         ]
 
-        response = _infer_local(prompt)
-        logger.info(f"Raw model response for '{c.title}': {response}")
+        response = infer(prompt)
 
         try:
-            # Parse output JSON from assistant
-            parsed = clean_and_parse_json(response)
-
-            # Extract attributes
+            parsed = clean_json(response)
             risk_cat = parsed.get("risk_category", "Rủi ro chung")
             severity = parsed.get("severity", "NONE")
             risk_score = int(parsed.get("risk_score", 0))
@@ -217,11 +233,8 @@ def run_ai_analysis(
                 total_score += risk_score
                 scores_count += 1
         except Exception as e:
-            logger.error(
-                f"Error parsing model response for clause '{c.title}': {e}. Response was: {response}"
-            )
+            print(f"Error parsing model response for clause '{c.title}': {e}. Response was: {response}")
 
-    # Calculate overall score
     overall_score = int(total_score / scores_count) if scores_count > 0 else 0
     summary = f"AI analysis completed. Scanned {len(clauses)} clauses. Found {len(findings)} risks."
 
@@ -230,63 +243,151 @@ def run_ai_analysis(
     )
 
 
-# --- FastAPI app + endpoints (copy từ main.py) ---
-app = FastAPI(title="RiskDL AI Inference Service", version="1.0.0")
-
-
+# 6. Endpoints
 @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
 async def analyze_contract(payload: AnalyzeRequest):
     if not payload.clauses:
         raise HTTPException(status_code=400, detail="No clauses provided for analysis.")
-    if model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="AI inference model is not loaded. Please wait for model loading to complete or check server logs.",
-        )
     try:
-        logger.info("Executing LLM model inference...")
         return run_ai_analysis(
             payload.clauses, payload.extracted_entities, payload.risk_rules
         )
     except Exception as e:
-        logger.exception("Error during analysis:")
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
 
+@app.post("/api/v1/summarize", response_model=SummarizeResponse)
+async def summarize_contract(payload: SummarizeRequest):
+    if not payload.clauses:
+        raise HTTPException(status_code=400, detail="No clauses provided.")
+
+    all_clauses_text = "\n\n".join(
+        f"[{c.title}]\n{c.content[:800]}" for c in payload.clauses[:15] # Lấy 15 điều khoản đầu cho đỡ tràn context
+    )
+
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "Bạn là chuyên gia pháp lý. Hãy viết TÓM TẮT ĐIỀU HÀNH (Executive Summary) "
+                "cho hợp đồng dưới đây, bao gồm: Mục đích ký kết, Thông tin các bên, Giá trị hợp đồng, "
+                "Thời hạn, Nghĩa vụ chính, Rủi ro trọng yếu. "
+                "Viết bằng tiếng Việt, cô đọng trong đoạn văn 150-250 từ."
+            ),
+        },
+        {"role": "user", "content": f"NỘI DUNG HỢP ĐỒNG:\n{all_clauses_text}"},
+    ]
+
+    try:
+        summary_text = infer(prompt)
+        return SummarizeResponse(summary=summary_text.strip())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+ENTITY_SYSTEM_PROMPT = (
+    "Bạn là hệ thống trích xuất thông tin hợp đồng tự động. "
+    "Đọc đoạn văn bản (có thể là một điều khoản hợp đồng) và trích xuất các thông tin sau thành JSON. "
+    "Chỉ điền giá trị nếu thực sự có trong văn bản, để chuỗi rỗng \"\" nếu không có:\n"
+    "  COMPANY_NAME   : Tên công ty/tổ chức (có thể là list nếu nhiều bên)\n"
+    "  TAX_CODE       : Mã số thuế\n"
+    "  CONTRACT_VALUE : Giá trị hợp đồng (giữ nguyên đơn vị tiền tệ)\n"
+    "  DATE_EFFECTIVE : Ngày hiệu lực (định dạng YYYY-MM-DD nếu có thể)\n"
+    "  DATE_EXPIRE    : Ngày hết hạn (định dạng YYYY-MM-DD nếu có thể)\n"
+    "  DURATION       : Thời hạn/thời gian thực hiện (ví dụ: '12 tháng', '2 năm')\n"
+    "  PAYMENT_TERM   : Điều kiện/phương thức thanh toán\n"
+    "  PENALTY        : Điều khoản phạt vi phạm (tóm tắt ngắn gọn)\n"
+    "  OBLIGATION     : Nghĩa vụ chính của các bên (tóm tắt ngắn gọn)\n"
+    "Chỉ trả về JSON hợp lệ, không giải thích gì thêm."
+)
+
+@app.post("/api/v1/extract_entities", response_model=EntityExtractResponse)
+async def extract_entities(payload: EntityExtractRequest):
+    sys_prompt = payload.system_prompt if payload.system_prompt else ENTITY_SYSTEM_PROMPT
+    prompt = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": payload.text},
+    ]
+    try:
+        response_text = infer(prompt)
+        entities = clean_json(response_text)
+        return EntityExtractResponse(entities=entities, raw_response=response_text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/extract_entities_batch", response_model=BatchEntityExtractResponse)
+async def extract_entities_batch(payload: ClauseEntityExtractRequest):
+    """
+    Extract entities từ danh sách clauses.
+    Mỗi clause được xử lý riêng; kết quả trả về gắn kèm clause_title.
+    """
+    if not payload.clauses:
+        raise HTTPException(status_code=400, detail="No clauses provided.")
+
+    results: List[ClauseEntityResult] = []
+    for clause in payload.clauses:
+        text = f"[{clause.title}]\n{clause.content[:1000]}"
+        prompt = [
+            {"role": "system", "content": ENTITY_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ]
+        try:
+            response_text = infer(prompt)
+            entities = clean_json(response_text)
+            results.append(ClauseEntityResult(
+                clause_title=clause.title,
+                entities=entities,
+            ))
+        except Exception as e:
+            results.append(ClauseEntityResult(
+                clause_title=clause.title,
+                entities={},
+                error=str(e),
+            ))
+
+    return BatchEntityExtractResponse(results=results)
+
+@app.post("/api/v1/extract_clauses", response_model=ExtractClausesResponse)
+async def extract_clauses(payload: EntityExtractRequest):
+    if not payload.text:
+        raise HTTPException(status_code=400, detail="No text provided.")
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "Bạn là chuyên gia phân tích văn bản pháp lý. Hãy phân tích văn bản hợp đồng sau "
+                "và chia nó thành danh sách các điều khoản. "
+                "Với mỗi điều khoản, trích xuất: "
+                "1. title: Tiêu đề của điều khoản (ví dụ: 'Điều 1: Định nghĩa', 'Điều 2: Giá trị hợp đồng'). "
+                "2. content: Nội dung chi tiết của điều khoản đó. "
+                "3. clause_type: Thể loại điều khoản (ví dụ: 'Payment', 'Termination', 'Liability', 'Dispute', hoặc null nếu không rõ). "
+                "Trả về kết quả dưới dạng một đối tượng JSON có thuộc tính \"clauses\" chứa danh sách các điều khoản nêu trên. "
+                "Chỉ trả về JSON hợp lệ, không giải thích gì thêm."
+            )
+        },
+        {"role": "user", "content": payload.text[:3000]}
+    ]
+    try:
+        response_text = infer(prompt)
+        data = clean_json(response_text)
+        clauses = data.get("clauses", [])
+        return ExtractClausesResponse(clauses=clauses)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
-    status = "healthy" if model is not None else "unhealthy"
-    return {"status": status, "model_loaded": model is not None}
+    return {"status": "healthy", "model": MODEL_ID}
 
-
-# Khởi động server trong background thread
-threading.Thread(
-    target=uvicorn.run,
-    kwargs={"app": app, "host": "0.0.0.0", "port": 8000},
-    daemon=True,
-).start()
-
-import time
-
-time.sleep(3)
-logger.info("✅ FastAPI server started on port 8000")
-
-
-# =========================================================================
-# CELL 4 - Expose qua ngrok → lấy URL công khai
-# =========================================================================
-# Đăng ký free tại https://ngrok.com → Dashboard → Authtoken → copy
-from pyngrok import ngrok, conf
-
-NGROK_TOKEN = "3Falm90byk0kDTynqQaVBJpyMOn_7QGUtEZT13zMKCej5qq65"
-conf.get_default().auth_token = NGROK_TOKEN
-
-url = ngrok.connect(8000, "http").public_url
-print("=" * 65)
-print(f"✅ KAGGLE AI SERVICE đang chạy tại: {url}")
-print()
-print("📋 Paste dòng sau vào docker-compose.yml (ai-service > environment):")
-print(f"   - KAGGLE_AI_URL={url}")
-print()
-print("⚠️  Giữ notebook đang chạy! Tắt notebook = mất URL.")
-print("=" * 65)
+# 7. Expose via Ngrok & Run Server
+if __name__ == "__main__":
+    public_url = ngrok.connect(8001).public_url
+    print(f"==================================================")
+    print(f"✅ NG_ROK PUBLIC URL: {public_url}")
+    print(f"👉 Copy URL này và dán vào file .env của Django:")
+    print(f"KAGGLE_AI_URL={public_url}")
+    print(f"KAGGLE_QWEN_SERVICE_URL={public_url}")
+    print(f"==================================================")
+    import asyncio
+    config = uvicorn.Config(app, host="0.0.0.0", port=8001)
+    server = uvicorn.Server(config)
+    await server.serve()

@@ -57,7 +57,7 @@
                 <div class="panel-header">
                     <h3 class="panel-title"><i class="fa-solid fa-file-lines"></i> Original Contract Document</h3>
                     {% if contract.file_path %}
-                    <a href="{{ contract.file_path }}" target="_blank" class="btn-download">
+                    <a href="{{ contract.file_path }}" target="_blank" download class="btn-download">
                         <i class="fa-solid fa-file-pdf"></i> Download PDF
                     </a>
                     {% endif %}
@@ -250,7 +250,7 @@
                                 {% endif %}
                             </div>
 
-                            {% if contract.status == 'APPROVED' %}
+                            {% if contract.status != 'PENDING_WORKFLOW' %}
                             <!-- Push to Workflow -->
                             <div class="workflow-push-section" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px;">
                                 <h4 class="section-title" style="margin-bottom: 12px;"><i class="fa-solid fa-diagram-project"></i> Approval Workflow</h4>
@@ -377,7 +377,7 @@
                 <button class="modal-close-btn" id="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="modal-body">
-                <form id="upload-version-form" enctype="multipart/form-data">
+                <form id="upload-version-form" data-contract-id="{{ contract.id }}" enctype="multipart/form-data">
                     {% csrf_token %}
                     <div class="form-group" style="margin-bottom: 16px;">
                         <label class="form-label" for="version_change_summary" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px;">Change Summary *</label>
@@ -396,13 +396,13 @@
                     
                     <!-- File Tab -->
                     <div class="tab-pane active" id="file-tab">
-                        <div class="file-upload-zone" id="file-upload-zone" style="border: 2px dashed rgba(99, 102, 241, 0.3); border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: rgba(99, 102, 241, 0.02);">
+                        <label class="file-upload-zone" id="file-upload-zone" for="version_file_input" style="display: block; border: 2px dashed rgba(99, 102, 241, 0.3); border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: rgba(99, 102, 241, 0.02);">
                             <i class="fa-solid fa-cloud-arrow-up" style="font-size: 32px; color: var(--accent-primary); margin-bottom: 8px;"></i>
                             <p style="font-weight: 500; font-size: 13.5px; margin: 0; color: #ffffff;">Click to select file or drag & drop</p>
-                            <p style="font-size: 11.5px; color: var(--text-muted); margin: 4px 0 0 0;">Supports .txt, .docx (Max 10MB)</p>
-                            <input type="file" id="version_file_input" name="file" style="display: none;" accept=".txt,.docx,.doc">
+                            <p style="font-size: 11.5px; color: var(--text-muted); margin: 4px 0 0 0;">Supports .pdf, .txt, .docx (Max 10MB)</p>
+                            <input type="file" id="version_file_input" name="file" style="display: none;" accept=".pdf,.txt,.docx,.doc">
                             <div class="selected-file-name" id="selected-file-name" style="margin-top: 12px; font-weight: 600; color: #10b981; display: none;"></div>
-                        </div>
+                        </label>
                     </div>
                     
                     <!-- Text Tab -->
@@ -425,6 +425,6 @@
     </div>
 
     <!-- External JS -->
-    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.2"></script>
+    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.3"></script>
 </body>
 </html>

@@ -106,8 +106,14 @@ class ClauseSplitter:
         raw_clauses = self._extract_raw_clauses(merged_text)
 
         if not raw_clauses:
-            logger.warning("No clause headers found in document")
-            return []
+            logger.warning("No clause headers found in document. Creating a fallback virtual clause.")
+            raw_clauses = [
+                _RawClause(
+                    title="Nội dung hợp đồng",
+                    body=_PAGE_MARKER_RE.sub("", merged_text).strip(),
+                    char_start=0
+                )
+            ]
 
         # Bước 3: Gán start_page / end_page
         clauses = self._assign_pages(raw_clauses, page_boundaries, pages)
@@ -162,10 +168,22 @@ class ClauseSplitter:
             Danh sách _RawClause theo thứ tự xuất hiện.
         """
         matches = list(_CLAUSE_HEADER_RE.finditer(merged_text))
-        if not matches:
-            return []
-
+        
         raw_clauses: List[_RawClause] = []
+        
+        # Thêm phần mở đầu (preamble) trước điều khoản đầu tiên nếu có
+        if matches:
+            preamble_text = merged_text[0:matches[0].start()].strip()
+            clean_preamble = _PAGE_MARKER_RE.sub("", preamble_text).strip()
+            if len(clean_preamble) > 10:
+                raw_clauses.append(
+                    _RawClause(
+                        title="Phần mở đầu",
+                        body=clean_preamble,
+                        char_start=0
+                    )
+                )
+
         for i, match in enumerate(matches):
             title = match.group(1).strip()
             start = match.start()

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}">
+    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}?v=1.1">
 </head>
 <body>
     <div class="app-shell">
@@ -32,13 +32,17 @@
                 <a href="{% url 'workflow_board' %}" class="nav-item active">
                     <i class="fa-solid fa-diagram-project"></i><span>Workflows</span>
                 </a>
+                <a href="/identity/" class="nav-item">
+                    <i class="fa-solid fa-building-shield"></i><span>Identity Registry</span>
+                </a>
             </nav>
+
             <div class="sidebar-footer">
                 <div class="sidebar-user">
                     <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
                     <div class="user-info">
-                        <div class="user-name">Admin</div>
-                        <div class="user-role">Legal Officer</div>
+                        <div class="user-name">{{ request.user.username }}</div>
+                        <div class="user-role">{{ request.user.role.role_name|default:"No Role" }}</div>
                     </div>
                 </div>
             </div>
@@ -130,6 +134,18 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="{% static 'contracts/js/workflow_board.js' %}"></script>
+    <!-- Django Data Island: VS Code linter ignores type="application/json" -->
+    <script id="django-ctx" type="application/json">{
+        "currentUserId": {{ request.user.id|default:0 }},
+        "currentUserRole": "{{ request.user.role.role_name|default:'' }}",
+        "currentUserIsSuperuser": {{ request.user.is_superuser|yesno:"true,false" }}
+    }</script>
+    <script>
+        const _ctx = JSON.parse(document.getElementById('django-ctx').textContent);
+        window.currentUserId = _ctx.currentUserId;
+        window.currentUserRole = _ctx.currentUserRole;
+        window.currentUserIsSuperuser = _ctx.currentUserIsSuperuser;
+    </script>
+    <script src="{% static 'contracts/js/workflow_board.js' %}?v=1.4"></script>
 </body>
 </html>

@@ -51,6 +51,10 @@
                 <a href="/identity/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-identity">
                     <i class="fa-solid fa-building-shield"></i> Identity Registry
                 </a>
+                <a href="/workflows/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-workflows">
+                    <i class="fa-solid fa-diagram-project"></i> Workflow Board
+                </a>
+
                 <div style="display: flex; align-items: center; gap: 12px; margin-left: 12px; padding-left: 12px; border-left: 1px solid rgba(255,255,255,0.1);">
                     <div style="text-align: right;">
                         <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">{{ user.username }}</div>
@@ -216,9 +220,11 @@
                 <div class="form-group" style="margin-bottom: 24px;">
                     <label class="form-label">Or Upload Contract File (PDF, DOCX, TXT)</label>
                     <div class="file-drop-area" id="file-drop-zone">
-                        <i class="fa-solid fa-cloud-arrow-up file-icon"></i>
-                        <p id="file-drop-text">Drag and drop file here, or click to choose file</p>
-                        <input type="file" name="file" id="file-input">
+                        <label for="file-input" style="display: block; cursor: pointer; width: 100%; height: 100%;">
+                            <i class="fa-solid fa-cloud-arrow-up file-icon"></i>
+                            <p id="file-drop-text">Drag and drop file here, or click to choose file</p>
+                            <input type="file" name="file" id="file-input" style="display: none;">
+                        </label>
                     </div>
                 </div>
 

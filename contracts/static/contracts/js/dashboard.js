@@ -375,7 +375,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i class="fa-solid fa-expand"></i> Full Reader Page
                         </a>
                         ${data.file_path ? `
-                        <a href="${data.file_path}" target="_blank" class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
+                        <a href="${data.file_path}" target="_blank" download class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
                             <i class="fa-solid fa-file-pdf"></i> Download PDF
                         </a>` : ''}
                     </div>

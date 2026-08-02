@@ -21,7 +21,7 @@ tokenizer = None
 kaggle_url = os.environ.get("KAGGLE_AI_URL", "").rstrip("/")  # URL ngrok từ Kaggle notebook
 model_id   = os.environ.get("BASE_MODEL_NAME", "Qwen/Qwen2.5-3B-Instruct")
 adapter_id = os.environ.get("ADAPTER_MODEL_NAME", "Doan2108/contract-risk-qwen2.5-3b-fix1")
-hf_token   = os.environ.get("HF_TOKEN", "")
+hf_token   = os.environ.get("HF_TOKEN", None)
 
 if kaggle_url:
     # Chế độ Kaggle: không load model local, chỉ forward request
