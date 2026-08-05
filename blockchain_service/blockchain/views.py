@@ -10,6 +10,66 @@ from .models import HashProof, BlockchainTransaction, SignatureCertificate, Bloc
 def health_check(request):
     return JsonResponse({"status": "healthy", "service": "blockchain-django-service"})
 
+
+def get_stats(request):
+    """GET: Aggregate stats + recent transactions for the blockchain explorer UI."""
+    from .models import BlockchainTransaction, HashProof, SignatureCertificate, DigitalSignature, BlockchainNetwork
+    try:
+        total_txs = BlockchainTransaction.objects.count()
+        total_proofs = HashProof.objects.count()
+        total_certs = SignatureCertificate.objects.count()
+        total_sigs = DigitalSignature.objects.count()
+        verified_proofs = HashProof.objects.filter(verified=True).count()
+        latest_block = BlockchainTransaction.objects.filter(
+            block_number__isnull=False
+        ).order_by('-block_number').values_list('block_number', flat=True).first() or 0
+
+        # Recent 20 transactions
+        recent_txs = BlockchainTransaction.objects.order_by('-created_at')[:20]
+        txs_data = [{
+            "id": tx.id,
+            "tx_hash": tx.tx_hash,
+            "block_number": tx.block_number,
+            "block_hash": tx.block_hash,
+            "status": tx.status,
+            "tx_type": tx.tx_type,
+            "sender": tx.sender,
+            "channel_name": tx.channel_name,
+            "chaincode_name": tx.chaincode_name,
+            "fabric_tx_id": tx.fabric_tx_id,
+            "latency": float(tx.latency) if tx.latency else None,
+            "created_at": tx.created_at.isoformat(),
+        } for tx in recent_txs]
+
+        # Recent hash proofs
+        recent_proofs = HashProof.objects.order_by('-generated_at')[:10]
+        proofs_data = [{
+            "id": p.id,
+            "version_id": p.version_id,
+            "document_hash": p.document_hash,
+            "hash_algorithm": p.hash_algorithm,
+            "verified": p.verified,
+            "merkle_root": p.merkle_root,
+            "generated_at": p.generated_at.isoformat(),
+        } for p in recent_proofs]
+
+        return JsonResponse({
+            "stats": {
+                "total_transactions": total_txs,
+                "total_proofs": total_proofs,
+                "total_certificates": total_certs,
+                "total_signatures": total_sigs,
+                "verified_proofs": verified_proofs,
+                "latest_block": latest_block,
+            },
+            "recent_transactions": txs_data,
+            "recent_proofs": proofs_data,
+        })
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+
 @csrf_exempt
 def create_certificate(request):
     if request.method != 'POST':

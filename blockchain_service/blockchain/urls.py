@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('health/', views.health_check, name='health_check'),
+    path('stats/', views.get_stats, name='get_stats'),
     path('certificates/create/', views.create_certificate, name='create_certificate'),
     path('proofs/generate/', views.generate_proof, name='generate_proof'),
     path('proofs/anchor/', views.anchor_proof, name='anchor_proof'),

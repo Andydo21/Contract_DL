@@ -1685,6 +1685,21 @@ def api_obtain_token(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+@login_required(login_url='/login/')
+def blockchain_explorer(request):
+    """Render the built-in blockchain explorer page."""
+    return render(request, 'contracts/blockchain_explorer.html')
+
+
+def api_blockchain_stats(request):
+    """GET: Proxy to fetch stats from blockchain-service/stats/."""
+    try:
+        resp = _req.get(f"{_BC_URL}/stats/", timeout=15)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 
 
 
