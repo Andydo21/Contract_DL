@@ -58,4 +58,5 @@ urlpatterns = [
     path('api/admin/keys/<int:key_id>/rotate/', views.api_workflow_key_rotate_proxy, name='api_workflow_key_rotate_proxy'),
     path('api/admin/keys/<int:key_id>/revoke/', views.api_workflow_key_revoke_proxy, name='api_workflow_key_revoke_proxy'),
     path('api/admin/signatures/', views.api_workflow_signatures_proxy, name='api_workflow_signatures_proxy'),
+    path('api/token/', views.api_obtain_token, name='api_obtain_token'),
 ]

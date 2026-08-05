@@ -1657,5 +1657,62 @@ def api_workflow_signatures_proxy(request):
         return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+def api_obtain_token(request):
+    """POST -> Authenticate user and return a JWT token."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method is allowed.'}, status=405)
+    
+    try:
+        import json
+        import datetime
+        import jwt
+        from django.conf import settings
+        from django.contrib.auth import authenticate
+
+        if request.content_type == 'application/json':
+            body = json.loads(request.body.decode('utf-8'))
+            username = body.get('username')
+            password = body.get('password')
+        else:
+            username = request.POST.get('username')
+            password = request.POST.get('password')
+            
+        if not username or not password:
+            return JsonResponse({'error': 'Both username and password are required.'}, status=400)
+            
+        user = authenticate(username=username, password=password)
+        if user is not None:
+            if not user.is_active:
+                return JsonResponse({'error': 'User account is inactive.'}, status=400)
+                
+            # Generate JWT token
+            payload = {
+                'user_id': user.id,
+                'username': user.username,
+                'role': user.role.role_name if (hasattr(user, 'role') and user.role) else 'USER',
+                'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7),
+                'iat': datetime.datetime.utcnow(),
+            }
+            token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+            
+            return JsonResponse({
+                'token': token,
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'role': user.role.role_name if (hasattr(user, 'role') and user.role) else 'USER'
+                }
+            })
+        else:
+            return JsonResponse({'error': 'Invalid credentials.'}, status=401)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+
 
 
