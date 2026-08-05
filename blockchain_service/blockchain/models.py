@@ -127,6 +127,9 @@ class DigitalSignature(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     verified = models.BooleanField(default=False, verbose_name="Verified")
     verified_at = models.DateTimeField(blank=True, null=True, verbose_name="Verified At")
+    tx_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Transaction Hash")
+    block_number = models.BigIntegerField(blank=True, null=True, verbose_name="Block Number")
+    block_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Block Hash")
 
     class Meta:
         verbose_name = 'Digital Signature'

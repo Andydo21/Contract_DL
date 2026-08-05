@@ -236,11 +236,25 @@ class ContractService:
             full_path = os.path.join(settings.MEDIA_ROOT, rel_path.replace('/', os.sep))
             if os.path.exists(full_path):
                 try:
-                    from .crypto_utils import decrypt_pdf
-                    with open(full_path, 'rb') as f:
-                        encrypted_bytes = f.read()
-                    decrypted_bytes = decrypt_pdf(encrypted_bytes)
-                    raw_content = decrypted_bytes.decode('utf-8', errors='ignore')
+                    ext = os.path.splitext(latest_file.file_name)[1].lower() if latest_file.file_name else ''
+                    if ext == '.txt':
+                        from .crypto_utils import decrypt_pdf
+                        with open(full_path, 'rb') as f:
+                            encrypted_bytes = f.read()
+                        decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                        raw_content = decrypted_bytes.decode('utf-8', errors='ignore')
+                    elif ext == '.pdf':
+                        from .crypto_utils import decrypt_pdf
+                        import fitz
+                        with open(full_path, 'rb') as f:
+                            encrypted_bytes = f.read()
+                        decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                        doc = fitz.open(stream=decrypted_bytes, filetype='pdf')
+                        text_list = []
+                        for page in doc:
+                            text_list.append(page.get_text())
+                        raw_content = "\n\n".join(text_list)
+                        doc.close()
                 except Exception:
                     pass
         
@@ -336,14 +350,6 @@ class ContractService:
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
             
-        # Extract and save clauses immediately upon creation
-        try:
-            self.extract_and_save_clauses_via_processor(version)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger("django")
-            logger.warning(f"Failed to auto-extract clauses on creation: {e}")
-            
         return contract
 
     def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary=""):
@@ -383,12 +389,8 @@ class ContractService:
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
             
-        try:
-            self.extract_and_save_clauses_via_processor(version)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger("django")
-            logger.warning(f"Failed to auto-extract clauses on new version: {e}")
+        contract.status = 'DRAFT'
+        contract.save()
             
         return version
 

@@ -316,6 +316,7 @@ class AuditLog(models.Model):
     contract = models.ForeignKey(Contract, on_delete=models.CASCADE, null=True, blank=True, related_name='audit_logs', verbose_name="Contract")
     action = models.CharField(max_length=100, verbose_name="Action")
     ip_address = models.CharField(max_length=45, blank=True, null=True, verbose_name="IP Address")
+    payload = models.TextField(blank=True, null=True, verbose_name="Request Payload")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
 
     class Meta:

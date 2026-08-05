@@ -1,6 +1,13 @@
 import os
+import sys
 import django
 import requests
+
+# Reconfigure stdout/stderr to prevent UnicodeEncodeError on Windows terminals
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 # 1. Initialize Django environment
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')

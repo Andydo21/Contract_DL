@@ -204,6 +204,9 @@ services:
     environment:
       - CHAINCODE_SERVER_ADDRESS=0.0.0.0:9999
     entrypoint: /bin/sh /chaincode/start.sh
+    depends_on:
+      fabric-init:
+        condition: service_completed_successfully
     networks:
       - riskdl-net
 

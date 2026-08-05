@@ -363,14 +363,21 @@
                 </h1>
                 <p class="page-subtitle">Manage decentralized identity nodes, companies, and authorized personnel anchored on Hyperledger Fabric.</p>
             </div>
-            <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 8px 16px; border-radius: 12px;">
-                <div style="text-align: right;">
-                    <div style="font-size: 13px; font-weight: 600; color: #fff;">{{ user.username }}</div>
-                    <div style="font-size: 11px; color: var(--text-muted);">{{ user.role.role_name|default:"Staff" }}</div>
-                </div>
-                <a href="/logout/" style="color: #fda4af; font-size: 16px; transition: color 0.2s; margin-left: 8px;" title="Log Out">
-                    <i class="fa-solid fa-right-from-bracket"></i>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                {% if user.is_superuser or user.role.role_name.upper == 'MANAGER' or user.role.role_name.upper == 'ADMIN' %}
+                <a href="/admin-dashboard/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease; margin-right: 12px;" id="btn-goto-admin">
+                    <i class="fa-solid fa-user-gear"></i> Admin Dashboard
                 </a>
+                {% endif %}
+                <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 8px 16px; border-radius: 12px;">
+                    <div style="text-align: right;">
+                        <div style="font-size: 13px; font-weight: 600; color: #fff;">{{ user.username }}</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">{{ user.role.role_name|default:"Staff" }}</div>
+                    </div>
+                    <a href="/logout/" style="color: #fda4af; font-size: 16px; transition: color 0.2s; margin-left: 8px;" title="Log Out">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                    </a>
+                </div>
             </div>
         </div>
 
@@ -496,11 +503,12 @@
                                     <th>Status</th>
                                     <th>Block Number</th>
                                     <th>Tx Hash</th>
+                                    <th>Ledger State</th>
                                 </tr>
                             </thead>
                             <tbody id="users-table-body">
                                 <tr>
-                                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                         <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 20px; margin-bottom: 8px;"></i>
                                         <p>Loading staff registry...</p>
                                     </td>
@@ -614,7 +622,7 @@
                 const tbody = document.getElementById('users-table-body');
                 
                 if (data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px 0;">No staff registered.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px 0;">No staff registered.</td></tr>`;
                     return;
                 }
                 
@@ -641,6 +649,11 @@
                                     </button>
                                 </div>
                             ` : '<span style="color: var(--text-muted);">N/A</span>'}
+                        </td>
+                        <td>
+                            <button class="tx-link" style="border: none; cursor: pointer; font-family: inherit; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(99, 102, 241, 0.15); border-radius: 6px;" onclick="showLedgerUser(${u.id})">
+                                <i class="fa-solid fa-cube"></i> Query Ledger
+                            </button>
                         </td>
                     </tr>
                 `).join('');
@@ -747,10 +760,53 @@
             }
         }
 
+        // Query User directly from Hyperledger Fabric Ledger
+        async function showLedgerUser(userId) {
+            const modal = document.getElementById('ledgerModal');
+            const content = document.getElementById('ledgerModalContent');
+            
+            content.innerHTML = `<div style="text-align: center; padding: 20px;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size: 24px; margin-bottom: 8px;"></i><p>Querying Hyperledger Fabric...</p></div>`;
+            modal.style.display = 'flex';
+            
+            try {
+                const resp = await fetch(`/api/blockchain/user/${userId}/`);
+                const data = await resp.json();
+                
+                if (resp.ok) {
+                    content.innerHTML = `<span style="color: #818cf8;">// GET /user/${userId} from Fabric Gateway Ledger</span>\n` + JSON.stringify(data, null, 2);
+                } else {
+                    content.innerHTML = `<span style="color: #f87171;">Error Querying Ledger (User not yet anchored/registered):</span>\n` + JSON.stringify(data, null, 2);
+                }
+            } catch (err) {
+                content.innerHTML = `<span style="color: #f87171;">Failed to query Fabric Gateway:</span>\n${err.message}`;
+            }
+        }
+        
+        function closeLedgerModal() {
+            document.getElementById('ledgerModal').style.display = 'none';
+        }
+
         // Initial Load
         document.addEventListener('DOMContentLoaded', () => {
             loadCompanies();
         });
     </script>
+
+    <!-- Ledger Modal -->
+    <div id="ledgerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;" onclick="if(event.target === this) closeLedgerModal();">
+        <div class="glass-card" style="width: 550px; max-width: 90%; position: relative; border-color: rgba(99, 102, 241, 0.35); box-shadow: 0 0 30px rgba(99, 102, 241, 0.25); background: rgba(13, 17, 23, 0.95); padding: 24px; border-radius: 16px; border: 1px solid var(--border-glass);">
+            <button onclick="closeLedgerModal()" style="position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 18px; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='var(--text-secondary)'">
+                <i class="fa-solid fa-times"></i>
+            </button>
+            <h3 class="card-title" style="margin-bottom: 8px; color: #fff; font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <i class="fa-solid fa-cube" style="color: #6366f1"></i>
+                Fabric Ledger State
+            </h3>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px; margin-top: 0;">Direct, real-time query from Hyperledger Fabric world state.</p>
+            <div id="ledgerModalContent" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px; font-family: monospace; font-size: 13px; color: #a5b4fc; overflow-y: auto; max-height: 350px; white-space: pre-wrap; line-height: 1.5; text-align: left;">
+                <!-- Content will load here -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>

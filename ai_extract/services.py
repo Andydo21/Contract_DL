@@ -144,10 +144,15 @@ class ExtractEntityService:
 
         clauses = list(Clause.objects.filter(version=version))
         if not clauses:
-            raise ValueError(
-                f"ContractVersion {version.id} has no clauses. "
-                "Run clause splitting first."
-            )
+            logger.info(f"[extract] No clauses found for version {version.id}. Running ClauseExtractService first.")
+            from .services import ClauseExtractService
+            clause_extractor = ClauseExtractService()
+            clause_extractor.extract_version(version, re_extract=True)
+            clauses = list(Clause.objects.filter(version=version))
+            if not clauses:
+                raise ValueError(
+                    f"ContractVersion {version.id} has no clauses after splitting."
+                )
 
         url = f"{_kaggle_url()}/api/v1/extract_entities"
         results = []

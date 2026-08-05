@@ -90,7 +90,7 @@ class DocumentService:
             DocumentProcessorError: Nếu gặp lỗi nghiêm trọng.
         """
         # ── Bước 1: Load & validate file ──────────────────────────────
-        logger.info("═══ Start processing: %s ═══", file_path)
+        logger.info("=== Start processing: %s ===", file_path)
         load_result = self._loader.load(file_path)
 
         # ── Bước 2: Extract text theo loại file ───────────────────────
@@ -114,7 +114,7 @@ class DocumentService:
         output = self._build_output(load_result, pages, clauses, ocr_used, warnings)
 
         logger.info(
-            "═══ Done: %d pages | %d clauses | %d warnings | OCR=%s ═══",
+            "=== Done: %d pages | %d clauses | %d warnings | OCR=%s ===",
             len(pages),
             len(clauses),
             len(warnings),
@@ -176,29 +176,56 @@ class DocumentService:
         all_pages: List[PageData] = list(result.pages)  # trang có text native
         ocr_used = False
 
+        import os
+        skip_ocr = os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
+
         if result.scan_page_numbers:
-            logger.info(
-                "PDF has %d scan pages — running OCR: %s",
-                len(result.scan_page_numbers),
-                result.scan_page_numbers,
-            )
-            ocr_pages = self._ocr_pdf_pages(
-                extractor, file_path, result.scan_page_numbers
-            )
-            all_pages.extend(ocr_pages)
-            ocr_used = True
+            if skip_ocr:
+                logger.info("PDF has scan pages but SKIP_OCR is enabled. Skipping OCR.")
+            else:
+                logger.info(
+                    "PDF has %d scan pages — running OCR: %s",
+                    len(result.scan_page_numbers),
+                    result.scan_page_numbers,
+                )
+                ocr_pages = self._ocr_pdf_pages(
+                    extractor, file_path, result.scan_page_numbers
+                )
+                all_pages.extend(ocr_pages)
+                ocr_used = True
 
         # Sắp xếp lại theo page_number sau khi merge
         all_pages.sort(key=lambda p: p.page_number)
 
-        # Nếu không có trang nào (PDF scan hoàn toàn mà OCR thất bại)
+        # Nếu không có trang nào (PDF scan hoàn toàn và skip_ocr hoặc OCR thất bại)
         if not all_pages:
-            logger.warning("No pages extracted from PDF — returning empty")
+            logger.warning("No pages extracted from PDF — returning empty or placeholder")
+            if skip_ocr:
+                all_pages.append(
+                    PageData(
+                        page_number=1,
+                        text="[Hệ thống: Đây là tài liệu dạng ảnh quét (scanned PDF) và tính năng trích xuất hình ảnh/OCR đã được tắt theo yêu cầu. Không có văn bản thuần để trích xuất.]",
+                        source="pdf",
+                        confidence=1.0,
+                    )
+                )
 
         return all_pages, ocr_used
 
     def _extract_image(self, file_path: str):
         """OCR trực tiếp file ảnh."""
+        import os
+        skip_ocr = os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
+        if skip_ocr:
+            logger.info("Image file uploaded but SKIP_OCR is enabled. Skipping OCR.")
+            return [
+                PageData(
+                    page_number=1,
+                    text="[Hệ thống: Đây là file hình ảnh và tính năng trích xuất hình ảnh/OCR đã được tắt theo yêu cầu.]",
+                    source="ocr",
+                    confidence=1.0,
+                )
+            ], True
         logger.info("Extract text from image file via OCR")
         engine = self._get_ocr_engine()
         page = engine.ocr_image_file(file_path, page_number=1)

@@ -650,7 +650,7 @@
 
             // Check permissions
             const requiredRoleName = roleIdToNameMap[activeStep.role_id] || 'NO_ROLE';
-            const hasPermission = currentUserIsSuperuser || (currentUserRole === 'ADMIN') || (requiredRoleName === currentUserRole);
+            const hasPermission = (currentUserRole === 'ADMIN') || (requiredRoleName === currentUserRole);
 
             if (!hasPermission) {
                 panel.innerHTML = `

@@ -64,22 +64,65 @@ $runAiSummary = {
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle='RiskDL - AI Summary Proxy (Port 8004)'; Get-Content .env | Where-Object { `$_ -match '=' -and `$_ -notmatch '^#' } | ForEach-Object { `$name, `$value = `$_ -split '=', 2; [System.Environment]::SetEnvironmentVariable(`$name.Trim(), `$value.Trim()) }; cd ai_summary; ..\venv\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8004"
 }
 
+$startFabricDocker = {
+    Write-Host "Checking Docker status..." -ForegroundColor Yellow
+    $dockerRunning = $false
+    try {
+        $oldPref = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        & docker ps > $null 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $dockerRunning = $true
+        }
+        $ErrorActionPreference = $oldPref
+    } catch {
+        $dockerRunning = $false
+    }
+
+    if (-not $dockerRunning) {
+        Write-Host "[WARNING] Docker Desktop is not running! Hyperledger Fabric services cannot start." -ForegroundColor Red
+        Write-Host "Please start Docker Desktop and press Enter to continue, or Ctrl+C to abort." -ForegroundColor Yellow
+        $null = Read-Host
+        try {
+            $oldPref = $ErrorActionPreference
+            $ErrorActionPreference = "SilentlyContinue"
+            & docker ps > $null 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $dockerRunning = $true
+            }
+            $ErrorActionPreference = $oldPref
+        } catch {
+            $dockerRunning = $false
+        }
+        if (-not $dockerRunning) {
+            Write-Host "[ERROR] Docker is still not running. Starting local services without Fabric." -ForegroundColor Red
+            return
+        }
+    }
+    Write-Host "Starting Fabric network and Explorer services in Docker..." -ForegroundColor Yellow
+    docker compose up -d orderer.example.com peer0.org1.example.com fabric-chaincode fabric-gateway explorer-db explorer
+}
+
 if ($choice -eq "1") {
+    & $startFabricDocker
     & $runWeb
     & $runBlockchain
     & $runWorkflow
     & $runAiService
     & $runAiSummary
     Write-Host ""
-    Write-Host "All 5 services have been started in separate terminal windows." -ForegroundColor Green
+    Write-Host "All local microservices have been started in separate terminal windows." -ForegroundColor Green
+    Write-Host "Fabric blockchain network and Explorer are running in Docker." -ForegroundColor Green
     Write-Host "Enjoy testing RiskDL!" -ForegroundColor Cyan
 }
 elseif ($choice -eq "2") {
+    & $startFabricDocker
     & $runWeb
     & $runBlockchain
     & $runWorkflow
     Write-Host ""
-    Write-Host "Core services have been started in separate terminal windows." -ForegroundColor Green
+    Write-Host "Core local services have been started in separate terminal windows." -ForegroundColor Green
+    Write-Host "Fabric blockchain network is running in Docker." -ForegroundColor Green
 }
 elseif ($choice -eq "3") {
     Write-Host "Running End-to-End Blockchain Verification Tests..." -ForegroundColor Yellow

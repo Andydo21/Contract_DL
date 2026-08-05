@@ -169,12 +169,24 @@ def _infer_local(messages: list) -> str:
     return tokenizer.decode(generated_ids, skip_special_tokens=True)
 
 
-# Real AI inference runner using fine-tuned model
 def run_ai_analysis(
     clauses: List[ClauseInput],
     extracted_entities: List[ExtractedEntityInput],
     risk_rules: List[RiskRuleInput] = [],
 ) -> AnalyzeResponse:
+    # --- Model Context Protocol (MCP) Integration ---
+    try:
+        from ai_service.mcp_client import MCPClient
+        mcp_client = MCPClient()
+        logger.info("Querying Legal MCP Server for legal references...")
+        for c in clauses:
+            ref_text = mcp_client.get_legal_references(c.title, c.content)
+            if ref_text:
+                c.content += ref_text
+                logger.info(f"Successfully injected legal references into clause: '{c.title}'")
+    except Exception as mcp_err:
+        logger.warning(f"Error querying MCP server: {mcp_err}")
+
     # --- Kaggle mode: forward sang Kaggle server ---
     if kaggle_url:
         payload = {
@@ -212,12 +224,13 @@ def run_ai_analysis(
                 "content": "Bạn là chuyên gia phân tích rủi ro hợp đồng pháp lý tại Việt Nam. "
                 "Hãy đóng vai trò là một Luật sư cực kỳ nghiêm khắc, kỹ tính và luôn bảo vệ quyền lợi của Bên thuê/Bên mua. "
                 "Nhiệm vụ của bạn là đọc kỹ điều khoản hợp đồng và phát hiện tất cả các lỗi, điểm bất lợi, rủi ro tiềm ẩn hoặc sự bất đối xứng quyền lợi. "
+                "Nếu điều khoản đi kèm phần '[THAM CHIẾU LUẬT PHÁP VIỆT NAM (MCP)]', bạn phải sử dụng các điều luật này làm căn cứ pháp lý chính để đối chiếu, đánh giá xem điều khoản hợp đồng có vi phạm hoặc bất lợi so với luật hay không, và trích dẫn rõ tên điều luật (ví dụ: 'Điều 301 Luật Thương mại 2005') trong phần giải thích (explanation) và khuyến nghị (recommendation). "
                 "Luôn trả về JSON thuần túy với các trường sau: "
                 "\"risk_category\" (str: Ví dụ 'Limitation of Liability Risk', 'Payment Risk', 'Unbalanced Termination Clause', hoặc tên rủi ro phù hợp), "
                 "\"severity\" (str: 'NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'), "
                 '"risk_score" (int 0-100), '
-                '"explanation" (str: Giải thích chi tiết bằng tiếng Việt lý do điều khoản này có rủi ro hoặc bất lợi), '
-                '"recommendation" (str: Đề xuất sửa đổi cụ thể bằng tiếng Việt để giảm thiểu rủi ro), '
+                '"explanation" (str: Giải thích chi tiết bằng tiếng Việt lý do điều khoản này có rủi ro hoặc bất lợi, có trích dẫn điều luật tương ứng nếu vi phạm), '
+                '"recommendation" (str: Đề xuất sửa đổi cụ thể bằng tiếng Việt để giảm thiểu rủi ro, có viện dẫn cơ sở pháp lý), '
                 "\"disadvantaged_party\" (str: Bên gặp bất lợi, ví dụ 'Bên B', hoặc null). "
                 f'Hãy suy luận cực kỳ chặt chẽ để tìm ra rủi ro. Nếu điều khoản thực sự hoàn toàn an toàn và không có bất kỳ rủi ro nào, hãy đặt "severity": "NONE", "risk_score": 0, "risk_category": "Safe" và "disadvantaged_party": null.{rules_instruction}',
             },

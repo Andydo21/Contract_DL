@@ -130,11 +130,10 @@ def api_approve_workflow_step(request, step_id):
         user = request.user
         
         # Verify role permission
-        if not user.is_superuser:
-            if not user.role or (user.role.id != req_role_id and user.role.role_name.upper() != 'ADMIN'):
-                return JsonResponse({
-                    'error': 'Permission Denied: You do not have the required role to approve this step.'
-                }, status=403)
+        if not user.role or (user.role.id != req_role_id and user.role.role_name.upper() != 'ADMIN'):
+            return JsonResponse({
+                'error': 'Permission Denied: You do not have the required role to approve this step.'
+            }, status=403)
     except Exception as e:
         return JsonResponse({'error': f'Failed to verify permissions: {e}'}, status=400)
 
@@ -420,22 +419,6 @@ def api_contract_versions(request, contract_id):
                 change_summary=change_summary
             )
             
-            # 2. Trigger AI analysis for the new version automatically
-            scan_error = None
-            try:
-                contract_service.analyze_contract(contract_id, version_id=version.id)
-            except Exception as se:
-                scan_error = str(se)
-                
-            if scan_error:
-                return JsonResponse({
-                    'success': True,
-                    'version_id': version.id,
-                    'version_number': version.version_number,
-                    'change_summary': version.change_summary,
-                    'scan_error': scan_error
-                })
-            
             return JsonResponse({
                 'success': True,
                 'version_id': version.id,
@@ -687,6 +670,7 @@ import os as _os
 import requests as _req
 from django.conf import settings as _settings
 
+# Resolved connection target endpoint for blockchain microservice calls
 _BC_URL = _os.environ.get("BLOCKCHAIN_SERVICE_URL", "http://blockchain-service:8000")
 
 
@@ -899,10 +883,12 @@ def api_download_file(request, file_id):
             response['Content-Disposition'] = f'attachment; filename="{cf.file_name}"'
             return response
         else:
-            try:
-                text_str = decrypted_data.decode('utf-8', errors='ignore')
-            except Exception:
-                text_str = str(decrypted_data)
+            import mimetypes
+            content_type, _ = mimetypes.guess_type(cf.file_name)
+            content_type = content_type or 'application/octet-stream'
+            response = HttpResponse(decrypted_data, content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename="{cf.file_name}"'
+            return response
     else:
         details = contract_service.get_contract_details(cf.version.contract.id, version_id=cf.version.id) or {}
         text_str = details.get('raw_content') or cf.version.contract.title or ''
@@ -1031,6 +1017,17 @@ def api_blockchain_certificate(request, user_id):
         return JsonResponse(resp.json(), status=resp.status_code)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+def api_blockchain_user(request, user_id):
+    """GET → fetch user details directly from the Fabric gateway ledger."""
+    try:
+        gateway_url = _os.environ.get("FABRIC_GATEWAY_URL", "http://localhost:5000")
+        resp = _req.get(f"{gateway_url}/user/{user_id}", timeout=5)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
 
 
 @login_required(login_url='/login/')
@@ -1360,5 +1357,305 @@ def logout_user(request):
     """Log the user out and redirect to the login page."""
     logout(request)
     return redirect('/login/')
+
+
+@manager_required
+def admin_dashboard(request):
+    """Render the custom Admin Dashboard."""
+    return render(request, 'contracts/admin_dashboard.html')
+
+
+@api_manager_required
+def api_admin_stats(request):
+    """GET → stats, service health checks, and recent audit logs."""
+    from django.conf import settings
+    from .models import User, Company, Contract, AuditLog
+    import time
+    
+    # 1. Basic Stats
+    total_users = User.objects.count()
+    total_companies = Company.objects.count()
+    total_contracts = Contract.objects.count()
+    
+    # 2. Service Health Checks
+    health_services = {
+        'AI Service': _os.environ.get("AI_SERVICE_URL", "http://localhost:8001"),
+        'Blockchain Service': _BC_URL,
+        'Workflow Service': _os.environ.get("WORKFLOW_SERVICE_URL", "http://localhost:8003"),
+        'MCP Server': _os.environ.get("LEGAL_MCP_SERVER_URL", "http://127.0.0.1:8005/rpc"),
+    }
+    
+    health_results = {}
+    for name, url in health_services.items():
+        status = 'OFFLINE'
+        latency = 0.0
+        try:
+            start_time = time.time()
+            if name == 'MCP Server':
+                r = _req.post(url, json={"jsonrpc": "2.0", "method": "ping", "id": 1}, timeout=2)
+            else:
+                r = _req.get(url, timeout=2)
+            latency = round((time.time() - start_time) * 1000, 1)
+            if r.status_code < 500:
+                status = 'ONLINE'
+        except Exception:
+            status = 'OFFLINE'
+        health_results[name] = {'status': status, 'latency': latency, 'url': url}
+        
+    # 3. Audit Logs
+    try:
+        page = int(request.GET.get('page', 1))
+    except ValueError:
+        page = 1
+    limit = 10
+    offset = (page - 1) * limit
+
+    total_logs = AuditLog.objects.count()
+    logs = AuditLog.objects.select_related('user', 'contract').order_by('-created_at')[offset:offset+limit]
+    
+    logs_data = []
+    for l in logs:
+        logs_data.append({
+            'id': l.id,
+            'user': l.user.username if l.user else 'System',
+            'action': l.action,
+            'contract_code': l.contract.contract_code if l.contract else None,
+            'ip_address': l.ip_address or 'N/A',
+            'payload': l.payload,
+            'created_at': l.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+        
+    # 4. Users Table (needed for user management tab)
+    users = User.objects.select_related('company', 'role').all().order_by('-id')
+    users_data = []
+    for u in users:
+        users_data.append({
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'company_name': u.company.company_name if u.company else 'N/A',
+            'role_name': u.role.role_name if u.role else 'Staff',
+            'status': u.status,
+            'block_number': u.block_number,
+            'tx_hash': u.tx_hash
+        })
+
+    return JsonResponse({
+        'stats': {
+            'total_users': total_users,
+            'total_companies': total_companies,
+            'total_contracts': total_contracts,
+        },
+        'health': health_results,
+        'logs': logs_data,
+        'logs_pagination': {
+            'page': page,
+            'total_logs': total_logs,
+            'limit': limit,
+            'total_pages': (total_logs + limit - 1) // limit if total_logs > 0 else 1
+        },
+        'users': users_data,
+        'skip_ocr': _os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
+    })
+
+
+@csrf_exempt
+@api_manager_required
+def api_admin_delete_user(request, user_id):
+    """POST/DELETE → delete user."""
+    if request.method not in ('POST', 'DELETE'):
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+        
+    from .models import User, AuditLog
+    try:
+        user = User.objects.get(id=user_id)
+        username = user.username
+        if user == request.user:
+            return JsonResponse({'error': 'Cannot delete your own account'}, status=400)
+            
+        user.delete()
+        
+        # Audit Log
+        AuditLog.objects.create(
+            user=request.user,
+            action=f"Deleted user account: {username} (ID: {user_id})",
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        return JsonResponse({'status': 'success'})
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_manager_required
+def api_admin_retry_user(request, user_id):
+    """POST → retry user anchoring."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+        
+    from .models import User, AuditLog
+    try:
+        user = User.objects.get(id=user_id)
+        
+        # Retry blockchain-service registration
+        resp = _req.post(f"{_BC_URL}/user/register/", json={
+            'user_id': user.id,
+            'username': user.username,
+            'company_id': user.company.id if user.company else None,
+            'role': user.role.role_name if user.role else 'Staff',
+            'status': 'ACTIVE',
+            'sender': 'System'
+        }, timeout=20)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            user.status = 'ACTIVE'
+            user.tx_hash = data.get('tx_hash')
+            user.block_number = data.get('block_number')
+            user.block_hash = data.get('block_hash')
+            user.save()
+            
+            # Audit Log
+            AuditLog.objects.create(
+                user=request.user,
+                action=f"Retried and anchored user: {user.username} (Block #{user.block_number})",
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+            
+            # Automatically issue a digital certificate
+            try:
+                import random
+                clean_company_name = "".join(x for x in user.company.company_name.upper() if x.isalnum() or x == ' ') if user.company else "SYSTEM"
+                serial_number = f"CERT-{clean_company_name.replace(' ', '-')[:8]}-{user.id:04d}-{random.randint(1000, 9999)}"
+                _req.post(f"{_BC_URL}/certificates/create/", json={
+                    'user_id': user.id,
+                    'serial_number': serial_number,
+                    'issuer': 'ContractGuard CA',
+                    'valid_days': 365
+                }, timeout=10)
+            except Exception as cert_err:
+                print(f"Warning: Failed to auto issue certificate: {str(cert_err)}")
+                
+            return JsonResponse({
+                'status': 'success',
+                'tx_hash': user.tx_hash,
+                'block_number': user.block_number
+            })
+        else:
+            error_msg = resp.json().get('error', 'Unknown blockchain error')
+            return JsonResponse({'error': f'Blockchain error: {error_msg}'}, status=400)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@api_manager_required
+def api_admin_toggle_ocr(request):
+    """GET or POST → view or toggle dynamic OCR engine setting."""
+    from .models import AuditLog
+    if request.method == 'GET':
+        skip_ocr = _os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
+        return JsonResponse({'skip_ocr': skip_ocr})
+        
+    elif request.method == 'POST':
+        try:
+            body = json.loads(request.body)
+            skip_ocr = body.get('skip_ocr', True)
+            
+            _os.environ["SKIP_OCR"] = "True" if skip_ocr else "False"
+            
+            # Audit Log
+            AuditLog.objects.create(
+                user=request.user,
+                action=f"Changed system OCR configuration: SKIP_OCR={skip_ocr}",
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+            
+            return JsonResponse({'status': 'success', 'skip_ocr': skip_ocr})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+            
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+# ─────────────────────────────────────────────────────────────────
+#  WORKFLOW KEY & SIGNATURE PROXIES
+# ─────────────────────────────────────────────────────────────────
+
+@csrf_exempt
+@login_required(login_url='/login/')
+def api_workflow_keys_proxy(request):
+    """Proxy keys listing/creation to workflow-service."""
+    import requests
+    from django.conf import settings
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
+    url = f"{workflow_url}/keys/"
+    
+    try:
+        if request.method == "GET":
+            qs = request.GET.urlencode()
+            full_url = url + (f"?{qs}" if qs else "")
+            resp = requests.get(full_url, timeout=10)
+            return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+            
+        elif request.method == "POST":
+            resp = requests.post(url, json=json.loads(request.body), timeout=10)
+            return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+            
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    except Exception as e:
+        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+
+
+@csrf_exempt
+@login_required(login_url='/login/')
+def api_workflow_key_rotate_proxy(request, key_id):
+    """Proxy key rotation to workflow-service."""
+    import requests
+    from django.conf import settings
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
+    url = f"{workflow_url}/keys/{key_id}/rotate/"
+    try:
+        resp = requests.post(url, timeout=10)
+        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+
+
+@csrf_exempt
+@login_required(login_url='/login/')
+def api_workflow_key_revoke_proxy(request, key_id):
+    """Proxy key revocation to workflow-service."""
+    import requests
+    from django.conf import settings
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
+    url = f"{workflow_url}/keys/{key_id}/revoke/"
+    try:
+        resp = requests.post(url, timeout=10)
+        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+
+
+@login_required(login_url='/login/')
+def api_workflow_signatures_proxy(request):
+    """Proxy signatures listing to workflow-service."""
+    import requests
+    from django.conf import settings
+    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
+    url = f"{workflow_url}/signatures/"
+    try:
+        qs = request.GET.urlencode()
+        full_url = url + (f"?{qs}" if qs else "")
+        resp = requests.get(full_url, timeout=10)
+        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+    except Exception as e:
+        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+
+
 
 

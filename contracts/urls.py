@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/blockchain/transaction/<str:tx_hash>/', views.api_blockchain_transaction, name='api_blockchain_transaction'),
     path('api/blockchain/proof/<int:version_id>/', views.api_blockchain_proof, name='api_blockchain_proof'),
     path('api/blockchain/certificate/<int:user_id>/', views.api_blockchain_certificate, name='api_blockchain_certificate'),
+    path('api/blockchain/user/<int:user_id>/', views.api_blockchain_user, name='api_blockchain_user'),
     path('api/contracts/files/<int:file_id>/download/', views.api_download_file, name='api_download_file'),
     path('api/contracts/<int:contract_id>/download-pdf/', views.api_download_contract_pdf, name='api_download_contract_pdf'),
     path('api/analyses/', views.api_analyses_list, name='api_analyses_list'),
@@ -45,4 +46,16 @@ urlpatterns = [
     path('login/', views.login_user, name='login'),
     path('signup/', views.signup_user, name='signup'),
     path('logout/', views.logout_user, name='logout'),
+    # Custom Admin Dashboard
+    path('admin-dashboard/', views.admin_dashboard, name='admin_dashboard'),
+    path('api/admin/stats/', views.api_admin_stats, name='api_admin_stats'),
+    path('api/admin/users/<int:user_id>/delete/', views.api_admin_delete_user, name='api_admin_delete_user'),
+    path('api/admin/users/<int:user_id>/retry/', views.api_admin_retry_user, name='api_admin_retry_user'),
+    path('api/admin/config/ocr/', views.api_admin_toggle_ocr, name='api_admin_toggle_ocr'),
+
+    # Workflow Key & Signature Management
+    path('api/admin/keys/', views.api_workflow_keys_proxy, name='api_workflow_keys_proxy'),
+    path('api/admin/keys/<int:key_id>/rotate/', views.api_workflow_key_rotate_proxy, name='api_workflow_key_rotate_proxy'),
+    path('api/admin/keys/<int:key_id>/revoke/', views.api_workflow_key_revoke_proxy, name='api_workflow_key_revoke_proxy'),
+    path('api/admin/signatures/', views.api_workflow_signatures_proxy, name='api_workflow_signatures_proxy'),
 ]

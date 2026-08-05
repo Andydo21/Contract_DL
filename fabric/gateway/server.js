@@ -16,7 +16,7 @@ const certPath = path.join(mspRoot, 'users', 'User1@org1.example.com', 'msp', 's
 const keyDirectoryPath = path.join(mspRoot, 'users', 'User1@org1.example.com', 'msp', 'keystore');
 const tlsCertPath = path.join(mspRoot, 'peers', 'peer0.org1.example.com', 'tls', 'ca.crt');
 
-const peerEndpoint = process.env.PEER_ENDPOINT || 'peer0.org1.example.com:7051';
+const peerEndpoint = process.env.PEER_ENDPOINT || 'localhost:7051';
 const channelName = process.env.CHANNEL_NAME || 'contracts-channel';
 const chaincodeName = process.env.CHAINCODE_NAME || 'ContractVerifyChaincode';
 
@@ -383,6 +383,86 @@ app.post('/user/store', async (req, res) => {
         });
     } catch (error) {
         console.error('Error storing user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/signature/store', async (req, res) => {
+    try {
+        const { signatureId, stepId, userId, certificateSerial, signatureHash } = req.body;
+        if (!signatureId || !stepId || !userId || !certificateSerial || !signatureHash) {
+            return res.status(400).json({ error: 'signatureId, stepId, userId, certificateSerial, and signatureHash are required' });
+        }
+
+        if (!contract) {
+            return res.status(503).json({ error: 'Fabric Gateway not initialized' });
+        }
+
+        const timestamp = new Date().toISOString();
+        console.log(`Submitting StoreSignature for signature ${signatureId}...`);
+        
+        const commit = await contract.submitAsync('StoreSignature', {
+            arguments: [String(signatureId), String(stepId), String(userId), certificateSerial, signatureHash, timestamp]
+        });
+        console.log(`Transaction submitted to orderer.`);
+
+        const status = await commit.getStatus();
+        if (!status.successful) {
+            throw new Error(`Transaction validation failed with code: ${status.code}`);
+        }
+        const txId = status.transactionId;
+
+        console.log(`StoreSignature transaction ${txId} committed. Querying block info...`);
+        const blockInfo = await getBlockInfoByTxId(txId);
+        
+        res.json({
+            status: 'CONFIRMED',
+            tx_hash: txId,
+            block_number: blockInfo.blockNumber,
+            block_hash: blockInfo.blockHash,
+            gas_fee: 0.0,
+            latency: 1.2
+        });
+    } catch (error) {
+        console.error('Error storing signature:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/user/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!contract) {
+            return res.status(503).json({ error: 'Fabric Gateway not initialized' });
+        }
+        
+        console.log(`Querying GetUser for user ${id}...`);
+        const resultBytes = await contract.evaluateTransaction('GetUser', String(id));
+        const decodedStr = Buffer.from(resultBytes).toString('utf8');
+        console.log("Decoded GetUser result:", decodedStr);
+        const resultJson = JSON.parse(decodedStr);
+        res.json(resultJson);
+    } catch (error) {
+        console.error('Error querying user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/signature/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!contract) {
+            return res.status(503).json({ error: 'Fabric Gateway not initialized' });
+        }
+        
+        console.log(`Querying GetSignature for signature ${id}...`);
+        const resultBytes = await contract.evaluateTransaction('GetSignature', String(id));
+        const decodedStr = Buffer.from(resultBytes).toString('utf8');
+        console.log("Decoded GetSignature result:", decodedStr);
+        const resultJson = JSON.parse(decodedStr);
+        res.json(resultJson);
+    } catch (error) {
+        console.error('Error querying signature:', error);
         res.status(500).json({ error: error.message });
     }
 });

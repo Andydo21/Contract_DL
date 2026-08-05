@@ -8,6 +8,7 @@ cd /fabric
 # Clean up any old configurations
 rm -rf crypto-config
 rm -f contracts-channel.block
+rm -f chaincode/package_id.txt
 
 # 1. Generate crypto materials
 cryptogen generate --config=crypto-config.yaml --output=crypto-config
