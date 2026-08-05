@@ -73,7 +73,17 @@ class DigitalSignature(models.Model):
     user_id = models.BigIntegerField(verbose_name="User ID")
     key = models.ForeignKey(KeyManagement, on_delete=models.SET_NULL, null=True, blank=True, related_name='signatures', verbose_name="Signing Key")
     signature_hash = models.CharField(max_length=512, verbose_name="Signature Hash")
+    algorithm = models.CharField(max_length=100, default="SHA256withRSA", verbose_name="Signing Algorithm")
     signed_at = models.DateTimeField(auto_now_add=True, verbose_name="Signed At")
+
+    # Blockchain confirmation fields (populated after anchoring to Hyperledger Fabric)
+    tx_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Fabric Transaction Hash")
+    block_number = models.BigIntegerField(blank=True, null=True, verbose_name="Block Number")
+    block_hash = models.CharField(max_length=255, blank=True, null=True, verbose_name="Block Hash")
+
+    # Verification status
+    verified = models.BooleanField(default=False, verbose_name="Verified")
+    verified_at = models.DateTimeField(blank=True, null=True, verbose_name="Verified At")
 
     class Meta:
         verbose_name = 'Digital Signature'
@@ -81,3 +91,4 @@ class DigitalSignature(models.Model):
 
     def __str__(self):
         return f"Signature for step {self.step_id} by user {self.user_id}"
+
