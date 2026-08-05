@@ -1630,6 +1630,37 @@ def api_workflow_signatures_proxy(request):
         return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
+def api_obtain_token_from_session(request):
+    """GET -> Issue a JWT token for the currently logged-in session user.
+    Allows frontend JS to bootstrap JWT auth without re-entering credentials.
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated.'}, status=401)
+    try:
+        import datetime
+        import jwt as _jwt
+        from django.conf import settings
+        user = request.user
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'role': user.role.role_name if (hasattr(user, 'role') and user.role) else 'USER',
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7),
+            'iat': datetime.datetime.utcnow(),
+        }
+        token = _jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+        return JsonResponse({
+            'token': token,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'role': user.role.role_name if (hasattr(user, 'role') and user.role) else 'USER',
+            }
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
 
 @csrf_exempt
 def api_obtain_token(request):

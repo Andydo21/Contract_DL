@@ -1,3 +1,29 @@
+# ============================================================
+# 0. Cài đặt thư viện (chạy cell này trước khi chạy các cell khác)
+# ============================================================
+import subprocess, sys
+
+def pip_install(*packages):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *packages])
+
+pip_install(
+    "pyngrok",           # Expose localhost qua public URL
+    "fastapi",           # Web framework
+    "uvicorn",           # ASGI server
+    "nest-asyncio",      # Cho phép asyncio lồng nhau trong Jupyter/Kaggle
+    "pydantic",          # Data validation (thường đã có sẵn)
+    "transformers",      # Load HuggingFace models
+    "accelerate",        # Hỗ trợ device_map="auto"
+    "bitsandbytes",      # 4-bit quantization
+    "sentencepiece",     # Tokenizer cho một số model
+    "protobuf",          # Dependency của transformers
+)
+
+print("✅ Đã cài đặt xong tất cả thư viện!")
+
+# ============================================================
+# 1. Imports
+# ============================================================
 import os
 import nest_asyncio
 import uvicorn
