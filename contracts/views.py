@@ -83,7 +83,6 @@ def workflow_detail(request, workflow_id):
     return render(request, 'contracts/workflow_detail.html', context)
 
 
-@csrf_exempt
 def api_workflow_all(request):
     """GET: Proxy — lấy tất cả workflows từ workflow-service."""
     import requests as req
@@ -97,7 +96,6 @@ def api_workflow_all(request):
         return JsonResponse({'error': str(e), 'workflows': []}, status=200)
 
 
-@csrf_exempt
 def api_approve_workflow_step(request, step_id):
     """POST: Proxy — duyệt / từ chối 1 step trong workflow-service."""
     import requests as req
@@ -197,7 +195,6 @@ def contract_detail(request, contract_id):
     return render(request, 'contracts/contract_detail.html', {'contract': details})
 
 
-@csrf_exempt
 @api_manager_required
 def api_contracts_list(request):
     """
@@ -218,7 +215,6 @@ def api_contracts_list(request):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 @api_manager_required
 def api_create_contract(request):
     """
@@ -265,7 +261,6 @@ def api_create_contract(request):
         return JsonResponse({'error': str(e)}, status=400)
 
 
-@csrf_exempt
 @api_manager_required
 def api_contract_detail(request, contract_id):
     """
@@ -289,7 +284,6 @@ def api_contract_detail(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 @api_manager_required
 def api_analyze_contract(request, contract_id):
     """
@@ -320,7 +314,6 @@ def api_analyze_contract(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 @api_manager_required
 def api_manual_extract_contract(request, contract_id):
     """
@@ -351,7 +344,6 @@ def api_manual_extract_contract(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 @api_manager_required
 def api_push_to_workflow(request, contract_id):
     """
@@ -373,7 +365,6 @@ def api_push_to_workflow(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 def api_workflow_status(request, contract_id):
     """
     GET: Lấy trạng thái workflow hiện tại của contract từ workflow-service.
@@ -390,7 +381,6 @@ def api_workflow_status(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 def api_contract_versions(request, contract_id):
     """
     GET: Get all versions of a contract.
@@ -432,7 +422,6 @@ def api_contract_versions(request, contract_id):
 
 
 
-@csrf_exempt
 def api_submit_review(request, analysis_id):
     """
     POST: Submit legal expert review.
@@ -465,7 +454,6 @@ def api_submit_review(request, analysis_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@csrf_exempt
 def api_risks_list(request):
     """
     GET: Get list of all master risks.
@@ -518,7 +506,6 @@ def analysis_history(request):
     return render(request, 'contracts/analysis_history.html')
 
 
-@csrf_exempt
 @api_manager_required
 def api_analyses_list(request):
     """
@@ -540,7 +527,6 @@ def developer_test(request):
     return render(request, 'contracts/developer_test.html')
 
 
-@csrf_exempt
 def api_run_developer_test(request):
     """
     POST: Run end-to-end test analysis on selected contract and return full payload & logs.
@@ -722,7 +708,6 @@ def _get_version_or_latest(contract_id, version_id=None):
     return contract, version, None
 
 
-@csrf_exempt
 def api_blockchain_generate_proof(request, contract_id):
     """POST { version_id? } → /proofs/generate/ trên blockchain-service."""
     if request.method != 'POST':
@@ -741,7 +726,6 @@ def api_blockchain_generate_proof(request, contract_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def api_blockchain_anchor_proof(request, contract_id):
     """POST { proof_id, network_id, smart_contract_id? } → /proofs/anchor/ trên blockchain-service."""
     if request.method != 'POST':
@@ -760,7 +744,6 @@ def api_blockchain_anchor_proof(request, contract_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def api_blockchain_verify_proof(request, contract_id):
     """POST { version_id? } → /proofs/verify/ trên blockchain-service."""
     if request.method != 'POST':
@@ -804,7 +787,6 @@ def api_blockchain_status(request, contract_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def api_blockchain_create_certificate(request):
     """POST { user_id, serial_number, issuer, valid_days? } → /certificates/create/ trên blockchain-service."""
     if request.method != 'POST':
@@ -824,7 +806,6 @@ def api_blockchain_create_certificate(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def api_blockchain_sign_step(request):
     """POST { step_id, user_id, certificate_id, signature_hash } → /signatures/create/ trên blockchain-service."""
     if request.method != 'POST':
@@ -1036,7 +1017,6 @@ def identity_registry(request):
     return render(request, 'contracts/identity_registry.html')
 
 
-@csrf_exempt
 def api_register_company(request):
     """POST: Register a new Company in DB and anchor it to the blockchain."""
     import requests
@@ -1096,7 +1076,6 @@ def api_register_company(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 def api_register_user(request):
     """POST: Register a new User in DB and anchor them to the blockchain."""
     import requests
@@ -1459,7 +1438,6 @@ def api_admin_stats(request):
     })
 
 
-@csrf_exempt
 @api_manager_required
 def api_admin_delete_user(request, user_id):
     """POST/DELETE → delete user."""
@@ -1488,7 +1466,6 @@ def api_admin_delete_user(request, user_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @api_manager_required
 def api_admin_retry_user(request, user_id):
     """POST → retry user anchoring."""
@@ -1552,7 +1529,6 @@ def api_admin_retry_user(request, user_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-@csrf_exempt
 @api_manager_required
 def api_admin_toggle_ocr(request):
     """GET or POST → view or toggle dynamic OCR engine setting."""
@@ -1586,7 +1562,6 @@ def api_admin_toggle_ocr(request):
 #  WORKFLOW KEY & SIGNATURE PROXIES
 # ─────────────────────────────────────────────────────────────────
 
-@csrf_exempt
 @login_required(login_url='/login/')
 def api_workflow_keys_proxy(request):
     """Proxy keys listing/creation to workflow-service."""
@@ -1611,7 +1586,6 @@ def api_workflow_keys_proxy(request):
         return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
-@csrf_exempt
 @login_required(login_url='/login/')
 def api_workflow_key_rotate_proxy(request, key_id):
     """Proxy key rotation to workflow-service."""
@@ -1626,7 +1600,6 @@ def api_workflow_key_rotate_proxy(request, key_id):
         return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
-@csrf_exempt
 @login_required(login_url='/login/')
 def api_workflow_key_revoke_proxy(request, key_id):
     """Proxy key revocation to workflow-service."""
@@ -1657,7 +1630,6 @@ def api_workflow_signatures_proxy(request):
         return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
-from django.views.decorators.csrf import csrf_exempt
 
 @csrf_exempt
 def api_obtain_token(request):
