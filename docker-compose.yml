@@ -81,6 +81,10 @@ services:
       - DB_HOST=${DB_HOST}
       - DB_PORT=${DB_PORT}
       - DB_SSLMODE=${DB_SSLMODE}
+      - HUGGINGFACE_TOKEN=${HF_TOKEN:-}
+      - WORKFLOW_HF_MODEL=${WORKFLOW_HF_MODEL:-d90nqm/contract-workflow}
+    ports:
+      - "8003:8000"
     volumes:
       - ./workflow_service:/app
     networks:
