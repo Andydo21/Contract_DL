@@ -83,6 +83,8 @@ services:
       - DB_HOST=${DB_HOST}
       - DB_PORT=${DB_PORT}
       - DB_SSLMODE=${DB_SSLMODE}
+      - KAGGLE_AI_URL=${KAGGLE_AI_URL}
+      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai-service:8000}
     volumes:
       - ./workflow_service:/app
     networks:

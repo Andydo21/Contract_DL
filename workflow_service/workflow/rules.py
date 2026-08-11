@@ -346,7 +346,7 @@ def recommend_workflow(text: str, clause_types: list, contract_type: str):
                     "clause_types": signals,
                     "contract_type": declared_type
                 },
-                timeout=10
+                timeout=60  # Kaggle model may take time on first inference
             )
             if resp.status_code == 200:
                 ai_data = resp.json()
