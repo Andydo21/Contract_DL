@@ -1,4 +1,6 @@
-{
+import json
+
+notebook = {
  "cells": [
   {
    "cell_type": "markdown",
@@ -11,7 +13,7 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
+   "execution_count": None,
    "metadata": {},
    "outputs": [],
    "source": [
@@ -21,7 +23,7 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
+   "execution_count": None,
    "metadata": {},
    "outputs": [],
    "source": [
@@ -39,7 +41,7 @@
     "nest_asyncio.apply()\n",
     "app = FastAPI(title=\"Unified Kaggle Workflow Recommendation Service\")\n",
     "\n",
-    "# \u2500\u2500 Classification model: load d90nqm/contract-workflow directly from HuggingFace \u2500\u2500\n",
+    "# ── Classification model: load d90nqm/contract-workflow directly from HuggingFace ──\n",
     "# This model classifies contracts into 8 workflow types:\n",
     "# WF_EMPLOYMENT, WF_EXECUTIVE, WF_GENERAL, WF_NDA,\n",
     "# WF_PROCUREMENT, WF_PURCHASE, WF_SERVICE, WF_VENDOR\n",
@@ -56,7 +58,7 @@
     "    print(f\"Failed to load classification model: {e}\")\n",
     "    deberta_model = None\n",
     "\n",
-    "# \u2500\u2500 Step generation model: Flan-T5 fine-tuned locally on Kaggle \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n",
+    "# ── Step generation model: Flan-T5 fine-tuned locally on Kaggle ──────────────\n",
     "# This model generates the sequence of approval steps (e.g. Legal Review -> Finance Review -> ...)\n",
     "FLANT5_PATH = \"/kaggle/working/dynamic-workflow-builder-final\"\n",
     "if not os.path.exists(FLANT5_PATH):\n",
@@ -76,18 +78,18 @@
     "\n",
     "# Define detailed step library mapping (descriptions and role ids)\n",
     "STEP_DETAILS_MAPPING = {\n",
-    "    \"Contract Negotiation\": {\"role_id\": 4, \"description\": \"Th\u01b0\u01a1ng th\u1ea3o c\u00e1c \u0111i\u1ec1u kho\u1ea3n ch\u01b0a th\u1ed1ng nh\u1ea5t gi\u1eefa c\u00e1c b\u00ean k\u00fd k\u1ebft.\"},\n",
-    "    \"Legal Review\": {\"role_id\": 4, \"description\": \"R\u00e0 so\u00e1t t\u00ednh ph\u00e1p l\u00fd, r\u1ee7i ro \u0111i\u1ec1u kho\u1ea3n v\u00e0 tu\u00e2n th\u1ee7 ph\u00e1p lu\u1eadt.\"},\n",
-    "    \"Technical Review\": {\"role_id\": 7, \"description\": \"Th\u1ea9m \u0111\u1ecbnh t\u00ednh kh\u1ea3 thi k\u1ef9 thu\u1eadt v\u00e0 gi\u1ea3i ph\u00e1p c\u00f4ng ngh\u1ec7 \u0111\u1ec1 xu\u1ea5t.\"},\n",
-    "    \"Security Review\": {\"role_id\": 8, \"description\": \"\u0110\u00e1nh gi\u00e1 an to\u00e0n th\u00f4ng tin, b\u1ea3o m\u1eadt d\u1eef li\u1ec7u v\u00e0 h\u1ec7 th\u1ed1ng.\"},\n",
-    "    \"Compliance Review\": {\"role_id\": 9, \"description\": \"Ki\u1ec3m tra s\u1ef1 tu\u00e2n th\u1ee7 c\u00e1c quy \u0111\u1ecbnh n\u1ed9i b\u1ed9 v\u00e0 ti\u00eau chu\u1ea9n ng\u00e0nh.\"},\n",
-    "    \"Finance Review\": {\"role_id\": 6, \"description\": \"Th\u1ea9m \u0111\u1ecbnh ng\u00e2n s\u00e1ch, d\u00f2ng ti\u1ec1n v\u00e0 ngh\u0129a v\u1ee5 t\u00e0i ch\u00ednh ph\u00e1t sinh.\"},\n",
-    "    \"Procurement Review\": {\"role_id\": 10, \"description\": \"\u0110\u00e1nh gi\u00e1 n\u0103ng l\u1ef1c nh\u00e0 cung c\u1ea5p, \u0111\u01a1n gi\u00e1 v\u00e0 ch\u00ednh s\u00e1ch mua s\u1eafm.\"},\n",
-    "    \"Manager Approval\": {\"role_id\": 5, \"description\": \"Ph\u00ea duy\u1ec7t c\u1ea5p qu\u1ea3n l\u00fd tr\u1ef1c ti\u1ebfp v\u1ec1 m\u1eb7t ch\u1ee7 tr\u01b0\u01a1ng v\u00e0 ng\u00e2n s\u00e1ch.\"},\n",
-    "    \"Director Approval\": {\"role_id\": 11, \"description\": \"Ph\u00ea duy\u1ec7t c\u1ea5p Gi\u00e1m \u0111\u1ed1c b\u1ed9 ph\u1eadn \u0111\u1ed1i v\u1edbi c\u00e1c h\u1ee3p \u0111\u1ed3ng/d\u1ef1 \u00e1n l\u1edbn.\"},\n",
-    "    \"Executive Approval\": {\"role_id\": 11, \"description\": \"Ph\u00ea duy\u1ec7t t\u1ed1i cao t\u1eeb Ban \u0111i\u1ec1u h\u00e0nh/T\u1ed5ng gi\u00e1m \u0111\u1ed1c.\"},\n",
-    "    \"Contract Signing\": {\"role_id\": 4, \"description\": \"\u0110\u1ea1i di\u1ec7n c\u00f3 th\u1ea9m quy\u1ec1n th\u1ef1c hi\u1ec7n k\u00fd k\u1ebft h\u1ee3p \u0111\u1ed3ng ch\u00ednh th\u1ee9c.\"},\n",
-    "    \"Document Archive\": {\"role_id\": 4, \"description\": \"L\u01b0u tr\u1eef h\u1ee3p \u0111\u1ed3ng \u0111\u00e3 k\u00fd k\u1ebft v\u00e0o h\u1ec7 th\u1ed1ng v\u00e0 b\u00e0n giao b\u1ea3n c\u1ee9ng.\"}\n",
+    "    \"Contract Negotiation\": {\"role_id\": 4, \"description\": \"Thương thảo các điều khoản chưa thống nhất giữa các bên ký kết.\"},\n",
+    "    \"Legal Review\": {\"role_id\": 4, \"description\": \"Rà soát tính pháp lý, rủi ro điều khoản và tuân thủ pháp luật.\"},\n",
+    "    \"Technical Review\": {\"role_id\": 7, \"description\": \"Thẩm định tính khả thi kỹ thuật và giải pháp công nghệ đề xuất.\"},\n",
+    "    \"Security Review\": {\"role_id\": 8, \"description\": \"Đánh giá an toàn thông tin, bảo mật dữ liệu và hệ thống.\"},\n",
+    "    \"Compliance Review\": {\"role_id\": 9, \"description\": \"Kiểm tra sự tuân thủ các quy định nội bộ và tiêu chuẩn ngành.\"},\n",
+    "    \"Finance Review\": {\"role_id\": 6, \"description\": \"Thẩm định ngân sách, dòng tiền và nghĩa vụ tài chính phát sinh.\"},\n",
+    "    \"Procurement Review\": {\"role_id\": 10, \"description\": \"Đánh giá năng lực nhà cung cấp, đơn giá và chính sách mua sắm.\"},\n",
+    "    \"Manager Approval\": {\"role_id\": 5, \"description\": \"Phê duyệt cấp quản lý trực tiếp về mặt chủ trương và ngân sách.\"},\n",
+    "    \"Director Approval\": {\"role_id\": 11, \"description\": \"Phê duyệt cấp Giám đốc bộ phận đối với các hợp đồng/dự án lớn.\"},\n",
+    "    \"Executive Approval\": {\"role_id\": 11, \"description\": \"Phê duyệt tối cao từ Ban điều hành/Tổng giám đốc.\"},\n",
+    "    \"Contract Signing\": {\"role_id\": 4, \"description\": \"Đại diện có thẩm quyền thực hiện ký kết hợp đồng chính thức.\"},\n",
+    "    \"Document Archive\": {\"role_id\": 4, \"description\": \"Lưu trữ hợp đồng đã ký kết vào hệ thống và bàn giao bản cứng.\"}\n",
     "}\n",
     "\n",
     "INDEX_TO_WORKFLOW_ID = {\n",
@@ -201,7 +203,7 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
+   "execution_count": None,
    "metadata": {},
    "outputs": [],
    "source": [
@@ -228,3 +230,8 @@
  "nbformat": 4,
  "nbformat_minor": 2
 }
+
+with open("workflow-api-server.ipynb", "w", encoding="utf-8") as f:
+    json.dump(notebook, f, indent=1)
+
+print("workflow-api-server.ipynb generated successfully!")
