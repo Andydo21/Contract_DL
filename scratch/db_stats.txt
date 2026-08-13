@@ -1,0 +1,52 @@
+=== VERSION 93 CONTEXTS ===
+Page 1 (source=pdf, confidence=1.00):
+----------------------------------------
+DO DANG AN 
+Software Engineering Intern 
+Phone: 0344 375 886 • Email: ando21445@gmail.com 
+GitHub: github.com/Andydo21 • Address: Hanoi, Vietnam 
+English: IELTS B2 (5.5) 
+ 
+ 
+PROFESSIONAL SUMMARY 
+Ambitious Software Engineering student at PTIT (High-Quality Program) seeking a Software Engineering Internship. Offers hands- on backend and full-stack development experience from internships at Mobifone and GSolution. Proficient in building APIs and backend services using Java (Spring Boot), C# (.NET Core), and Python (Django). Eager to contribute to engineering teams and apply academic knowledge in microservices, AI integrations, and database design. Certified IELTS B2 (5.5) for comfortable team collaboration. 
+TECHNICAL SKILLS & CERTIFICATIONS 
+• Languages & Backend: Java, C# (.NET), Python, TypeScript, JavaScript, SQL, C++, Spring Boot, Spring Cloud, .NET 
+Core/ASP.NET Core (8/9), Django, Servlet/JSP 
+• Frontend & Design: Angular, Tailwind CSS, Nx Monorepo, HTML5, CSS3, RESTful APIs, SOLID Principles 
+• Databases & Tools: PostgreSQL, SQL Server, MySQL, Redis, Docker, Docker Compose, Kafka, APISIX, Git/GitHub, Linux 
+• Certifications: IELTS B2 Certificate (5.5) - Upper-Intermediate Professional English Proficiency 
+PROFESSIONAL EXPERIENCE 
+GSOLUTION | Fullstack Developer Intern 
+Jan 2025 - Present 
+• Developed and optimized backend RESTful API endpoints using .NET Core and Entity Framework Core, maintaining transactional safety. 
+• Designed SQL Server database schemas, conducting query profiling and index tuning to minimize backend data access latencies. 
+• Built dynamic, responsive SPAs leveraging Angular and Tailwind CSS in an Nx Monorepo, implementing reactive forms and custom route guards. 
+MOBIFONE | Backend Developer Intern 
+Jul 2023 - Dec 2023 
+• Developed backend microservices using Spring Boot and Python Django to support large-scale telecom analytics tools. 
+• Developed high-efficiency RESTful APIs, securing low-latency asynchronous inter-service communications. 
+• Optimized PostgreSQL queries and database access, and implemented robust API test suites using JUnit and Mockito. 
+KEY PROJECTS 
+1. Startup Pitching & Ecosystem Management (Event-Driven) github.com/Andydo21/Api-gateway_vs_bff 
+• Implemented Saga Choreography over Kafka to handle distributed transactions and rollback logic across core scheduling, booking, and meeting microservices. 
+• Configured Apache APISIX API Gateway for routing, rate limiting, and BFF (Backend for Frontend) aggregation. 
+Stack: Python, Django, Apache APISIX, Kafka Broker, Redis, PostgreSQL, Angular, Docker Compose 
+2. Contract_DL - AI-Powered Blockchain Contract Management github.com/Andydo21/Contract_DL 
+• Designed a Django gateway coordinating FastAPI AI services and a local Hyperledger Fabric blockchain network. 
+• Integrated chaincode wrapper APIs to anchor contract hash pointers on-chain for secure, tamper-proof auditing. 
+Stack: Python, Django, FastAPI, Hyperledger Fabric, Docker, PostgreSQL 
+3. Vietnamese Document Intelligence NLP Platform github.com/Andydo21/Transformer-project 
+• Fine-tuned PhoBERT/ViT5 (using PEFT/LoRA) for contract classification and summarization, achieving >90% validation accuracy. 
+• Deployed models as Dockerized FastAPI endpoints, utilizing vector databases for semantic document QA. 
+Stack: Python, FastAPI, PyTorch, Hugging Face, PhoBERT, ViT5, Docker 
+4. BookBrRe - Library Web Application with DAO Testing github.com/Andydo21/BookBrRe 
+• Built a library MVC web app using Java Servlets/JSP and PostgreSQL, covered by comprehensive JUnit/Mockito unit tests. 
+Stack: Java, Servlet, JSP, JSTL, PostgreSQL, Maven, JUnit, Mockito, Docker Compose 
+EDUCATION 
+Posts and Telecommunications Institute of Technology (PTIT) 
+2022 - Present 
+Bachelor of Science in Information Technology (High-Quality Program / CLC) 
+Relevant Coursework: OOP, Data Structures & Algorithms, Database Management Systems (3NF), Software Engineering, Web 
+Development.
+----------------------------------------

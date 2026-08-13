@@ -28,13 +28,14 @@ class WorkflowRepository:
         )
 
     @staticmethod
-    def create_step(workflow, step_order, step_name, role_id=None, status="PENDING", description=None):
+    def create_step(workflow, step_order, step_name, role_id=None,reasons=None, status="PENDING", description=None):
         """Create a step associated with a workflow."""
         return WorkflowStep.objects.create(
             workflow=workflow,
             step_order=step_order,
             step_name=step_name,
             role_id=role_id,
+            reason=reason,
             status=status,
             description=description
         )

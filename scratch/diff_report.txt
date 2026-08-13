@@ -1,0 +1,422 @@
+
+=================== DIFF FOR: config\settings.py ===================
+--- inner/config\settings.py
++++ outer/config\settings.py
+@@ -37,3 +37,2 @@
+     "contracts.apps.ContractsConfig",
+-    "ai_extract.apps.AiExtractConfig",
+ ]
+@@ -141,7 +140 @@
+ )
+-
+-# Kaggle Qwen AI Extract & Summarize Service
+-# Points to the kaggle-qwen-service Docker container (or ngrok URL when Kaggle notebook is running)
+-KAGGLE_QWEN_SERVICE_URL = os.environ.get(
+-    "KAGGLE_QWEN_SERVICE_URL", "http://kaggle-qwen-service:8000"
+-)
+
+=================== DIFF FOR: config\urls.py ===================
+--- inner/config\urls.py
++++ outer/config\urls.py
+@@ -8,3 +8,2 @@
+     path('', include('contracts.urls')),
+-    path('api/ai/', include('ai_extract.urls')),
+ ]
+
+=================== DIFF FOR: contracts\repositories.py ===================
+--- inner/contracts\repositories.py
++++ outer/contracts\repositories.py
+@@ -77,2 +77,6 @@
+         return Contract.objects.all().order_by('-created_at')
++        
++    @staticmethod
++    def get_contracts_by_company(company):
++        return Contract.objects.filter(company=company).order_by('-created_at')
+         
+
+=================== DIFF FOR: contracts\services.py ===================
+--- inner/contracts\services.py
++++ outer/contracts\services.py
+@@ -65,4 +65,8 @@
+ 
+-    def list_all_analyses(self):
+-        analyses = self.analysis_repo.get_all_analyses()
++    def list_all_analyses(self, company=None):
++        if company:
++            from .models import AIAnalysis
++            analyses = AIAnalysis.objects.filter(version__contract__company=company).order_by('-created_at')
++        else:
++            analyses = self.analysis_repo.get_all_analyses()
+         result = []
+@@ -117,4 +121,7 @@
+ 
+-    def list_all_contracts(self):
+-        contracts = self.contract_repo.get_all_contracts()
++    def list_all_contracts(self, company=None):
++        if company:
++            contracts = self.contract_repo.get_contracts_by_company(company)
++        else:
++            contracts = self.contract_repo.get_all_contracts()
+         data = []
+
+=================== DIFF FOR: contracts\templates\contracts\dashboard.html ===================
+--- inner/contracts\templates\contracts\dashboard.html
++++ outer/contracts\templates\contracts\dashboard.html
+@@ -27,3 +27,8 @@
+                 <i class="fa-solid fa-shield-halved logo-icon"></i>
+-                <div class="logo-text">Contract Guard AI</div>
++                <div class="logo-text">
++                    Contract Guard AI
++                    <div style="font-size: 11px; font-weight: normal; opacity: 0.7; color: var(--text-muted); margin-top: 2px;">
++                        {{ user.company.company_name|default:"No Company" }}
++                    </div>
++                </div>
+             </div>
+@@ -48,2 +53,11 @@
+                 </a>
++                <div style="display: flex; align-items: center; gap: 12px; margin-left: 12px; padding-left: 12px; border-left: 1px solid rgba(255,255,255,0.1);">
++                    <div style="text-align: right;">
++                        <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">{{ user.username }}</div>
++                        <div style="font-size: 11px; color: var(--text-muted);">{{ user.role.role_name|default:"Staff" }}</div>
++                    </div>
++                    <a href="/logout/" style="color: #fda4af; font-size: 16px; transition: color 0.2s;" title="Log Out">
++                        <i class="fa-solid fa-right-from-bracket"></i>
++                    </a>
++                </div>
+             </div>
+
+=================== DIFF FOR: contracts\templates\contracts\identity_registry.html ===================
+--- inner/contracts\templates\contracts\identity_registry.html
++++ outer/contracts\templates\contracts\identity_registry.html
+@@ -357,8 +357,19 @@
+         <!-- Header -->
+-        <div class="page-header">
+-            <h1 class="page-title">
+-                <i class="fa-solid fa-building-shield" style="color: var(--tab-active)"></i>
+-                Enterprise Identity Registry
+-            </h1>
+-            <p class="page-subtitle">Manage decentralized identity nodes, companies, and authorized personnel anchored on Hyperledger Fabric.</p>
++        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;">
++            <div>
++                <h1 class="page-title">
++                    <i class="fa-solid fa-building-shield" style="color: var(--tab-active)"></i>
++                    Enterprise Identity Registry
++                </h1>
++                <p class="page-subtitle">Manage decentralized identity nodes, companies, and authorized personnel anchored on Hyperledger Fabric.</p>
++            </div>
++            <div style="display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); padding: 8px 16px; border-radius: 12px;">
++                <div style="text-align: right;">
++                    <div style="font-size: 13px; font-weight: 600; color: #fff;">{{ user.username }}</div>
++                    <div style="font-size: 11px; color: var(--text-muted);">{{ user.role.role_name|default:"Staff" }}</div>
++                </div>
++                <a href="/logout/" style="color: #fda4af; font-size: 16px; transition: color 0.2s; margin-left: 8px;" title="Log Out">
++                    <i class="fa-solid fa-right-from-bracket"></i>
++                </a>
++            </div>
+         </div>
+
+=================== DIFF FOR: contracts\urls.py ===================
+--- inner/contracts\urls.py
++++ outer/contracts\urls.py
+@@ -41,2 +41,5 @@
+     path('api/identity/roles/', views.api_roles_list, name='api_roles_list'),
++    path('login/', views.login_user, name='login'),
++    path('signup/', views.signup_user, name='signup'),
++    path('logout/', views.logout_user, name='logout'),
+ ]
+
+=================== DIFF FOR: contracts\views.py ===================
+--- inner/contracts\views.py
++++ outer/contracts\views.py
+@@ -1,5 +1,7 @@
+ import json
+-from django.shortcuts import render
++from django.shortcuts import render, redirect
+ from django.http import JsonResponse
+ from django.views.decorators.csrf import csrf_exempt
++from django.contrib.auth import login, logout, authenticate
++from django.contrib.auth.decorators import login_required
+ from .services import ContractService, RiskService, AnalysisHistoryService
+@@ -10,2 +12,27 @@
+ 
++def manager_required(view_func):
++    def _wrapped_view(request, *args, **kwargs):
++        if not request.user.is_authenticated:
++            return redirect('/login/')
++        user = request.user
++        if user.is_superuser:
++            return view_func(request, *args, **kwargs)
++        if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
++            return render(request, 'contracts/access_denied.html')
++        return view_func(request, *args, **kwargs)
++    return _wrapped_view
++
++def api_manager_required(view_func):
++    def _wrapped_view(request, *args, **kwargs):
++        if not request.user.is_authenticated:
++            return JsonResponse({'error': 'Unauthorized. Please log in.'}, status=401)
++        user = request.user
++        if user.is_superuser:
++            return view_func(request, *args, **kwargs)
++        if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
++            return JsonResponse({'error': 'Permission Denied: Only Managers can access this resource.'}, status=403)
++        return view_func(request, *args, **kwargs)
++    return _wrapped_view
++
++@manager_required
+ def dashboard(request):
+@@ -15,2 +42,3 @@
+ 
++@manager_required
+ def workflow_board(request):
+@@ -58,4 +86,14 @@
+ 
++@manager_required
+ def contract_detail(request, contract_id):
+     """Render the dedicated contract detail page."""
++    from .models import Contract
++    try:
++        contract_obj = Contract.objects.get(id=contract_id)
++        if not request.user.is_superuser and contract_obj.company != request.user.company:
++            return render(request, 'contracts/access_denied.html')
++    except Contract.DoesNotExist:
++        from django.http import Http404
++        raise Http404("Contract not found")
++        
+     version_id = request.GET.get('version_id')
+@@ -68,4 +106,4 @@
+ 
+-
+-@csrf_exempt
++@csrf_exempt
++@api_manager_required
+ def api_contracts_list(request):
+@@ -76,3 +114,5 @@
+         try:
+-            contracts = contract_service.list_all_contracts()
++            user = request.user
++            company = None if user.is_superuser else user.company
++            contracts = contract_service.list_all_contracts(company=company)
+             return JsonResponse(contracts, safe=False)
+@@ -88,2 +128,3 @@
+ @csrf_exempt
++@api_manager_required
+ def api_create_contract(request):
+@@ -134,2 +175,3 @@
+ @csrf_exempt
++@api_manager_required
+ def api_contract_detail(request, contract_id):
+@@ -139,2 +181,10 @@
+     if request.method == 'GET':
++        from .models import Contract
++        try:
++            contract_obj = Contract.objects.get(id=contract_id)
++            if not request.user.is_superuser and contract_obj.company != request.user.company:
++                return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
++        except Contract.DoesNotExist:
++            return JsonResponse({'error': 'Contract not found.'}, status=404)
++
+         version_id = request.GET.get('version_id')
+@@ -149,2 +199,3 @@
+ @csrf_exempt
++@api_manager_required
+ def api_analyze_contract(request, contract_id):
+@@ -162,2 +213,6 @@
+         try:
++            from .models import Contract
++            contract_obj = Contract.objects.get(id=contract_id)
++            if not request.user.is_superuser and contract_obj.company != request.user.company:
++                return JsonResponse({'error': 'Permission Denied.'}, status=403)
+             contract = contract_service.analyze_contract(contract_id, version_id=version_id)
+@@ -175,2 +230,3 @@
+ @csrf_exempt
++@api_manager_required
+ def api_push_to_workflow(request, contract_id):
+@@ -350,2 +406,3 @@
+ 
++@manager_required
+ def analysis_history(request):
+@@ -356,2 +413,3 @@
+ @csrf_exempt
++@api_manager_required
+ def api_analyses_list(request):
+@@ -362,3 +420,5 @@
+         try:
+-            data = analysis_history_service.list_all_analyses()
++            user = request.user
++            company = None if user.is_superuser else user.company
++            data = analysis_history_service.list_all_analyses(company=company)
+             return JsonResponse(data, safe=False)
+@@ -679,2 +739,3 @@
+ 
++@api_manager_required
+ def api_download_file(request, file_id):
+@@ -688,2 +749,4 @@
+         cf = ContractFile.objects.get(id=file_id)
++        if not request.user.is_superuser and cf.version.contract.company != request.user.company:
++            return HttpResponse("Permission Denied: You do not have access to this file.", status=403)
+     except ContractFile.DoesNotExist:
+@@ -753,2 +816,3 @@
+ 
++@login_required(login_url='/login/')
+ def identity_registry(request):
+@@ -949,2 +1013,4 @@
+     from .models import Role
++    # Ensure role MANAGER exists
++    Role.objects.get_or_create(role_name='MANAGER')
+     roles = Role.objects.all().order_by('role_name')
+@@ -954 +1020,126 @@
+ 
++def login_user(request):
++    """Render and handle the login page."""
++    from .models import Role
++    Role.objects.get_or_create(role_name='MANAGER')
++    
++    if request.user.is_authenticated:
++        return redirect('/')
++        
++    error = None
++    if request.method == 'POST':
++        username = request.POST.get('username')
++        password = request.POST.get('password')
++        next_url = request.POST.get('next', '/') or '/'
++        user = authenticate(request, username=username, password=password)
++        if user is not None:
++            login(request, user)
++            return redirect(next_url)
++        else:
++            error = "Tài khoản hoặc mật khẩu không chính xác."
++            
++    next_url = request.GET.get('next', '/')
++    return render(request, 'contracts/login.html', {
++        'error': error,
++        'next': next_url
++    })
++
++
++def signup_user(request):
++    """Render and handle the signup page."""
++    from .models import Company, Role, User
++    Role.objects.get_or_create(role_name='MANAGER')
++    
++    if request.user.is_authenticated:
++        return redirect('/')
++        
++    error = None
++    if request.method == 'POST':
++        username = request.POST.get('username')
++        email = request.POST.get('email')
++        password = request.POST.get('password')
++        company_id = request.POST.get('company_id')
++        role_id = request.POST.get('role_id')
++        
++        if not username or not email or not password or not company_id or not role_id:
++            error = "Vui lòng điền đầy đủ các trường thông tin."
++        elif User.objects.filter(username=username).exists():
++            error = "Tên đăng nhập đã tồn tại."
++        elif User.objects.filter(email=email).exists():
++            error = "Email đã được sử dụng."
++        else:
++            try:
++                company = Company.objects.get(id=company_id)
++                role = Role.objects.get(id=role_id)
++                
++                # Create the user in database
++                user = User.objects.create_user(
++                    username=username,
++                    email=email,
++                    password=password,
++                    company=company,
++                    role=role,
++                    status='ACTIVE'
++                )
++                
++                # Register on the blockchain-service
++                try:
++                    import requests
++                    resp = requests.post(f"{_BC_URL}/user/register/", json={
++                        'user_id': user.id,
++                        'username': username,
++                        'company_id': company.id,
++                        'role': role.role_name,
++                        'status': 'ACTIVE',
++                        'sender': 'System'
++                    }, timeout=15)
++                    
++                    if resp.status_code == 200:
++                        data = resp.json()
++                        user.tx_hash = data.get('tx_hash')
++                        user.block_number = data.get('block_number')
++                        user.block_hash = data.get('block_hash')
++                        user.save()
++                        
++                        # Automatically issue a digital certificate for the new user
++                        try:
++                            import random
++                            clean_company_name = "".join(x for x in company.company_name.upper() if x.isalnum() or x == ' ')
++                            serial_number = f"CERT-{clean_company_name.replace(' ', '-')[:8]}-{user.id:04d}-{random.randint(1000, 9999)}"
++                            requests.post(f"{_BC_URL}/certificates/create/", json={
++                                'user_id': user.id,
++                                'serial_number': serial_number,
++                                'issuer': 'ContractGuard CA',
++                                'valid_days': 365
++                            }, timeout=10)
++                        except Exception as cert_err:
++                            print(f"Warning: Failed to automatically issue certificate: {str(cert_err)}")
++                    else:
++                        user.status = 'ERROR'
++                        user.save()
++                except Exception as e:
++                    print(f"Warning: Failed to register user on blockchain: {str(e)}")
++                    user.status = 'ERROR'
++                    user.save()
++                
++                # Automatically log the user in after signing up
++                login(request, user)
++                return redirect('/')
++            except Exception as e:
++                error = f"Lỗi đăng ký: {str(e)}"
++                
++    companies = Company.objects.all().order_by('company_name')
++    roles = Role.objects.all().order_by('role_name')
++    return render(request, 'contracts/signup.html', {
++        'companies': companies,
++        'roles': roles,
++        'error': error
++    })
++
++
++def logout_user(request):
++    """Log the user out and redirect to the login page."""
++    logout(request)
++    return redirect('/login/')
++
++
+
+=================== DIFF FOR: docker-compose.yml ===================
+--- inner/docker-compose.yml
++++ outer/docker-compose.yml
+@@ -17,3 +17,2 @@
+       - WORKFLOW_SERVICE_URL=http://workflow-service:8000
+-      - KAGGLE_QWEN_SERVICE_URL=http://kaggle-qwen-service:8000
+     volumes:
+@@ -34,19 +33,2 @@
+       - ./ai_service:/app
+-    networks:
+-      - riskdl-net
+-
+-  kaggle-qwen-service:
+-    build:
+-      context: ./kaggle_qwen_service
+-      dockerfile: Dockerfile
+-    container_name: riskdl_kaggle_qwen
+-    restart: always
+-    environment:
+-      # Paste the ngrok URL printed by the Kaggle notebook here
+-      # Example: - KAGGLE_AI_URL=https://xxxx.ngrok-free.app
+-      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
+-    ports:
+-      - "8001:8000"
+-    volumes:
+-      - ./kaggle_qwen_service:/app
+     networks:

@@ -1,9 +1,15 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-blockchain-secret-key-change-in-prod'
+# Load shared root .env so SECRET_KEY matches main Django app
+env_path = BASE_DIR.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+
+SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-default-change-me")
 
 DEBUG = True
 

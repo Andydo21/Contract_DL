@@ -1,0 +1,779 @@
+# --- CELL ---
+
+# Install/upgrade the libraries this notebook needs.
+# On Kaggle these are mostly preinstalled; the pins here keep the run reproducible.
+!pip install -q -U "transformers>=4.41.0" "datasets>=2.19.0" "evaluate" "rouge_score" \
+    "accelerate>=0.30.0" "sentencepiece" "huggingface_hub" "nltk"
+
+
+# --- CELL ---
+import torch
+import transformers
+import datasets
+
+print("Torch:", torch.__version__)
+print("Transformers:", transformers.__version__)
+print("Datasets:", datasets.__version__)
+
+# --- CELL ---
+
+import os
+import re
+import json
+import glob
+import unicodedata
+import random
+from collections import Counter, defaultdict
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+import nltk
+nltk.download("punkt", quiet=True)
+
+from datasets import Dataset, DatasetDict
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    DataCollatorForSeq2Seq,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
+)
+import evaluate
+
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+
+pd.set_option("display.max_colwidth", 200)
+print("Libraries imported.")
+
+
+# --- CELL ---
+
+def find_file(filename, search_root="/kaggle/input"):
+    """Recursively search for `filename` under `search_root`.
+    Falls back to the current working directory so this notebook also
+    runs if the three files were uploaded directly instead of attached
+    as a Kaggle dataset."""
+    candidates = glob.glob(os.path.join(search_root, "**", filename), recursive=True)
+    if not candidates:
+        local = glob.glob(os.path.join(".", "**", filename), recursive=True)
+        candidates.extend(local)
+    if not candidates:
+        raise FileNotFoundError(
+            f"Could not locate '{filename}' under {search_root} or the working "
+            f"directory. Attach the Kaggle Legal Contract Dataset to this notebook."
+        )
+    return candidates[0]
+
+
+COMPLETE_JSON_PATH = find_file("complete.json")
+CLAUSES_CSV_PATH = find_file("all_reshaped_clauses.csv")
+BOUNDARY_CSV_PATH = find_file("clause_boundary_data.csv")
+
+print("complete.json         ->", COMPLETE_JSON_PATH)
+print("all_reshaped_clauses  ->", CLAUSES_CSV_PATH)
+print("clause_boundary_data  ->", BOUNDARY_CSV_PATH)
+
+
+# --- CELL ---
+
+# --- Load complete.json -------------------------------------------------
+with open(COMPLETE_JSON_PATH, "r", encoding="utf-8") as f:
+    raw_complete = json.load(f)
+
+# complete.json may be a list of contract records, or a dict keyed by
+# contract id. Normalize to a list of dicts either way.
+if isinstance(raw_complete, dict):
+    complete_records = []
+    for key, val in raw_complete.items():
+        if isinstance(val, dict):
+            val = dict(val)
+            val.setdefault("contract_id", key)
+            complete_records.append(val)
+elif isinstance(raw_complete, list):
+    complete_records = raw_complete
+else:
+    raise ValueError("Unexpected structure for complete.json")
+
+print(f"Loaded {len(complete_records)} raw records from complete.json")
+print("Example record keys:", list(complete_records[0].keys())[:15])
+
+
+# --- CELL ---
+
+# --- Identify which field in each record actually holds the contract text ---
+TEXT_KEY_HINTS = ["text", "contract_text", "document_text", "content", "body", "full_text"]
+ID_KEY_HINTS = ["id", "contract_id", "doc_id", "document_id", "file", "filename", "title"]
+TYPE_KEY_HINTS = ["type", "contract_type", "doc_type", "category", "label"]
+
+def guess_field(record, hints):
+    """Return the first key in `record` whose name contains one of `hints`,
+    preferring exact matches, then substring matches."""
+    keys = list(record.keys())
+    lower_map = {k.lower(): k for k in keys}
+    for h in hints:
+        if h in lower_map:
+            return lower_map[h]
+    for h in hints:
+        for k in keys:
+            if h in k.lower():
+                return k
+    return None
+
+sample = complete_records[0]
+TEXT_FIELD = guess_field(sample, TEXT_KEY_HINTS)
+ID_FIELD = guess_field(sample, ID_KEY_HINTS)
+TYPE_FIELD = guess_field(sample, TYPE_KEY_HINTS)
+
+print("Detected text field :", TEXT_FIELD)
+print("Detected id field   :", ID_FIELD)
+print("Detected type field :", TYPE_FIELD)
+
+def extract_text(record):
+    """Pull contract text out of a record, handling the case where the text
+    field itself is a nested dict/list (e.g. list of paragraphs)."""
+    val = record.get(TEXT_FIELD) if TEXT_FIELD else None
+    if val is None:
+        # fall back: concatenate every string-valued field in the record
+        val = " ".join(str(v) for v in record.values() if isinstance(v, str))
+    elif isinstance(val, list):
+        val = " ".join(str(v) for v in val if isinstance(v, (str, int, float)))
+    elif isinstance(val, dict):
+        val = " ".join(str(v) for v in val.values() if isinstance(v, (str, int, float)))
+    return str(val).strip()
+
+contracts_df = pd.DataFrame({
+    "contract_id": [
+        str(r.get(ID_FIELD, i)) if ID_FIELD else str(i)
+        for i, r in enumerate(complete_records)
+    ],
+    "contract_text": [extract_text(r) for r in complete_records],
+    "declared_type": [
+        str(r.get(TYPE_FIELD, "")) if TYPE_FIELD else "" for r in complete_records
+    ],
+})
+
+print(contracts_df.shape)
+contracts_df.head(3)
+
+
+# --- CELL ---
+
+# --- Load the two supporting clause-level CSVs --------------------------
+clauses_df = pd.read_csv(CLAUSES_CSV_PATH)
+boundary_df = pd.read_csv(BOUNDARY_CSV_PATH)
+
+print("all_reshaped_clauses.csv:", clauses_df.shape)
+print(clauses_df.columns.tolist())
+print()
+print("clause_boundary_data.csv:", boundary_df.shape)
+print(boundary_df.columns.tolist())
+
+
+# --- CELL ---
+
+# --- Aggregate clause-level signals back onto each contract --------------
+# We look for an id-like column to join on. If none is shared, we instead
+# aggregate clause category text globally per contract row order, which is
+# the layout these Kaggle CUAD-style clause exports normally use.
+
+def find_join_key(df, hints=ID_KEY_HINTS):
+    lower_map = {c.lower(): c for c in df.columns}
+    for h in hints:
+        if h in lower_map:
+            return lower_map[h]
+    for h in hints:
+        for c in df.columns:
+            if h in c.lower():
+                return c
+    return None
+
+def find_category_col(df):
+    hints = ["clause_type", "category", "clause_category", "label", "clause"]
+    lower_map = {c.lower(): c for c in df.columns}
+    for h in hints:
+        if h in lower_map:
+            return lower_map[h]
+    for h in hints:
+        for c in df.columns:
+            if h in c.lower():
+                return c
+    return None
+
+clauses_join_key = find_join_key(clauses_df)
+clauses_cat_col = find_category_col(clauses_df)
+boundary_join_key = find_join_key(boundary_df)
+boundary_cat_col = find_category_col(boundary_df)
+
+print("clauses join key / category col   :", clauses_join_key, "/", clauses_cat_col)
+print("boundary join key / category col  :", boundary_join_key, "/", boundary_cat_col)
+
+def build_clause_signal_map(df, join_key, cat_col):
+    """contract_id -> set of clause category strings mentioned for it."""
+    signal_map = defaultdict(set)
+    if join_key is None or cat_col is None:
+        return signal_map
+    for cid, cat in zip(df[join_key].astype(str), df[cat_col].astype(str)):
+        if cat and cat.lower() != "nan":
+            signal_map[cid].add(cat.strip())
+    return signal_map
+
+clause_signals = build_clause_signal_map(clauses_df, clauses_join_key, clauses_cat_col)
+boundary_signals = build_clause_signal_map(boundary_df, boundary_join_key, boundary_cat_col)
+
+def get_clause_signals(contract_id):
+    """Union of clause-category strings from both supporting files for a
+    given contract id (empty set if the id isn't present in either file)."""
+    return clause_signals.get(contract_id, set()) | boundary_signals.get(contract_id, set())
+
+contracts_df["clause_signals"] = contracts_df["contract_id"].apply(
+    lambda cid: sorted(get_clause_signals(cid))
+)
+
+n_with_signals = (contracts_df["clause_signals"].str.len() > 0).sum()
+print(f"{n_with_signals} / {len(contracts_df)} contracts matched clause-level signals by id.")
+
+
+# --- CELL ---
+
+print("Dataset size:", contracts_df.shape)
+print()
+print("Missing values:")
+print(contracts_df.isna().sum())
+print()
+empty_text = (contracts_df["contract_text"].str.strip() == "").sum()
+print("Rows with empty contract_text:", empty_text)
+print()
+dupes = contracts_df.duplicated(subset=["contract_text"]).sum()
+print("Duplicate contract_text rows:", dupes)
+
+
+# --- CELL ---
+
+contracts_df["text_length_chars"] = contracts_df["contract_text"].str.len()
+contracts_df["text_length_words"] = contracts_df["contract_text"].str.split().apply(len)
+
+print(contracts_df["text_length_words"].describe())
+
+plt.figure(figsize=(8, 5))
+plt.hist(contracts_df["text_length_words"], bins=40, color="#3f6db5")
+plt.xlabel("Contract length (words)")
+plt.ylabel("Number of contracts")
+plt.title("Contract Length Distribution")
+plt.tight_layout()
+plt.show()
+
+
+# --- CELL ---
+
+type_counts = contracts_df["declared_type"].replace("", "unlabeled").value_counts().head(20)
+
+plt.figure(figsize=(9, 5))
+type_counts.plot(kind="bar", color="#5a9367")
+plt.xlabel("Declared contract type")
+plt.ylabel("Count")
+plt.title("Contract Type Distribution (top 20)")
+plt.tight_layout()
+plt.show()
+
+type_counts
+
+
+# --- CELL ---
+
+def clean_contract_text(text):
+    text = unicodedata.normalize("NFKC", str(text))
+    text = text.replace("\u00a0", " ")           # non-breaking space
+    text = re.sub(r"[ \t]+", " ", text)           # collapse horizontal whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)        # collapse excessive blank lines
+    return text.strip()
+
+before = len(contracts_df)
+contracts_df["contract_text"] = contracts_df["contract_text"].apply(clean_contract_text)
+
+contracts_df = contracts_df[contracts_df["contract_text"].str.len() > 0].copy()
+contracts_df = contracts_df.drop_duplicates(subset=["contract_text"]).reset_index(drop=True)
+
+after = len(contracts_df)
+print(f"Contracts before cleaning: {before}")
+print(f"Contracts after removing empty/duplicate rows: {after}")
+
+
+# --- CELL ---
+
+# --- Canonical step library and ordering ---------------------------------
+STEP_LIBRARY = [
+    "Contract Negotiation",
+    "Legal Review",
+    "Technical Review",
+    "Security Review",
+    "Compliance Review",
+    "Finance Review",
+    "Procurement Review",
+    "Manager Approval",
+    "Director Approval",
+    "Executive Approval",
+    "Contract Signing",
+    "Document Archive",
+]
+STEP_ORDER = {step: i for i, step in enumerate(STEP_LIBRARY)}
+
+def order_steps(step_set):
+    """De-duplicate and sort a collection of step names into canonical order."""
+    return sorted(set(step_set), key=lambda s: STEP_ORDER.get(s, len(STEP_LIBRARY)))
+
+
+# --- CELL ---
+
+# --- Signal detection helpers ---------------------------------------------
+# Each detector looks for real evidence in (a) the contract text and
+# (b) the clause-level signals pulled from the supporting CSVs in Section 3.
+
+def _text_has_any(text, keywords):
+    t = text.lower()
+    return any(kw in t for kw in keywords)
+
+def _signals_have_any(signals, keywords):
+    s = " | ".join(signals).lower()
+    return any(kw in s for kw in keywords)
+
+def is_nda(text, signals, declared_type):
+    kws = ["non-disclosure", "nondisclosure", "confidentiality agreement", "nda"]
+    return ("nda" in declared_type.lower()) or _text_has_any(text, kws) or _signals_have_any(signals, ["confidential"])
+
+def is_software_or_technical(text, signals, declared_type):
+    kws = ["software", "development agreement", "technical services", "saas",
+           "source code", "api", "hosting", "system integration", "it services"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["ip rights", "source code", "license"])
+
+def has_financial_obligation(text, signals, declared_type):
+    kws = ["payment", "fee", "invoice", "purchase price", "consideration",
+           "compensation", "$", "usd", "cost", "expense"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["payment", "revenue", "price"])
+
+def has_large_value_signal(text, signals, declared_type):
+    # Looks for explicit large monetary figures (>= 6 digits) or contract-value language.
+    money_matches = re.findall(r"\$\s?([\d,]{6,})", text)
+    big_number = any(int(m.replace(",", "")) >= 100000 for m in money_matches if m.replace(",", "").isdigit())
+    kws = ["contract value", "total contract price", "aggregate amount"]
+    return big_number or _text_has_any(text, kws)
+
+def has_confidentiality(text, signals, declared_type):
+    kws = ["confidential", "non-disclosure", "trade secret"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["confidential"])
+
+def has_ip_clause(text, signals, declared_type):
+    kws = ["intellectual property", "copyright", "patent", "trademark", "proprietary rights"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["intellectual property", "ip"])
+
+def has_data_protection(text, signals, declared_type):
+    kws = ["personal data", "data protection", "gdpr", "privacy", "data processing"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["data protection", "privacy"])
+
+def has_international_party(text, signals, declared_type):
+    kws = ["foreign", "international", "cross-border", "export control",
+           "governing law of", "united kingdom", "european union", "overseas"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["international", "export"])
+
+def has_payment_terms(text, signals, declared_type):
+    kws = ["net 30", "net 60", "payment terms", "installment", "milestone payment"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["payment terms"])
+
+def has_termination_clause(text, signals, declared_type):
+    kws = ["termination", "terminate this agreement", "right to terminate"]
+    return _text_has_any(text, kws) or _signals_have_any(signals, ["termination"])
+
+def has_negotiated_terms(text, signals, declared_type):
+    kws = ["negotiate", "negotiation", "mutually agreed", "subject to further discussion"]
+    return _text_has_any(text, kws)
+
+
+# --- CELL ---
+
+# --- Rule definitions -------------------------------------------------
+# Each rule: rule_name, condition (callable + human description), generated_steps,
+# explanation. Rules are evaluated independently and their steps are UNIONED,
+# then sorted into canonical order. This lets a single contract correctly
+# trigger multiple concerns at once (e.g. an international software deal).
+
+WORKFLOW_RULES = [
+    {
+        "rule_name": "baseline_every_contract",
+        "condition_desc": "Always true — every contract needs legal sign-off and archival.",
+        "condition": lambda text, sig, dt: True,
+        "generated_steps": ["Legal Review", "Contract Signing", "Document Archive"],
+        "explanation": "Every contract, regardless of type, must pass legal review before "
+                        "signing and must be archived afterward for record-keeping and audit.",
+    },
+    {
+        "rule_name": "nda_contract",
+        "condition_desc": "Contract text/type indicates an NDA or confidentiality agreement.",
+        "condition": is_nda,
+        "generated_steps": ["Legal Review", "Manager Approval", "Contract Signing", "Document Archive"],
+        "explanation": "NDAs are low financial risk but carry confidentiality exposure, so they "
+                        "require legal review and a single manager sign-off rather than the full "
+                        "approval chain.",
+    },
+    {
+        "rule_name": "software_or_technical_contract",
+        "condition_desc": "Contract concerns software/technical services (keywords or IP/license clause signals).",
+        "condition": is_software_or_technical,
+        "generated_steps": ["Technical Review", "Security Review", "Manager Approval"],
+        "explanation": "Technical agreements (development, SaaS, integrations) need a technical "
+                        "feasibility check and a security review of any system access or data "
+                        "exchange before a manager approves scope and cost.",
+    },
+    {
+        "rule_name": "financial_obligation_present",
+        "condition_desc": "Contract text/clauses reference payment, fees, invoicing, or cost.",
+        "condition": has_financial_obligation,
+        "generated_steps": ["Finance Review"],
+        "explanation": "Any contract creating a financial obligation must be checked by Finance "
+                        "for budget availability and accounting treatment.",
+    },
+    {
+        "rule_name": "large_value_contract",
+        "condition_desc": "Contract references a monetary figure >= 100,000 or explicit high-value language.",
+        "condition": has_large_value_signal,
+        "generated_steps": ["Finance Review", "Director Approval", "Executive Approval"],
+        "explanation": "High-value contracts carry outsized financial risk, so they escalate past "
+                        "a single manager to Director and Executive approval in addition to Finance "
+                        "Review.",
+    },
+    {
+        "rule_name": "confidentiality_clause",
+        "condition_desc": "Contract text/clauses contain confidentiality or trade-secret language.",
+        "condition": has_confidentiality,
+        "generated_steps": ["Legal Review"],
+        "explanation": "Confidentiality obligations increase legal exposure and are reinforced "
+                        "here even outside the standalone-NDA case (e.g. a confidentiality clause "
+                        "embedded in a larger commercial contract).",
+    },
+    {
+        "rule_name": "intellectual_property_clause",
+        "condition_desc": "Contract text/clauses reference IP, copyright, patent, or proprietary rights.",
+        "condition": has_ip_clause,
+        "generated_steps": ["Legal Review", "Technical Review"],
+        "explanation": "IP assignment/licensing terms need legal scrutiny of ownership language "
+                        "and a technical check that the described deliverables match what's "
+                        "actually being built or licensed.",
+    },
+    {
+        "rule_name": "data_protection_clause",
+        "condition_desc": "Contract text/clauses reference personal data, GDPR, or privacy obligations.",
+        "condition": has_data_protection,
+        "generated_steps": ["Compliance Review", "Security Review"],
+        "explanation": "Processing personal data triggers regulatory compliance obligations and "
+                        "requires a security review of how that data will be protected.",
+    },
+    {
+        "rule_name": "international_party",
+        "condition_desc": "Contract text/clauses indicate a foreign/cross-border counterparty or governing law.",
+        "condition": has_international_party,
+        "generated_steps": ["Compliance Review", "Executive Approval"],
+        "explanation": "Cross-border contracts must clear export-control/compliance review and "
+                        "are escalated to Executive Approval given the added jurisdictional risk.",
+    },
+    {
+        "rule_name": "payment_terms_specified",
+        "condition_desc": "Contract text/clauses specify concrete payment terms (e.g. net-30, milestones).",
+        "condition": has_payment_terms,
+        "generated_steps": ["Finance Review", "Procurement Review"],
+        "explanation": "Defined payment schedules need Finance sign-off on cash-flow impact and "
+                        "Procurement validation that terms match vendor policy.",
+    },
+    {
+        "rule_name": "termination_clause_present",
+        "condition_desc": "Contract text/clauses define termination rights.",
+        "condition": has_termination_clause,
+        "generated_steps": ["Legal Review"],
+        "explanation": "Termination terms define exit risk and are reinforced here as a legal "
+                        "review trigger independent of the baseline rule.",
+    },
+    {
+        "rule_name": "negotiated_terms_present",
+        "condition_desc": "Contract text indicates terms are still subject to negotiation.",
+        "condition": has_negotiated_terms,
+        "generated_steps": ["Contract Negotiation"],
+        "explanation": "If the text signals terms are not yet final, a negotiation step precedes "
+                        "review so reviewers evaluate the settled version.",
+    },
+]
+
+print(f"Defined {len(WORKFLOW_RULES)} deterministic workflow rules.")
+
+
+# --- CELL ---
+
+def generate_workflow(text, signals, declared_type):
+    """Apply every rule engine condition to a contract and union the steps
+    of every rule that fires. Returns (steps, fired_rule_names)."""
+    fired = []
+    steps = set()
+    for rule in WORKFLOW_RULES:
+        if rule["condition"](text, signals, declared_type):
+            fired.append(rule["rule_name"])
+            steps.update(rule["generated_steps"])
+    return order_steps(steps), fired
+
+
+def explain_workflow(fired_rule_names):
+    """Human-readable justification listing which rules fired and why."""
+    lines = []
+    for name in fired_rule_names:
+        rule = next(r for r in WORKFLOW_RULES if r["rule_name"] == name)
+        lines.append(f"- [{rule['rule_name']}] {rule['explanation']}")
+    return "\n".join(lines)
+
+
+# --- Export the rule definitions for auditability -------------------------
+rules_export = [
+    {
+        "rule_name": r["rule_name"],
+        "condition": r["condition_desc"],
+        "generated_steps": r["generated_steps"],
+        "explanation": r["explanation"],
+    }
+    for r in WORKFLOW_RULES
+]
+
+with open("workflow_rules.json", "w", encoding="utf-8") as f:
+    json.dump(rules_export, f, indent=2, ensure_ascii=False)
+
+print("Saved workflow_rules.json with", len(rules_export), "rules.")
+
+
+# --- CELL ---
+
+generated_steps_col = []
+fired_rules_col = []
+
+for _, row in contracts_df.iterrows():
+    steps, fired = generate_workflow(row["contract_text"], row["clause_signals"], row["declared_type"])
+    generated_steps_col.append(steps)
+    fired_rules_col.append(fired)
+
+contracts_df["workflow_steps"] = generated_steps_col
+contracts_df["fired_rules"] = fired_rules_col
+
+dynamic_workflow_dataset = contracts_df[["contract_text", "workflow_steps"]].copy()
+# Store the list as a JSON string so the CSV round-trips cleanly.
+dynamic_workflow_dataset["workflow_steps"] = dynamic_workflow_dataset["workflow_steps"].apply(
+    lambda steps: json.dumps(steps)
+)
+
+dynamic_workflow_dataset.to_csv("dynamic_workflow_dataset.csv", index=False)
+print("Saved dynamic_workflow_dataset.csv with", len(dynamic_workflow_dataset), "rows.")
+dynamic_workflow_dataset.head(3)
+
+
+# --- CELL ---
+
+contracts_df["workflow_length"] = contracts_df["workflow_steps"].apply(len)
+
+print("Number of generated workflows:", len(contracts_df))
+print("Average workflow length:", contracts_df["workflow_length"].mean().round(2))
+print()
+print(contracts_df["workflow_length"].describe())
+
+plt.figure(figsize=(7, 4))
+plt.hist(contracts_df["workflow_length"], bins=range(1, STEP_LIBRARY.__len__() + 2), color="#b5723f")
+plt.xlabel("Workflow length (number of steps)")
+plt.ylabel("Number of contracts")
+plt.title("Workflow Length Distribution")
+plt.tight_layout()
+plt.show()
+
+
+# --- CELL ---
+
+step_counter = Counter()
+for steps in contracts_df["workflow_steps"]:
+    step_counter.update(steps)
+
+step_freq = pd.Series(step_counter).reindex(STEP_LIBRARY).fillna(0).astype(int)
+
+plt.figure(figsize=(9, 5))
+step_freq.plot(kind="bar", color="#7a4fb5")
+plt.xlabel("Workflow step")
+plt.ylabel("Number of contracts containing this step")
+plt.title("Most Common Workflow Steps (Class Balance)")
+plt.tight_layout()
+plt.show()
+
+print("Class imbalance (min vs max step frequency):", step_freq.min(), "vs", step_freq.max())
+step_freq
+
+
+# --- CELL ---
+
+# --- Print worked examples: contract text + generated workflow + why ------
+for i in random.sample(range(len(contracts_df)), k=min(3, len(contracts_df))):
+    row = contracts_df.iloc[i]
+    print("=" * 90)
+    print("CONTRACT SAMPLE (first 300 chars):")
+    print(row["contract_text"][:300].replace("\n", " "), "...")
+    print()
+    print("GENERATED WORKFLOW:", row["workflow_steps"])
+    print()
+    print("REASONING:")
+    print(explain_workflow(row["fired_rules"]))
+    print()
+
+
+# --- CELL ---
+
+def steps_to_text(steps):
+    return " -> ".join(steps)
+
+seq_df = contracts_df[["contract_text", "workflow_steps"]].copy()
+seq_df["target_text"] = seq_df["workflow_steps"].apply(steps_to_text)
+# Keep the model's job scoped to routing, not re-reading entire contracts word
+# for word — prompt it explicitly with an instruction, FLAN-T5 style.
+seq_df["input_text"] = "Generate the contract workflow steps for: " + seq_df["contract_text"]
+
+seq_df = seq_df[(seq_df["input_text"].str.len() > 0) & (seq_df["target_text"].str.len() > 0)]
+seq_df = seq_df.reset_index(drop=True)
+
+print(seq_df.shape)
+seq_df[["input_text", "target_text"]].head(2)
+
+
+# --- CELL ---
+
+# 80 / 10 / 10 split
+n = len(seq_df)
+shuffled = seq_df.sample(frac=1.0, random_state=SEED).reset_index(drop=True)
+n_train = int(n * 0.8)
+n_val = int(n * 0.1)
+
+train_df = shuffled.iloc[:n_train]
+val_df = shuffled.iloc[n_train:n_train + n_val]
+test_df = shuffled.iloc[n_train + n_val:]
+
+print("train:", len(train_df), "val:", len(val_df), "test:", len(test_df))
+
+raw_datasets = DatasetDict({
+    "train": Dataset.from_pandas(train_df[["input_text", "target_text"]], preserve_index=False),
+    "validation": Dataset.from_pandas(val_df[["input_text", "target_text"]], preserve_index=False),
+    "test": Dataset.from_pandas(test_df[["input_text", "target_text"]], preserve_index=False),
+})
+raw_datasets
+
+
+# --- CELL ---
+
+MODEL_CHECKPOINT = "google/flan-t5-base"
+MAX_INPUT_LENGTH = 512
+MAX_TARGET_LENGTH = 64
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
+model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_CHECKPOINT)
+
+
+def preprocess_batch(examples):
+    model_inputs = tokenizer(
+        examples["input_text"],
+        max_length=MAX_INPUT_LENGTH,
+        truncation=True,
+    )
+    labels = tokenizer(
+        text_target=examples["target_text"],
+        max_length=MAX_TARGET_LENGTH,
+        truncation=True,
+    )
+    model_inputs["labels"] = labels["input_ids"]
+    return model_inputs
+
+
+tokenized_datasets = raw_datasets.map(
+    preprocess_batch,
+    batched=True,
+    remove_columns=raw_datasets["train"].column_names,
+)
+tokenized_datasets
+
+
+# --- CELL ---
+
+data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+
+OUTPUT_DIR = "/kaggle/working/dynamic-workflow-builder"
+
+training_args = Seq2SeqTrainingArguments(
+    output_dir=OUTPUT_DIR,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    learning_rate=3e-4,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    weight_decay=0.01,
+    save_total_limit=2,
+    num_train_epochs=6,
+    predict_with_generate=True,
+    generation_max_length=MAX_TARGET_LENGTH,
+    fp16=True,
+    load_best_model_at_end=True,
+    metric_for_best_model="rougeL",
+    logging_steps=25,
+    report_to="none",
+    seed=SEED,
+)
+
+
+# --- CELL ---
+
+rouge = evaluate.load("rouge")
+
+def postprocess_text(preds, labels):
+    preds = [p.strip() for p in preds]
+    labels = [l.strip() for l in labels]
+    return preds, labels
+
+
+def compute_metrics(eval_preds):
+    preds, labels = eval_preds
+    if isinstance(preds, tuple):
+        preds = preds[0]
+
+    preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+
+    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
+
+    rouge_result = rouge.compute(
+        predictions=decoded_preds, references=decoded_labels, use_stemmer=True
+    )
+
+    exact_matches = [
+        1.0 if p.strip().lower() == l.strip().lower() else 0.0
+        for p, l in zip(decoded_preds, decoded_labels)
+    ]
+    exact_match_accuracy = float(np.mean(exact_matches)) if exact_matches else 0.0
+
+    result = {k: round(v * 100, 2) for k, v in rouge_result.items()}
+    result["exact_match_accuracy"] = round(exact_match_accuracy * 100, 2)
+    return result
+
+
+trainer = Seq2SeqTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_datasets["train"],
+    eval_dataset=tokenized_datasets["validation"],
+    processing_class=tokenizer,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+)
+
+train_result = trainer.train()
+trainer.log_metrics("train", train_result.metrics)
+trainer.save_metrics("train", train_result.metrics)
+
+
