@@ -1,6 +1,5 @@
 import json
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from .services import WorkflowService, KeyManagementService
 
 workflow_service = WorkflowService()
@@ -29,7 +28,6 @@ def list_all_workflows(request):
     return JsonResponse({"workflows": result})
 
 
-@csrf_exempt
 def create_workflow(request):
     """POST /workflows/"""
     if request.method != "POST":
@@ -100,7 +98,6 @@ def get_workflow_by_id_view(request, workflow_id):
     })
 
 
-@csrf_exempt
 def approve_step(request, step_id):
     """POST /workflows/steps/<step_id>/approve/"""
     if request.method != "POST":
@@ -134,7 +131,6 @@ def approve_step(request, step_id):
 #  KEY MANAGEMENT VIEWS
 # ─────────────────────────────────────────────────────────────────
 
-@csrf_exempt
 def key_list_create(request):
     """GET /keys/?company_id=X  |  POST /keys/"""
     if request.method == "GET":
@@ -163,7 +159,6 @@ def key_list_create(request):
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
 
-@csrf_exempt
 def key_rotate(request, key_id):
     """POST /keys/<key_id>/rotate/"""
     if request.method != "POST":
@@ -175,7 +170,6 @@ def key_rotate(request, key_id):
         return JsonResponse({"error": str(e)}, status=400)
 
 
-@csrf_exempt
 def key_revoke(request, key_id):
     """POST /keys/<key_id>/revoke/"""
     if request.method != "POST":

@@ -1,6 +1,5 @@
 import json
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from .services import (
     CertificateService, ProofService, BlockchainAnchorService,
     VerificationService, SignatureService
@@ -70,7 +69,6 @@ def get_stats(request):
 
 
 
-@csrf_exempt
 def create_certificate(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -107,7 +105,6 @@ def create_certificate(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-@csrf_exempt
 def generate_proof(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -142,7 +139,6 @@ def generate_proof(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-@csrf_exempt
 def anchor_proof(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -181,7 +177,6 @@ def anchor_proof(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-@csrf_exempt
 def verify_proof(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -208,7 +203,6 @@ def verify_proof(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-@csrf_exempt
 def sign_step(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -313,7 +307,6 @@ def get_certificate(request, user_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
-@csrf_exempt
 def register_company(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -344,7 +337,6 @@ def register_company(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-@csrf_exempt
 def register_user(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
