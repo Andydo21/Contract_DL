@@ -23,6 +23,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
+    'shared.jwt_middleware.JWTMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -7,6 +8,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables
 load_dotenv(BASE_DIR / ".env")
+
+# Make shared/ importable (especially inside Docker)
+shared_path = str(BASE_DIR / "shared")
+if shared_path not in sys.path:
+    sys.path.insert(0, shared_path)
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
@@ -41,11 +47,11 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "contracts.middleware.JWTAuthenticationMiddleware",
+    "shared.jwt_middleware.JWTMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "contracts.middleware.JWTUserMiddleware",
+    "shared.jwt_middleware.JWTUserMiddleware",
     "contracts.middleware.UserActionAuditMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

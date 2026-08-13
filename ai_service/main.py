@@ -4,7 +4,8 @@ import json
 import re
 import requests
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from shared.jwt_middleware import fastapi_jwt_required
 from pydantic import BaseModel
 
 # Configure logging
@@ -280,7 +281,7 @@ def run_ai_analysis(
 
 
 @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
-async def analyze_contract(payload: AnalyzeRequest):
+async def analyze_contract(payload: AnalyzeRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
     if not payload.clauses:
         raise HTTPException(status_code=400, detail="No clauses provided for analysis.")
 

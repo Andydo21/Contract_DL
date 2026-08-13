@@ -1,6 +1,7 @@
 import logging
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from shared.jwt_middleware import fastapi_jwt_required
 from schemas import (
     SummarizeRequest,
     SummarizeResponse,
@@ -23,7 +24,7 @@ app = FastAPI(
 )
 
 @app.post("/api/v1/summarize", response_model=SummarizeResponse)
-async def summarize_contract(payload: SummarizeRequest):
+async def summarize_contract(payload: SummarizeRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
     """
     Forward to POST {KAGGLE_AI_URL}/api/v1/summarize.
     Kaggle notebook generates an Executive Summary in Vietnamese (150-250 words).
@@ -34,7 +35,7 @@ async def summarize_contract(payload: SummarizeRequest):
     return SummarizeResponse(**result)
 
 @app.post("/api/v1/extract_entities", response_model=EntityExtractResponse)
-async def extract_entities(payload: EntityExtractRequest):
+async def extract_entities(payload: EntityExtractRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
     """
     Forward to POST {KAGGLE_AI_URL}/api/v1/extract_entities.
     Kaggle notebook extracts: COMPANY_NAME, TAX_CODE, CONTRACT_VALUE,
