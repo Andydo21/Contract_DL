@@ -1,247 +1,254 @@
 import json
+import textwrap
+
+# ── Cell sources (plain Python strings — no JSON escaping needed here) ─────────
+
+CELL_INSTALL = """\
+# Cell 1: Install dependencies
+!pip install -q fastapi uvicorn pyngrok nest_asyncio transformers torch sentencepiece protobuf accelerate
+"""
+
+CELL_APP = """\
+# Cell 2: Imports, model loading, FastAPI app + endpoint
+import os, nest_asyncio, uvicorn, torch
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+from pyngrok import ngrok
+from transformers import AutoModelForSequenceClassification, AutoModelForSeq2SeqLM, AutoTokenizer
+
+nest_asyncio.apply()
+app = FastAPI(title="Unified Kaggle Workflow Recommendation Service")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ── 1. Classification model (DeBERTa) ─────────────────────────────────────────
+# Load d90nqm/contract-workflow directly from HuggingFace Hub
+# Classifies contracts into 8 types: WF_NDA, WF_SERVICE, WF_EMPLOYMENT, ...
+DEBERTA_HF_ID = "d90nqm/contract-workflow"
+print(f"Loading classification model: {DEBERTA_HF_ID} ...")
+try:
+    deberta_tokenizer = AutoTokenizer.from_pretrained(DEBERTA_HF_ID)
+    deberta_model = AutoModelForSequenceClassification.from_pretrained(DEBERTA_HF_ID)
+    deberta_model.eval().to(device)
+    print(f"Classification model loaded! Labels: {list(deberta_model.config.id2label.values())}")
+except Exception as e:
+    print(f"Failed to load classification model: {e}")
+    deberta_model = None
+
+# ── 2. Step-generation model (Flan-T5) ────────────────────────────────────────
+# Generates approval step sequence AND dynamic descriptions/reasons
+FLANT5_PATH = "Doan2108/dynamic_worflow"
+print(f"Loading Flan-T5 step builder: {FLANT5_PATH} ...")
+try:
+    flant5_tokenizer = AutoTokenizer.from_pretrained(FLANT5_PATH)
+    flant5_model = AutoModelForSeq2SeqLM.from_pretrained(FLANT5_PATH)
+    flant5_model.eval().to(device)
+    print("Flan-T5 model loaded successfully!")
+except Exception as e:
+    print(f"Failed to load Flan-T5 ({e}). Falling back to google/flan-t5-base ...")
+    try:
+        flant5_tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+        flant5_model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
+        flant5_model.eval().to(device)
+        print("Fallback Flan-T5 base loaded.")
+    except Exception as e2:
+        print(f"Fallback also failed: {e2}")
+        flant5_model = None
+
+# ── Step library: name -> role_id + fallback description ──────────────────────
+STEP_DETAILS_MAPPING = {
+    "Contract Negotiation": {"role_id": 4,  "description": "Thuong thao cac dieu khoan chua thong nhat giua cac ben ky ket."},
+    "Legal Review":         {"role_id": 4,  "description": "Ra soat tinh phap ly, rui ro dieu khoan va tuan thu phap luat."},
+    "Technical Review":     {"role_id": 7,  "description": "Tham dinh tinh kha thi ky thuat va giai phap cong nghe de xuat."},
+    "Security Review":      {"role_id": 8,  "description": "Danh gia an toan thong tin, bao mat du lieu va he thong."},
+    "Compliance Review":    {"role_id": 9,  "description": "Kiem tra su tuan thu cac quy dinh noi bo va tieu chuan nganh."},
+    "Finance Review":       {"role_id": 6,  "description": "Tham dinh ngan sach, dong tien va nghia vu tai chinh phat sinh."},
+    "Procurement Review":   {"role_id": 10, "description": "Danh gia nang luc nha cung cap, don gia va chinh sach mua sam."},
+    "Manager Approval":     {"role_id": 5,  "description": "Phe duyet cap quan ly truc tiep ve mat chu truong va ngan sach."},
+    "Director Approval":    {"role_id": 11, "description": "Phe duyet cap Giam doc bo phan doi voi cac hop dong/du an lon."},
+    "Executive Approval":   {"role_id": 11, "description": "Phe duyet toi cao tu Ban dieu hanh/Tong giam doc."},
+    "Contract Signing":     {"role_id": 4,  "description": "Dai dien co tham quyen thuc hien ky ket hop dong chinh thuc."},
+    "Document Archive":     {"role_id": 4,  "description": "Luu tru hop dong da ky ket vao he thong va ban giao ban cung."},
+}
+
+# ── Pydantic schemas ───────────────────────────────────────────────────────────
+class RecommendWorkflowRequest(BaseModel):
+    contract_text: str
+    clause_types: List[str] = []
+    contract_type: str = ""
+
+class WorkflowStepResponse(BaseModel):
+    step_name: str
+    role_id: int
+    description: str
+
+class RecommendWorkflowResponse(BaseModel):
+    workflow_type: str
+    steps: List[WorkflowStepResponse]
+    reasons: str
+    workflow_name: Optional[str] = None
+
+# ── Helper: call Flan-T5 ───────────────────────────────────────────────────────
+def flan_generate(prompt: str, max_new_tokens: int = 100) -> str:
+    if flant5_model is None:
+        return ""
+    enc = flant5_tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(device)
+    with torch.no_grad():
+        out = flant5_model.generate(**enc, max_new_tokens=max_new_tokens)
+    return flant5_tokenizer.decode(out[0], skip_special_tokens=True).strip()
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+        "deberta": deberta_model is not None,
+        "flant5": flant5_model is not None,
+        "device": device,
+    }
+
+@app.post("/api/v1/recommend_workflow", response_model=RecommendWorkflowResponse)
+async def recommend_workflow_api(payload: RecommendWorkflowRequest):
+    context = payload.contract_text[:300]
+
+    # ── Step A: Classify workflow type ────────────────────────────────────────
+    workflow_type = "WF_GENERAL"
+    confidence = 0.0
+    if deberta_model is not None:
+        try:
+            enc = deberta_tokenizer(
+                payload.contract_text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=512,
+            ).to(device)
+            with torch.no_grad():
+                logits = deberta_model(**enc).logits
+            pred_idx = int(torch.argmax(logits, dim=-1).item())
+            confidence = float(torch.softmax(logits, dim=-1)[0][pred_idx].item())
+            workflow_type = deberta_model.config.id2label.get(pred_idx, "WF_GENERAL")
+            print(f"[CLASSIFY] {workflow_type}  confidence={confidence:.1%}")
+        except Exception as e:
+            print(f"Classification error: {e}")
+
+    # ── Step B: AI-generated explanation (reasons) ────────────────────────────
+    wf_label = workflow_type.replace("WF_", "").replace("_", " ").title()
+    reason_prompt = (
+        f"Based on this contract: '{context}...', "
+        f"explain in 1 Vietnamese sentence why it is classified as a '{wf_label}' contract workflow:"
+    )
+    reasons = flan_generate(reason_prompt, max_new_tokens=120)
+    if len(reasons) < 10:
+        reasons = (
+            f"Mo hinh AI phan loai hop dong nay la '{wf_label}' "
+            f"voi do tin cay {confidence:.1%}."
+        )
+
+    # ── Step C: Generate approval step sequence ───────────────────────────────
+    steps_list = []
+    step_prompt = "Generate the contract workflow steps for: " + payload.contract_text
+    decoded = flan_generate(step_prompt, max_new_tokens=64)
+    parsed_steps = [s.strip() for s in decoded.split("->") if s.strip()]
+
+    for step_name in parsed_steps:
+        if step_name not in STEP_DETAILS_MAPPING:
+            continue
+        details = STEP_DETAILS_MAPPING[step_name]
+
+        # Dynamic per-step description from Flan-T5
+        desc_prompt = (
+            f"Based on this contract: '{context}...', "
+            f"explain the approval step '{step_name}' in 1 short Vietnamese sentence:"
+        )
+        dynamic_desc = flan_generate(desc_prompt, max_new_tokens=64)
+        if len(dynamic_desc) < 5:
+            dynamic_desc = details["description"]
+
+        steps_list.append(WorkflowStepResponse(
+            step_name=step_name,
+            role_id=details["role_id"],
+            description=dynamic_desc,
+        ))
+
+    # ── Step D: Fallback steps if generation failed ───────────────────────────
+    if not steps_list:
+        for step_name in ["Legal Review", "Manager Approval", "Contract Signing", "Document Archive"]:
+            d = STEP_DETAILS_MAPPING[step_name]
+            steps_list.append(WorkflowStepResponse(
+                step_name=step_name,
+                role_id=d["role_id"],
+                description=d["description"],
+            ))
+
+    workflow_name = f"{wf_label} Contract Approval Workflow"
+    return RecommendWorkflowResponse(
+        workflow_type=workflow_type,
+        steps=steps_list,
+        reasons=reasons,
+        workflow_name=workflow_name,
+    )
+"""
+
+CELL_NGROK = """\
+# Cell 3: Start Ngrok tunnel + Uvicorn server
+# NOTE: Kaggle/Jupyter already has a running event loop.
+# Use uvicorn.Server + await instead of uvicorn.run() to avoid RuntimeError.
+import asyncio
+
+NGROK_TOKEN = os.environ.get("NGROK_AUTH_TOKEN", "2z2Jys005c289EvZifDWi1ViBBr_7nZ6ASrHHT7qpoJ3DgmQU")
+ngrok.set_auth_token(NGROK_TOKEN)
+try:
+    tunnel = ngrok.connect(8000)
+    print("\\n" + "="*60)
+    print("  NGROK PUBLIC URL  (copy -> KAGGLE_AI_URL in .env):")
+    print(f"  {tunnel.public_url}")
+    print("="*60 + "\\n")
+except Exception as e:
+    print(f"Ngrok tunnel failed: {e}")
+
+config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+server = uvicorn.Server(config)
+await server.serve()
+"""
+
+# ── Build notebook JSON ────────────────────────────────────────────────────────
+def make_code_cell(source: str):
+    return {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [line + "\n" for line in source.rstrip("\n").split("\n")],
+    }
 
 notebook = {
- "cells": [
-  {
-   "cell_type": "markdown",
-   "metadata": {},
-   "source": [
-    "# Unified Workflow Recommendation API Server\n",
-    "\n",
-    "This notebook loads the trained Deberta classification model and Flan-T5 step recommendation model, starts a FastAPI application, and opens a public ngrok tunnel so that `workflow_service` can call the AI recommendations."
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": None,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# 1. Install required dependencies\n",
-    "!pip install -q fastapi uvicorn pyngrok nest_asyncio transformers torch sentencepiece protobuf"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": None,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# 2. Initialize and define API application\n",
-    "import nest_asyncio\n",
-    "import uvicorn\n",
-    "from fastapi import FastAPI, HTTPException\n",
-    "from pydantic import BaseModel\n",
-    "from typing import List, Optional\n",
-    "from pyngrok import ngrok\n",
-    "import torch\n",
-    "from transformers import AutoModelForSequenceClassification, AutoModelForSeq2SeqLM, AutoTokenizer\n",
-    "import os\n",
-    "\n",
-    "nest_asyncio.apply()\n",
-    "app = FastAPI(title=\"Unified Kaggle Workflow Recommendation Service\")\n",
-    "\n",
-    "# ── Classification model: load d90nqm/contract-workflow directly from HuggingFace ──\n",
-    "# This model classifies contracts into 8 workflow types:\n",
-    "# WF_EMPLOYMENT, WF_EXECUTIVE, WF_GENERAL, WF_NDA,\n",
-    "# WF_PROCUREMENT, WF_PURCHASE, WF_SERVICE, WF_VENDOR\n",
-    "DEBERTA_HF_ID = \"d90nqm/contract-workflow\"\n",
-    "print(f\"Loading classification model from HuggingFace: {DEBERTA_HF_ID}...\")\n",
-    "try:\n",
-    "    deberta_tokenizer = AutoTokenizer.from_pretrained(DEBERTA_HF_ID)\n",
-    "    deberta_model = AutoModelForSequenceClassification.from_pretrained(DEBERTA_HF_ID)\n",
-    "    deberta_model.eval()\n",
-    "    if torch.cuda.is_available():\n",
-    "        deberta_model.to(\"cuda\")\n",
-    "    print(f\"Classification model loaded! Labels: {list(deberta_model.config.id2label.values())}\")\n",
-    "except Exception as e:\n",
-    "    print(f\"Failed to load classification model: {e}\")\n",
-    "    deberta_model = None\n",
-    "\n",
-    "# ── Step generation model: Flan-T5 fine-tuned locally on Kaggle ──────────────\n",
-    "# This model generates the sequence of approval steps (e.g. Legal Review -> Finance Review -> ...)\n",
-    "FLANT5_PATH = \"/kaggle/working/dynamic-workflow-builder-final\"\n",
-    "if not os.path.exists(FLANT5_PATH):\n",
-    "    FLANT5_PATH = \"google/flan-t5-base\"  # fallback to base model if not yet trained\n",
-    "\n",
-    "print(f\"Loading Flan-T5 step builder from {FLANT5_PATH}...\")\n",
-    "try:\n",
-    "    flant5_tokenizer = AutoTokenizer.from_pretrained(FLANT5_PATH)\n",
-    "    flant5_model = AutoModelForSeq2SeqLM.from_pretrained(FLANT5_PATH)\n",
-    "    flant5_model.eval()\n",
-    "    if torch.cuda.is_available():\n",
-    "        flant5_model.to(\"cuda\")\n",
-    "    print(\"Flan-T5 model loaded successfully!\")\n",
-    "except Exception as e:\n",
-    "    print(f\"Failed to load Flan-T5: {e}\")\n",
-    "    flant5_model = None\n",
-    "\n",
-    "# Define detailed step library mapping (descriptions and role ids)\n",
-    "STEP_DETAILS_MAPPING = {\n",
-    "    \"Contract Negotiation\": {\"role_id\": 4, \"description\": \"Thương thảo các điều khoản chưa thống nhất giữa các bên ký kết.\"},\n",
-    "    \"Legal Review\": {\"role_id\": 4, \"description\": \"Rà soát tính pháp lý, rủi ro điều khoản và tuân thủ pháp luật.\"},\n",
-    "    \"Technical Review\": {\"role_id\": 7, \"description\": \"Thẩm định tính khả thi kỹ thuật và giải pháp công nghệ đề xuất.\"},\n",
-    "    \"Security Review\": {\"role_id\": 8, \"description\": \"Đánh giá an toàn thông tin, bảo mật dữ liệu và hệ thống.\"},\n",
-    "    \"Compliance Review\": {\"role_id\": 9, \"description\": \"Kiểm tra sự tuân thủ các quy định nội bộ và tiêu chuẩn ngành.\"},\n",
-    "    \"Finance Review\": {\"role_id\": 6, \"description\": \"Thẩm định ngân sách, dòng tiền và nghĩa vụ tài chính phát sinh.\"},\n",
-    "    \"Procurement Review\": {\"role_id\": 10, \"description\": \"Đánh giá năng lực nhà cung cấp, đơn giá và chính sách mua sắm.\"},\n",
-    "    \"Manager Approval\": {\"role_id\": 5, \"description\": \"Phê duyệt cấp quản lý trực tiếp về mặt chủ trương và ngân sách.\"},\n",
-    "    \"Director Approval\": {\"role_id\": 11, \"description\": \"Phê duyệt cấp Giám đốc bộ phận đối với các hợp đồng/dự án lớn.\"},\n",
-    "    \"Executive Approval\": {\"role_id\": 11, \"description\": \"Phê duyệt tối cao từ Ban điều hành/Tổng giám đốc.\"},\n",
-    "    \"Contract Signing\": {\"role_id\": 4, \"description\": \"Đại diện có thẩm quyền thực hiện ký kết hợp đồng chính thức.\"},\n",
-    "    \"Document Archive\": {\"role_id\": 4, \"description\": \"Lưu trữ hợp đồng đã ký kết vào hệ thống và bàn giao bản cứng.\"}\n",
-    "}\n",
-    "\n",
-    "INDEX_TO_WORKFLOW_ID = {\n",
-    "    0: 'WF_EMPLOYMENT',\n",
-    "    1: 'WF_EXECUTIVE',\n",
-    "    2: 'WF_GENERAL',\n",
-    "    3: 'WF_NDA',\n",
-    "    4: 'WF_PROCUREMENT',\n",
-    "    5: 'WF_PURCHASE',\n",
-    "    6: 'WF_SERVICE',\n",
-    "    7: 'WF_VENDOR'\n",
-    "}\n",
-    "\n",
-    "class RecommendWorkflowRequest(BaseModel):\n",
-    "    contract_text: str\n",
-    "    clause_types: List[str] = []\n",
-    "    contract_type: str = \"\"\n",
-    "\n",
-    "class WorkflowStepResponse(BaseModel):\n",
-    "    step_name: str\n",
-    "    role_id: int\n",
-    "    description: str\n",
-    "\n",
-    "class RecommendWorkflowResponse(BaseModel):\n",
-    "    workflow_type: str\n",
-    "    steps: List[WorkflowStepResponse]\n",
-    "    reasons: str\n",
-    "    workflow_name: Optional[str] = None\n",
-    "\n",
-    "@app.post(\"/api/v1/recommend_workflow\", response_model=RecommendWorkflowResponse)\n",
-    "async def recommend_workflow_api(payload: RecommendWorkflowRequest):\n",
-    "    # 1. Classification\n",
-    "    workflow_type = \"WF_GENERAL\"\n",
-    "    if deberta_model is not None:\n",
-    "        try:\n",
-    "            device = \"cuda\" if torch.cuda.is_available() else \"cpu\"\n",
-    "            inputs = deberta_tokenizer(\n",
-    "                payload.contract_text,\n",
-    "                return_tensors=\"pt\",\n",
-    "                truncation=True,\n",
-    "                max_length=512\n",
-    "            ).to(device)\n",
-    "            with torch.no_grad():\n",
-    "                outputs = deberta_model(**inputs)\n",
-    "            pred_idx = torch.argmax(outputs.logits, dim=-1).item()\n",
-    "            if hasattr(deberta_model.config, 'id2label') and deberta_model.config.id2label:\n",
-    "                workflow_type = deberta_model.config.id2label.get(pred_idx, \"WF_GENERAL\")\n",
-    "            else:\n",
-    "                workflow_type = INDEX_TO_WORKFLOW_ID.get(pred_idx, \"WF_GENERAL\")\n",
-    "        except Exception as e:\n",
-    "            print(f\"Classification error: {e}\")\n",
-    "\n",
-    "    # 2. Step Generation\n",
-    "    steps_list = []\n",
-    "    reasons = \"AI model dynamically recommended the workflow steps and mapped roles.\"\n",
-    "    if flant5_model is not None:\n",
-    "        try:\n",
-    "            device = \"cuda\" if torch.cuda.is_available() else \"cpu\"\n",
-    "            prompt = \"Generate the contract workflow steps for: \" + payload.contract_text\n",
-    "            inputs = flant5_tokenizer(\n",
-    "                prompt,\n",
-    "                return_tensors=\"pt\",\n",
-    "                truncation=True,\n",
-    "                max_length=512\n",
-    "            ).to(device)\n",
-    "            with torch.no_grad():\n",
-    "                outputs = flant5_model.generate(**inputs, max_new_tokens=64)\n",
-    "            decoded = flant5_tokenizer.decode(outputs[0], skip_special_tokens=True)\n",
-    "            parsed_steps = [s.strip() for s in decoded.split(\"->\") if s.strip()]\n",
-    "            \n",
-    "            for step_name in parsed_steps:\n",
-    "                if step_name in STEP_DETAILS_MAPPING:\n",
-    "                    details = STEP_DETAILS_MAPPING[step_name]\n",
-    "                    # Generate description dynamically using Flan-T5 based on contract context\n",
-    "                    desc_prompt = f\"Based on this contract context: '{payload.contract_text[:300]}...', explain the contract approval step '{step_name}' in 1 short Vietnamese sentence:\"\n",
-    "                    desc_inputs = flant5_tokenizer(desc_prompt, return_tensors=\"pt\", truncation=True, max_length=512).to(device)\n",
-    "                    with torch.no_grad():\n",
-    "                        desc_outputs = flant5_model.generate(**desc_inputs, max_new_tokens=64)\n",
-    "                    dynamic_desc = flant5_tokenizer.decode(desc_outputs[0], skip_special_tokens=True).strip()\n",
-    "                    \n",
-    "                    if len(dynamic_desc) < 5:\n",
-    "                        dynamic_desc = details[\"description\"]\n",
-    "                        \n",
-    "                    steps_list.append(WorkflowStepResponse(\n",
-    "                        step_name=step_name,\n",
-    "                        role_id=details[\"role_id\"],\n",
-    "                        description=dynamic_desc\n",
-    "                    ))\n",
-    "        except Exception as e:\n",
-    "            print(f\"Step generation error: {e}\")\n",
-    "\n",
-    "    # Fallback to defaults if empty\n",
-    "    if not steps_list:\n",
-    "        default_steps = [\"Legal Review\", \"Contract Signing\", \"Document Archive\"]\n",
-    "        for step_name in default_steps:\n",
-    "            details = STEP_DETAILS_MAPPING[step_name]\n",
-    "            steps_list.append(WorkflowStepResponse(\n",
-    "                step_name=step_name,\n",
-    "                role_id=details[\"role_id\"],\n",
-    "                description=details[\"description\"]\n",
-    "            ))\n",
-    "\n",
-    "    workflow_name = f\"{workflow_type.replace('WF_', '').title()} Approval Workflow\"\n",
-    "    return RecommendWorkflowResponse(\n",
-    "        workflow_type=workflow_type,\n",
-    "        steps=steps_list,\n",
-    "        reasons=reasons,\n",
-    "        workflow_name=workflow_name\n",
-    "    )"
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": None,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "# 3. Set Ngrok Token and Start Uvicorn Server\n",
-    "# Fix: Kaggle/Jupyter already has a running event loop.\n",
-    "# Use uvicorn.Server + await instead of uvicorn.run() to avoid RuntimeError.\n",
-    "import asyncio\n",
-    "nest_asyncio.apply()  # allow nested event loops in Jupyter\n",
-    "\n",
-    "NGROK_TOKEN = \"2z2Jys005c289EvZifDWi1ViBBr_7nZ6ASrHHT7qpoJ3DgmQU\"\n",
-    "ngrok.set_auth_token(NGROK_TOKEN)\n",
-    "try:\n",
-    "    tunnel = ngrok.connect(8000)\n",
-    "    print(\"\\n==============================\")\n",
-    "    print(\"  NGROK PUBLIC URL:\")\n",
-    "    print(f\"  {tunnel.public_url}\")\n",
-    "    print(\"  Copy this URL to KAGGLE_AI_URL\")\n",
-    "    print(\"==============================\\n\")\n",
-    "except Exception as e:\n",
-    "    print(f\"Ngrok tunnel failed: {e}\")\n",
-    "\n",
-     "# Start server using await (compatible with Kaggle/Jupyter event loop)\n",
-     "config = uvicorn.Config(app, host=\"0.0.0.0\", port=8000, log_level=\"info\")\n",
-     "server = uvicorn.Server(config)\n",
-     "await server.serve()"
-    ]
-   }
-  ],
-  "metadata": {
-   "language_info": {
-    "name": "python"
-   }
-  },
-  "nbformat": 4,
-  "nbformat_minor": 2
- }
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# Unified Workflow Recommendation API Server\n",
+                "\n",
+                "Loads **d90nqm/contract-workflow** (DeBERTa, 8-class) from HuggingFace to classify contracts,\n",
+                "then uses **Flan-T5** to:\n",
+                "- generate the ordered approval step sequence\n",
+                "- generate a Vietnamese explanation (`reasons`) for the classification\n",
+                "- generate a context-aware Vietnamese description for each step\n",
+            ],
+        },
+        make_code_cell(CELL_INSTALL),
+        make_code_cell(CELL_APP),
+        make_code_cell(CELL_NGROK),
+    ],
+    "metadata": {
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python", "version": "3.10.0"},
+    },
+    "nbformat": 4,
+    "nbformat_minor": 4,
+}
 
 with open("workflow-api-server.ipynb", "w", encoding="utf-8") as f:
-    json.dump(notebook, f, indent=1)
+    json.dump(notebook, f, indent=1, ensure_ascii=False)
 
-print("workflow-api-server.ipynb generated successfully!")
+print("[OK] workflow-api-server.ipynb regenerated successfully!")
