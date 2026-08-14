@@ -140,16 +140,20 @@ def jwt_role_required(*roles):
             return view_func(request, *args, **kwargs)
         return wrapper
     return decorator
+try:
+    from fastapi import Header
+except ImportError:
+    Header = None
 
 
 # ── FastAPI dependency ─────────────────────────────────────────────────────────
 
-def fastapi_jwt_required(authorization: str = None):
+def fastapi_jwt_required(authorization: str = Header(None) if Header else None):
     """
     FastAPI dependency for JWT validation.
     Extracts Bearer token from incoming Authorization header and returns decoded payload.
     """
-    from fastapi import HTTPException, Header
+    from fastapi import HTTPException
     # Note: Header(None) is handled inside route definitions, but we fetch it here
     token = extract_bearer(authorization or "")
     if not token:
