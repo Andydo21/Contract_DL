@@ -160,3 +160,28 @@ def fastapi_jwt_required(authorization: str = None):
         raise HTTPException(status_code=401, detail="Token has expired.")
     except pyjwt.InvalidTokenError as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+
+# ── Token generation helpers for inter-service communication ────────────────────
+
+import datetime
+
+def generate_token(user_id, username: str, role: str, expires_in_hours: int = 24) -> str:
+    """Generate a JWT token signed with the shared SECRET_KEY."""
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "role": role,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=expires_in_hours),
+        "iat": datetime.datetime.utcnow(),
+    }
+    return pyjwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def get_auth_header(user_id, username: str, role: str) -> dict:
+    """Get request headers with JWT Bearer authorization."""
+    token = generate_token(user_id, username, role)
+    return {"Authorization": f"Bearer {token}"}
+
+def get_system_auth_header() -> dict:
+    """Get system-level authorization header."""
+    return get_auth_header(0, "system", "ADMIN")

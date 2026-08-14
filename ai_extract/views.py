@@ -2,7 +2,6 @@ import json
 import logging
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from contracts.models import Contract, ContractVersion
@@ -25,7 +24,6 @@ def _error(msg: str, status: int = 400) -> JsonResponse:
 # Summarize endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def api_summarize_contract(request, contract_id: int):
     """
@@ -103,7 +101,6 @@ def api_get_summary(request, contract_id: int):
 # Extract Entity endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def api_extract_entities(request, contract_id: int):
     """
@@ -157,7 +154,6 @@ def api_extract_entities(request, contract_id: int):
         return _error("Internal server error.", 500)
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def api_extract_from_text(request):
     """
@@ -252,7 +248,6 @@ def api_get_entities(request, contract_id: int):
 # Extract Clauses endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def api_extract_clauses(request, contract_id: int):
     """

@@ -725,3 +725,119 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* Step Role Selector Dropdown */
+.step-role-select {
+    background: rgba(13, 21, 38, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #c7d2fe;
+    padding: 3px 20px 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: 'Inter', sans-serif;
+    max-width: 140px;
+    display: inline-block;
+    vertical-align: middle;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg fill='%23c7d2fe' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 2px center;
+    background-size: 16px;
+}
+.step-role-select:focus, .step-role-select:hover {
+    border-color: var(--accent);
+    color: #fff;
+    background: rgba(13, 21, 38, 0.95);
+    box-shadow: 0 0 8px rgba(0, 242, 254, 0.25);
+}
+.step-role-select option {
+    background: #0d1526;
+    color: #fff;
+    font-weight: 500;
+}
+
+/* Step Insertion Divider and Button */
+.insert-step-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin: 4px 0;
+    opacity: 0;
+    height: 8px;
+    transition: opacity 0.2s ease, height 0.2s ease, margin 0.2s ease;
+}
+
+.wf-step-row:hover + .insert-step-divider,
+.insert-step-divider:hover {
+    opacity: 1;
+    height: 24px;
+    margin: 8px 0;
+}
+
+.insert-step-divider::before {
+    content: '';
+    position: absolute;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0, 242, 254, 0.25), transparent);
+    z-index: 1;
+}
+
+.btn-insert-step {
+    position: relative;
+    z-index: 2;
+    background: #0a0f1d;
+    border: 1px solid rgba(0, 242, 254, 0.4);
+    border-radius: 12px;
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 4px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.btn-insert-step:hover {
+    background: var(--accent);
+    color: #0d1526;
+    transform: scale(1.05);
+    box-shadow: 0 0 12px rgba(0, 242, 254, 0.5);
+}
+
+/* Delete Step Action Button */
+.btn-delete-step {
+    background: transparent;
+    border: none;
+    color: rgba(239, 68, 68, 0.55);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 6px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    margin-left: 10px;
+}
+
+.btn-delete-step:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: rgb(239, 68, 68);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
+    transform: scale(1.05);
+}
+

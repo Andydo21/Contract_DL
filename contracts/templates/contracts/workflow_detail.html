@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}?v=1.1">
+    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}?v=1.5">
     
     <style>
         .detail-container {
@@ -485,7 +485,22 @@
                                     <div class="node-content-card" id="card-{{ s.id }}">
                                         <div class="node-header">
                                             <span class="node-name">{{ s.step_name }}</span>
-                                            <span class="node-role-badge" id="role-badge-{{ s.id }}">Role ID: {{ s.role_id }}</span>
+                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                                <span class="node-role-badge" id="role-badge-{{ s.id }}">Role ID: {{ s.role_id }}</span>
+                                                {% if request.user.role.role_name == 'MANAGER' or request.user.role.role_name == 'ADMIN' or request.user.is_superuser %}
+                                                    <select class="step-role-selector" style="background: rgba(0,0,0,0.3); color: #c7d2fe; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer; outline: none;" onchange="changeStepRole({{ s.id }}, this.value)">
+                                                        <option value="1" {% if s.role_id == 1 %}selected{% endif %}>ADMIN</option>
+                                                        <option value="4" {% if s.role_id == 4 %}selected{% endif %}>LEGAL_EXPERT</option>
+                                                        <option value="5" {% if s.role_id == 5 %}selected{% endif %}>MANAGER</option>
+                                                        <option value="6" {% if s.role_id == 6 %}selected{% endif %}>FINANCE</option>
+                                                        <option value="7" {% if s.role_id == 7 %}selected{% endif %}>TECHNICAL</option>
+                                                        <option value="8" {% if s.role_id == 8 %}selected{% endif %}>SECURITY</option>
+                                                        <option value="9" {% if s.role_id == 9 %}selected{% endif %}>COMPLIANCE</option>
+                                                        <option value="10" {% if s.role_id == 10 %}selected{% endif %}>PROCUREMENT</option>
+                                                        <option value="11" {% if s.role_id == 11 %}selected{% endif %}>EXECUTIVE</option>
+                                                    </select>
+                                                {% endif %}
+                                            </div>
                                         </div>
                                         <div class="node-status-row">
                                             <span>Step {{ s.step_order }} • {{ s.status }}</span>
@@ -500,6 +515,26 @@
                                             <div class="node-comments">
                                                 <i class="fa-solid fa-quote-left" style="opacity: 0.4; margin-right: 6px;"></i>
                                                 {{ s.comment }}
+                                            </div>
+                                        {% endif %}
+                                        
+                                        {% if s.approvals %}
+                                            <div class="step-signatures-list" style="margin-top: 10px; font-size: 12px; border-top: 1px dashed rgba(255,255,255,0.06); padding-top: 8px;">
+                                                <div style="font-weight: 600; color: #a5b4fc; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                                                    <i class="fa-solid fa-signature"></i> Digital Signatures / Approvals:
+                                                </div>
+                                                <ul style="margin: 0; padding-left: 16px; list-style-type: square; color: var(--text-sec);">
+                                                    {% for app in s.approvals %}
+                                                        <li style="margin-bottom: 2px;">
+                                                            <strong style="color: #fff;">{{ app.username }}</strong> 
+                                                            <span style="color: var(--text-muted); font-size: 11px;">({{ app.role_name }})</span> 
+                                                            - <span style="color: #34d399; font-weight: 500;">{{ app.status }}</span>
+                                                            {% if app.comment %}
+                                                                : <span style="font-style: italic; color: var(--text-sec);">"{{ app.comment }}"</span>
+                                                            {% endif %}
+                                                        </li>
+                                                    {% endfor %}
+                                                </ul>
                                             </div>
                                         {% endif %}
                                     </div>
@@ -651,20 +686,36 @@
             // Check permissions
             const requiredRoleName = roleIdToNameMap[activeStep.role_id] || 'NO_ROLE';
             const hasPermission = (currentUserRole === 'ADMIN') || (requiredRoleName === currentUserRole);
+            const isManager = (currentUserRole === 'MANAGER') || (currentUserRole === 'ADMIN') || currentUserIsSuperuser;
 
-            if (!hasPermission) {
-                panel.innerHTML = `
-                    <p class="panel-desc" style="margin-bottom: 12px;">Currently pending step: <strong>${activeStep.step_name}</strong>.</p>
-                    <div class="panel-locked-pill">
-                        <i class="fa-solid fa-lock"></i> Locked. Requires the role: <strong>${requiredRoleName}</strong>.
+            let html = '';
+            
+            if (isManager) {
+                html += `
+                    <div style="border: 1px dashed rgba(99,102,241,0.3); padding: 14px; border-radius: 10px; margin-bottom: 16px; background: rgba(99,102,241,0.02);">
+                        <p class="panel-desc" style="color: #a5b4fc; font-weight: 600; margin-bottom: 8px;">
+                            <i class="fa-solid fa-user-shield"></i> Manager Control Panel
+                        </p>
+                        <p class="panel-desc" style="font-size: 12.5px; margin-bottom: 12px; line-height: 1.4;">
+                            You have manager authority. You can mark this step as completed at any time, even if no signatures are present.
+                        </p>
+                        <div class="form-comment-box" style="margin-bottom: 12px;">
+                            <label class="form-label" for="manager-comment-text" style="font-size: 11px;">Completion Note (Optional)</label>
+                            <textarea class="form-textarea" id="manager-comment-text" style="min-height: 60px; font-size: 12px; padding: 8px;" placeholder="Add final manager approval comment..."></textarea>
+                        </div>
+                        <button class="btn-panel-action approve" style="width: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2));" onclick="submitDecision(${activeStep.id}, 'FORCE_COMPLETE', true)">
+                            <i class="fa-solid fa-circle-check"></i> Complete Step (Manager)
+                        </button>
                     </div>
                 `;
-            } else {
-                panel.innerHTML = `
-                    <p class="panel-desc">You are authorized to review the current active step: <strong>${activeStep.step_name}</strong> (Requires role: <strong>${requiredRoleName}</strong>).</p>
+            }
+
+            if (hasPermission) {
+                html += `
+                    <p class="panel-desc">You are authorized to sign/approve this step (Requires role: <strong>${requiredRoleName}</strong>).</p>
                     
                     <div class="form-comment-box">
-                        <label class="form-label" for="comment-text">Review Comment (Optional)</label>
+                        <label class="form-label" for="comment-text">Signature Comment (Optional)</label>
                         <textarea class="form-textarea" id="comment-text" placeholder="Add your review notes, conditions, or reasoning..."></textarea>
                     </div>
 
@@ -673,15 +724,61 @@
                             <i class="fa-solid fa-xmark"></i> Reject
                         </button>
                         <button class="btn-panel-action approve" onclick="submitDecision(${activeStep.id}, 'APPROVED')">
-                            <i class="fa-solid fa-check"></i> Approve
+                            <i class="fa-solid fa-signature"></i> Sign Step
                         </button>
                     </div>
                 `;
+            } else {
+                if (!isManager) {
+                    html += `
+                        <p class="panel-desc" style="margin-bottom: 12px;">Currently pending step: <strong>${activeStep.step_name}</strong>.</p>
+                        <div class="panel-locked-pill">
+                            <i class="fa-solid fa-lock"></i> Locked. Requires the role: <strong>${requiredRoleName}</strong>.
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <p class="panel-desc" style="margin-top: 10px;">Required Role for this step: <strong>${requiredRoleName}</strong>.</p>
+                    `;
+                }
+            }
+            
+            panel.innerHTML = html;
+        }
+
+        async function changeStepRole(stepId, roleId) {
+            try {
+                const response = await fetch(`/api/workflows/steps/${stepId}/update_role/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({ role_id: parseInt(roleId) })
+                });
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    showToast('Step required role updated successfully!', 'success');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 800);
+                } else {
+                    showToast(result.error || 'Failed to update step role', 'error');
+                }
+            } catch (err) {
+                showToast(`Network error: ${err}`, 'error');
             }
         }
 
-        async function submitDecision(stepId, action) {
-            const comment = document.getElementById('comment-text').value;
+        async function submitDecision(stepId, action, fromManager = false) {
+            let comment = '';
+            if (fromManager) {
+                const managerTextEl = document.getElementById('manager-comment-text');
+                comment = managerTextEl ? managerTextEl.value : '';
+            } else {
+                const commentTextEl = document.getElementById('comment-text');
+                comment = commentTextEl ? commentTextEl.value : '';
+            }
             
             try {
                 const response = await fetch(`/api/workflows/steps/${stepId}/approve/`, {
@@ -695,7 +792,13 @@
 
                 const result = await response.json();
                 if (response.ok && result.success) {
-                    showToast(`Step successfully ${action === 'APPROVED' ? 'Approved' : 'Rejected'}!`, 'success');
+                    let msg = `Step successfully approved/signed!`;
+                    if (action === 'FORCE_COMPLETE') {
+                        msg = `Step successfully marked as Completed by Manager!`;
+                    } else if (action === 'REJECTED') {
+                        msg = `Step rejected!`;
+                    }
+                    showToast(msg, 'success');
                     setTimeout(() => {
                         window.location.reload();
                     }, 1200);

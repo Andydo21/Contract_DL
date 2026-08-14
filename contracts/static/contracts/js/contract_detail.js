@@ -43,7 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/analyses/${analysisId}/review/`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
                     },
                     body: JSON.stringify({ final_risk_level, comment })
                 });
@@ -73,7 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             try {
                 const res = await fetch(`/api/contracts/${contractId}/analyze/`, {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
                 });
                 const data = await res.json();
                 
@@ -108,7 +112,12 @@ document.addEventListener('DOMContentLoaded', () => {
             btnPushWorkflow.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing...';
 
             try {
-                const res = await fetch(`/api/contracts/${contractId}/workflow/`, { method: 'POST' });
+                const res = await fetch(`/api/contracts/${contractId}/workflow/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
                 const data = await res.json();
 
                 if (data.success) {
@@ -406,7 +415,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/contracts/${contractId}/manual-extract/`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
                     },
                     body: JSON.stringify({ version_id: versionId })
                 });
@@ -444,7 +454,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/ai/contracts/${contractId}/extract-entities/`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
                     },
                     body: JSON.stringify({ version_id: versionId, re_extract: true })
                 });
@@ -485,7 +496,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/ai/contracts/${contractId}/summarize/`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
                     },
                     body: JSON.stringify({ version_id: versionId })
                 });
@@ -666,3 +678,18 @@ window.toggleFinding = function(header) {
         icon.style.transform = 'rotate(0deg)';
     }
 };
+
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}

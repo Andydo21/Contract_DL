@@ -10,6 +10,7 @@ let activeStepId = null;
 let currentUserId = window.currentUserId || 1; // Default fallback user ID
 let currentUserRole = window.currentUserRole || '';
 let currentUserIsSuperuser = window.currentUserIsSuperuser || false;
+let stepIdToDelete = null;
 
 const roleIdToNameMap = {
     1: 'ADMIN',
@@ -81,6 +82,53 @@ function initEventListeners() {
     const btnReject = document.getElementById('btn-reject');
     if (btnReject) {
         btnReject.addEventListener('click', () => submitReview('REJECTED'));
+    }
+
+    // Force Complete Action
+    const btnForceComplete = document.getElementById('btn-force-complete');
+    if (btnForceComplete) {
+        btnForceComplete.addEventListener('click', () => submitReview('FORCE_COMPLETE'));
+    }
+
+    // Insert Step Modal Listeners
+    const modalInsertClose = document.getElementById('modal-insert-close');
+    const btnInsertCancel = document.getElementById('btn-insert-cancel');
+    const btnInsertSubmit = document.getElementById('btn-insert-submit');
+    const modalInsertOverlay = document.getElementById('insert-step-modal');
+
+    if (modalInsertClose) {
+        modalInsertClose.addEventListener('click', closeInsertStepModal);
+    }
+    if (btnInsertCancel) {
+        btnInsertCancel.addEventListener('click', closeInsertStepModal);
+    }
+    if (btnInsertSubmit) {
+        btnInsertSubmit.addEventListener('click', submitInsertStep);
+    }
+    if (modalInsertOverlay) {
+        modalInsertOverlay.addEventListener('click', (e) => {
+            if (e.target === modalInsertOverlay) closeInsertStepModal();
+        });
+    }
+    // Delete Step Confirmation Modal Listeners
+    const modalDeleteClose = document.getElementById('modal-delete-close');
+    const btnDeleteCancel = document.getElementById('btn-delete-cancel');
+    const btnDeleteSubmit = document.getElementById('btn-delete-submit');
+    const modalDeleteOverlay = document.getElementById('delete-confirm-modal');
+
+    if (modalDeleteClose) {
+        modalDeleteClose.addEventListener('click', closeDeleteConfirmModal);
+    }
+    if (btnDeleteCancel) {
+        btnDeleteCancel.addEventListener('click', closeDeleteConfirmModal);
+    }
+    if (btnDeleteSubmit) {
+        btnDeleteSubmit.addEventListener('click', submitDeleteWorkflowStep);
+    }
+    if (modalDeleteOverlay) {
+        modalDeleteOverlay.addEventListener('click', (e) => {
+            if (e.target === modalDeleteOverlay) closeDeleteConfirmModal();
+        });
     }
 }
 
@@ -232,7 +280,7 @@ function renderWorkflows() {
                 </div>
                 
                 <div class="wf-steps-list">
-                    ${w.steps.map(s => {
+                    ${w.steps.map((s, idx) => {
                         let statusClass = s.status.toLowerCase();
                         let icon = '<i class="fa-regular fa-circle"></i>';
                         if (s.status === 'APPROVED') {
@@ -244,16 +292,33 @@ function renderWorkflows() {
                             statusClass += ' active-step';
                         }
 
-                        return `
+                        const requiredRoleName = roleIdToNameMap[s.role_id] || '';
+                        const isManagerOrAdmin = currentUserIsSuperuser || (currentUserRole === 'ADMIN') || (currentUserRole === 'MANAGER');
+                        const hasPermission = isManagerOrAdmin || (requiredRoleName === currentUserRole);
+
+                        let stepRowHtml = `
                             <div class="wf-step-row status-${statusClass}">
                                 <div class="step-dot dot-${s.status}">${icon}</div>
                                 <div class="step-info">
                                     <div class="step-name">${s.step_name}</div>
-                                    <div class="step-status-text">Step ${s.step_order} • ${s.status}</div>
+                                    <div class="step-status-text">
+                                        Step ${s.step_order} • ${s.status}
+                                        ${isManagerOrAdmin ? `
+                                            • <select class="step-role-select" onchange="updateStepRole(${s.id}, this.value)">
+                                                ${Object.entries(roleIdToNameMap).map(([id, name]) => `
+                                                    <option value="${id}" ${s.role_id == id ? 'selected' : ''}>${name}</option>
+                                                `).join('')}
+                                            </select>
+                                        ` : `• Role: ${requiredRoleName}`}
+                                    </div>
+                                    ${(s.approvals && s.approvals.length > 0) ? `
+                                        <div class="step-approvals-list" style="margin-top: 4px; font-size: 11px; color: var(--text-sec);">
+                                            <i class="fa-solid fa-signature" style="font-size: 10px; color: var(--green);"></i> Signed: 
+                                            ${s.approvals.map(app => `${app.username} (${app.role_name})`).join(', ')}
+                                        </div>
+                                    ` : ''}
                                 </div>
                                 ${(activeStep && activeStep.id === s.id) ? (() => {
-                                    const requiredRoleName = roleIdToNameMap[s.role_id] || '';
-                                    const hasPermission = currentUserIsSuperuser || (currentUserRole === 'ADMIN') || (requiredRoleName === currentUserRole);
                                     if (hasPermission) {
                                         return `
                                             <button class="btn-step-action" onclick="openReviewModal(${s.id}, '${s.step_name}', '${w.workflow_name}')">
@@ -268,8 +333,37 @@ function renderWorkflows() {
                                         `;
                                     }
                                 })() : ''}
-                            </div>
+                                 ${isManagerOrAdmin ? `
+                                     <button class="btn-delete-step" onclick="openDeleteConfirmModal(${s.id}, '${s.step_name}')" title="Delete Step">
+                                         <i class="fa-solid fa-trash-can"></i>
+                                     </button>
+                                 ` : ''}
+                             </div>
                         `;
+
+                        // Add manual step insertion dividers
+                        let preDivider = '';
+                        if (isManagerOrAdmin && idx === 0) {
+                            preDivider = `
+                                <div class="insert-step-divider">
+                                    <button class="btn-insert-step" onclick="openInsertStepModal(${w.workflow_id}, 1)">
+                                        <i class="fa-solid fa-circle-plus"></i> Insert Step Here
+                                    </button>
+                                </div>
+                            `;
+                        }
+                        let postDivider = '';
+                        if (isManagerOrAdmin) {
+                            postDivider = `
+                                <div class="insert-step-divider">
+                                    <button class="btn-insert-step" onclick="openInsertStepModal(${w.workflow_id}, ${s.step_order + 1})">
+                                        <i class="fa-solid fa-circle-plus"></i> Insert Step Here
+                                    </button>
+                                </div>
+                            `;
+                        }
+
+                        return preDivider + stepRowHtml + postDivider;
                     }).join('')}
                 </div>
 
@@ -324,9 +418,16 @@ window.openReviewModal = function(stepId, stepName, workflowName) {
     if (modalWf) modalWf.innerText = workflowName;
     if (commentArea) commentArea.value = '';
     
+    
+    const isManagerOrAdmin = currentUserIsSuperuser || (currentUserRole === 'ADMIN') || (currentUserRole === 'MANAGER');
+    const btnForceComplete = document.getElementById('btn-force-complete');
+    if (btnForceComplete) {
+        btnForceComplete.style.display = isManagerOrAdmin ? 'flex' : 'none';
+    }
+
     if (modalOverlay) {
         modalOverlay.style.display = 'flex';
-        setTimeout(() => modalOverlay.classList.add('show'), 10);
+        setTimeout(() => modalOverlay.classList.add('active'), 10);
     }
 };
 
@@ -336,7 +437,7 @@ window.openReviewModal = function(stepId, stepName, workflowName) {
 function closeModal() {
     const modalOverlay = document.getElementById('approve-modal');
     if (modalOverlay) {
-        modalOverlay.classList.remove('show');
+        modalOverlay.classList.remove('active');
         setTimeout(() => {
             modalOverlay.style.display = 'none';
             activeStepId = null;
@@ -353,10 +454,12 @@ async function submitReview(action) {
     const comment = document.getElementById('modal-comment')?.value || '';
     const btnApprove = document.getElementById('btn-approve');
     const btnReject = document.getElementById('btn-reject');
+    const btnForceComplete = document.getElementById('btn-force-complete');
 
     // Disable buttons during submission
     if (btnApprove) btnApprove.disabled = true;
     if (btnReject) btnReject.disabled = true;
+    if (btnForceComplete) btnForceComplete.disabled = true;
 
     try {
         const response = await fetch(`/api/workflows/steps/${activeStepId}/approve/`, {
@@ -379,7 +482,10 @@ async function submitReview(action) {
         const data = await response.json();
         
         if (data.success) {
-            showToast(`Step successfully ${action === 'APPROVED' ? 'Approved' : 'Rejected'}!`, 'success');
+            let msg = `Step successfully Approved!`;
+            if (action === 'REJECTED') msg = `Step successfully Rejected!`;
+            else if (action === 'FORCE_COMPLETE') msg = `Step accepted and completed!`;
+            showToast(msg, 'success');
             closeModal();
             fetchWorkflows(); // Refresh list & stats
         } else {
@@ -391,6 +497,7 @@ async function submitReview(action) {
     } finally {
         if (btnApprove) btnApprove.disabled = false;
         if (btnReject) btnReject.disabled = false;
+        if (btnForceComplete) btnForceComplete.disabled = false;
     }
 }
 
@@ -442,3 +549,205 @@ function getCookie(name) {
     }
     return cookieValue;
 }
+
+/**
+ * Update step role for manager
+ */
+window.updateStepRole = async function(stepId, roleId) {
+    try {
+        const response = await fetch(`/api/workflows/steps/${stepId}/update_role/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                role_id: parseInt(roleId)
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showToast('Step role updated successfully!', 'success');
+            // Find the step in allWorkflows local cache and update it
+            for (let wf of allWorkflows) {
+                let st = wf.steps.find(s => s.id === stepId);
+                if (st) {
+                    st.role_id = parseInt(roleId);
+                    break;
+                }
+            }
+            renderWorkflows();
+        } else {
+            showToast(data.error || 'Failed to update step role.', 'error');
+        }
+    } catch (error) {
+        console.error('Error updating step role:', error);
+        showToast('Error communicating with server.', 'error');
+    }
+};
+
+// State for inserting step
+let activeInsertWorkflowId = null;
+let activeInsertTargetOrder = null;
+
+/**
+ * Open Insert Step Modal
+ */
+window.openInsertStepModal = function(workflowId, targetOrder) {
+    activeInsertWorkflowId = workflowId;
+    activeInsertTargetOrder = targetOrder;
+
+    const modal = document.getElementById('insert-step-modal');
+    const nameInput = document.getElementById('insert-step-name');
+    const roleSelect = document.getElementById('insert-step-role');
+    const descTextarea = document.getElementById('insert-step-description');
+
+    if (nameInput) nameInput.value = '';
+    if (roleSelect) roleSelect.value = '4'; // default: LEGAL_EXPERT
+    if (descTextarea) descTextarea.value = '';
+
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => modal.classList.add('active'), 10);
+    }
+};
+
+/**
+ * Close Insert Step Modal
+ */
+window.closeInsertStepModal = function() {
+    const modal = document.getElementById('insert-step-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.style.display = 'none';
+            activeInsertWorkflowId = null;
+            activeInsertTargetOrder = null;
+        }, 300);
+    }
+};
+
+/**
+ * Submit Insert Step request
+ */
+window.submitInsertStep = async function() {
+    if (!activeInsertWorkflowId || activeInsertTargetOrder === null) return;
+
+    const nameInput = document.getElementById('insert-step-name');
+    const roleSelect = document.getElementById('insert-step-role');
+    const descTextarea = document.getElementById('insert-step-description');
+
+    const stepName = nameInput ? nameInput.value.trim() : '';
+    if (!stepName) {
+        showToast('Step name is required!', 'error');
+        return;
+    }
+
+    const roleId = roleSelect ? parseInt(roleSelect.value) : null;
+    const description = descTextarea ? descTextarea.value.trim() : '';
+
+    const btnSubmit = document.getElementById('btn-insert-submit');
+    if (btnSubmit) btnSubmit.disabled = true;
+
+    try {
+        const response = await fetch(`/api/workflows/${activeInsertWorkflowId}/insert_step/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                step_order: activeInsertTargetOrder,
+                step_name: stepName,
+                role_id: roleId,
+                description: description
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showToast('Workflow step inserted successfully!', 'success');
+            closeInsertStepModal();
+            fetchWorkflows(); // Reload workflows board
+        } else {
+            showToast(data.error || 'Failed to insert step.', 'error');
+        }
+    } catch (error) {
+        console.error('Error inserting workflow step:', error);
+        showToast('Error communicating with server.', 'error');
+    } finally {
+        if (btnSubmit) btnSubmit.disabled = false;
+    }
+};
+
+/**
+ * Open and close delete step confirmation modal
+ */
+window.openDeleteConfirmModal = function(stepId, stepName) {
+    stepIdToDelete = stepId;
+    const modalText = document.getElementById('delete-modal-text');
+    if (modalText) {
+        modalText.textContent = `Are you sure you want to delete the step "${stepName}"? This action cannot be undone.`;
+    }
+    const modal = document.getElementById('delete-confirm-modal');
+    if (modal) modal.classList.add('active');
+};
+
+window.closeDeleteConfirmModal = function() {
+    stepIdToDelete = null;
+    const modal = document.getElementById('delete-confirm-modal');
+    if (modal) modal.classList.remove('active');
+};
+
+/**
+ * Submit step deletion to the proxy endpoint
+ */
+async function submitDeleteWorkflowStep() {
+    if (!stepIdToDelete) return;
+    const btnSubmit = document.getElementById('btn-delete-submit');
+    if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.textContent = 'Deleting...';
+    }
+
+    try {
+        const response = await fetch(`/api/workflows/steps/${stepIdToDelete}/delete/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showToast('Workflow step deleted successfully!', 'success');
+            closeDeleteConfirmModal();
+            fetchWorkflows(); // Reload workflows board
+        } else {
+            showToast(data.error || 'Failed to delete step.', 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting workflow step:', error);
+        showToast('Error communicating with server.', 'error');
+    } finally {
+        if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.textContent = 'Delete Step';
+        }
+    }
+}
+

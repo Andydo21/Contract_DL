@@ -53,6 +53,7 @@ def recommend_workflow(text: str, clause_types: list, contract_type: str):
     for url in unique_urls:
         endpoint = f"{url}/api/v1/recommend_workflow"
         try:
+            from shared.jwt_middleware import get_system_auth_header
             resp = requests.post(
                 endpoint,
                 json={
@@ -60,6 +61,7 @@ def recommend_workflow(text: str, clause_types: list, contract_type: str):
                     "clause_types": signals,
                     "contract_type": declared_type,
                 },
+                headers=get_system_auth_header(),
                 timeout=60,  # Kaggle model may take time on first inference
             )
             if resp.status_code == 200:

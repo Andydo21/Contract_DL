@@ -2,7 +2,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+import sys
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Make shared/ importable from project root
+shared_parent = str(BASE_DIR.parent)
+if shared_parent not in sys.path:
+    sys.path.insert(0, shared_parent)
 
 # Load environment variables from the root .env file if it exists
 env_path = BASE_DIR.parent / ".env"

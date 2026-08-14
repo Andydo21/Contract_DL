@@ -23,7 +23,7 @@ def list_all_workflows(request):
         "reasons":       wf.reasons,
         "started_at":    wf.started_at.isoformat() if wf.started_at else None,
         "completed_at":  wf.completed_at.isoformat() if wf.completed_at else None,
-        "steps": [_step_to_dict(st) for st in wf.steps.order_by("step_order")],
+        "steps": [_step_to_dict(st) for st in sorted(wf.steps.all(), key=lambda s: s.step_order)],
     } for wf in workflows]
     return JsonResponse({"workflows": result})
 
@@ -114,6 +114,7 @@ def approve_step(request, step_id):
             action=body.get("action", "APPROVED"),
             comment=body.get("comment", ""),
             company_id=body.get("company_id"),
+            is_manager=body.get("is_manager", False),
         )
     except ValueError as ve:
         return JsonResponse({"error": str(ve)}, status=400 if "action" in str(ve) else 404)
@@ -214,14 +215,94 @@ def signature_list(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+def update_step_role(request, step_id):
+    """POST /workflows/steps/<step_id>/update_role/"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body)
+        role_id = body.get("role_id")
+        if role_id is None:
+            return JsonResponse({"error": "role_id is required"}, status=400)
+        
+        from .models import WorkflowStep
+        try:
+            step = WorkflowStep.objects.get(id=step_id)
+            step.role_id = int(role_id)
+            step.save()
+            return JsonResponse({"success": True, "step_id": step.id, "role_id": step.role_id})
+        except WorkflowStep.DoesNotExist:
+            return JsonResponse({"error": "Step not found"}, status=404)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def insert_step_view(request, workflow_id):
+    """POST /workflows/<workflow_id>/insert_step/"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body)
+        step_order = body.get("step_order")
+        step_name = body.get("step_name")
+        role_id = body.get("role_id")
+        description = body.get("description", "")
+
+        if step_order is None or not step_name:
+            return JsonResponse({"error": "step_order and step_name are required"}, status=400)
+
+        step = workflow_service.insert_step(
+            workflow_id=workflow_id,
+            step_order=int(step_order),
+            step_name=step_name,
+            role_id=int(role_id) if role_id is not None else None,
+            description=description
+        )
+        return JsonResponse({
+            "success": True,
+            "step": _step_to_dict(step)
+        }, status=201)
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def delete_step_view(request, step_id):
+    """POST /workflows/steps/<step_id>/delete/"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        workflow_service.delete_step(step_id)
+        return JsonResponse({"success": True})
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
 # ─── helpers ──────────────────────────────────
 
 def _step_to_dict(st):
+    approvals_list = []
+    approvals = list(st.approvals.all())
+    for app in approvals:
+        approvals_list.append({
+            "user_id": app.user_id,
+            "status": app.status,
+            "comment": app.comment,
+            "approved_at": app.approved_at.isoformat() if app.approved_at else None,
+        })
+    comment = None
+    if approvals:
+        latest_app = max(approvals, key=lambda a: a.id)
+        comment = latest_app.comment
     return {
         "id": st.id, "step_order": st.step_order, "step_name": st.step_name,
         "role_id": st.role_id, "status": st.status,
         "completed_at": st.completed_at.isoformat() if st.completed_at else None,
-        "comment": st.approvals.order_by('-id').first().comment if st.approvals.exists() else None,
+        "comment": comment,
+        "approvals": approvals_list,
     }
 
 

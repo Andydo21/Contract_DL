@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}?v=1.1">
+    <link rel="stylesheet" href="{% static 'contracts/css/workflow_board.css' %}?v=1.5">
 </head>
 <body>
     <div class="app-shell">
@@ -127,6 +127,88 @@
                 <button class="btn btn-approve" id="btn-approve">
                     <i class="fa-solid fa-check"></i> Approve
                 </button>
+                <button class="btn btn-approve" id="btn-force-complete" style="display: none; background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 4px 12px var(--accent-glow);">
+                    <i class="fa-solid fa-check-double"></i> Accept & Complete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Insert Step Modal -->
+    <div class="modal-overlay" id="insert-step-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <i class="fa-solid fa-circle-plus modal-icon" style="color: var(--accent); font-size: 20px;"></i>
+                    <div>
+                        <h3 class="modal-title">Insert Workflow Step</h3>
+                        <p class="modal-subtitle">Manually add a signing step to the workflow</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="modal-insert-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label" style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-sec);">Step Name</label>
+                    <input type="text" id="insert-step-name" class="form-input" style="width: 100%; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; color: #fff; padding: 8px 12px; font-size: 13px;" placeholder="e.g. Finance Review, CTO Signoff...">
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label" style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-sec);">Required Role</label>
+                    <select id="insert-step-role" class="form-input" style="width: 100%; background: #0d1526; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; color: #fff; padding: 8px 12px; font-size: 13px;">
+                        <option value="4">LEGAL_EXPERT</option>
+                        <option value="5">MANAGER</option>
+                        <option value="6">FINANCE</option>
+                        <option value="7">TECHNICAL</option>
+                        <option value="8">SECURITY</option>
+                        <option value="9">COMPLIANCE</option>
+                        <option value="10">PROCUREMENT</option>
+                        <option value="11">EXECUTIVE</option>
+                        <option value="1">ADMIN</option>
+                        <option value="2">EXPERT</option>
+                        <option value="3">VIEWER</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" style="display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-sec);">Description (optional)</label>
+                    <textarea id="insert-step-description" class="form-textarea" style="width: 100%; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; color: #fff; padding: 8px 12px; font-size: 13px; min-height: 80px;" placeholder="What needs to be reviewed in this step..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-reject" id="btn-insert-cancel" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #fff; padding: 8px 16px; border-radius: 6px;">
+                    Cancel
+                </button>
+                <button class="btn btn-approve" id="btn-insert-submit" style="background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #0d1526; padding: 8px 16px; border-radius: 6px; font-weight: 600;">
+                    Insert Step
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="delete-confirm-modal">
+        <div class="modal-card" style="max-width: 400px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <i class="fa-solid fa-triangle-exclamation modal-icon" style="color: #ef4444; font-size: 20px;"></i>
+                    <div>
+                        <h3 class="modal-title">Delete Step</h3>
+                        <p class="modal-subtitle">Confirm workflow modifications</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="modal-delete-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin: 0;" id="delete-modal-text">
+                    Are you sure you want to delete this step? This action cannot be undone.
+                </p>
+            </div>
+            <div class="modal-footer" style="padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-reject" id="btn-delete-cancel" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #fff; padding: 8px 16px; border-radius: 6px;">
+                    Cancel
+                </button>
+                <button class="btn btn-approve" id="btn-delete-submit" style="background: linear-gradient(135deg, #ef4444, #f87171); color: #fff; padding: 8px 16px; border-radius: 6px; font-weight: 600; border: none; cursor: pointer;">
+                    Delete Step
+                </button>
             </div>
         </div>
     </div>
@@ -146,6 +228,6 @@
         window.currentUserRole = _ctx.currentUserRole;
         window.currentUserIsSuperuser = _ctx.currentUserIsSuperuser;
     </script>
-    <script src="{% static 'contracts/js/workflow_board.js' %}?v=1.4"></script>
+    <script src="{% static 'contracts/js/workflow_board.js' %}?v=1.7"></script>
 </body>
 </html>

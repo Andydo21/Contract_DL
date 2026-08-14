@@ -5,7 +5,7 @@ class WorkflowRepository:
     @staticmethod
     def get_all_workflows():
         """Retrieve all workflows ordered by ID descending."""
-        return Workflow.objects.all().order_by("-id")
+        return Workflow.objects.all().order_by("-id").prefetch_related("steps", "steps__approvals")
 
     @staticmethod
     def active_workflow_exists(version_id):
@@ -28,14 +28,13 @@ class WorkflowRepository:
         )
 
     @staticmethod
-    def create_step(workflow, step_order, step_name, role_id=None,reasons=None, status="PENDING", description=None):
+    def create_step(workflow, step_order, step_name, role_id=None, status="PENDING", description=None):
         """Create a step associated with a workflow."""
         return WorkflowStep.objects.create(
             workflow=workflow,
             step_order=step_order,
             step_name=step_name,
             role_id=role_id,
-            reason=reason,
             status=status,
             description=description
         )
@@ -88,3 +87,39 @@ class WorkflowRepository:
             workflow.completed_at = timezone.now()
         workflow.save()
         return workflow
+
+    @staticmethod
+    def insert_step(workflow, step_order, step_name, role_id=None, description=None):
+        """Insert a step at a specific order, shifting subsequent steps."""
+        from django.db import transaction
+        from django.db.models import F
+        with transaction.atomic():
+            WorkflowStep.objects.filter(
+                workflow=workflow,
+                step_order__gte=step_order
+            ).update(step_order=F('step_order') + 1)
+            
+            new_step = WorkflowStep.objects.create(
+                workflow=workflow,
+                step_order=step_order,
+                step_name=step_name,
+                role_id=role_id,
+                status="PENDING",
+                description=description
+            )
+            return new_step
+
+    @staticmethod
+    def delete_step(step):
+        """Delete a step, shifting subsequent steps' order down."""
+        from django.db import transaction
+        from django.db.models import F
+        with transaction.atomic():
+            workflow = step.workflow
+            order_to_remove = step.step_order
+            step.delete()
+            
+            WorkflowStep.objects.filter(
+                workflow=workflow,
+                step_order__gt=order_to_remove
+            ).update(step_order=F('step_order') - 1)

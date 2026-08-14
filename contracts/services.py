@@ -529,9 +529,11 @@ class ContractService:
         }
         
         try:
+            from shared.jwt_middleware import get_system_auth_header
             response = requests.post(
                 f"{settings.AI_SERVICE_URL}/api/v1/analyze",
                 json=payload,
+                headers=get_system_auth_header(),
                 timeout=600  # LLM generation can take time
             )
             response.raise_for_status()
@@ -740,9 +742,11 @@ class WorkflowService:
         }
 
         try:
+            from shared.jwt_middleware import get_system_auth_header
             resp = requests.post(
                 f"{workflow_url}/workflows/",
                 json=payload,
+                headers=get_system_auth_header(),
                 timeout=30,
             )
             resp.raise_for_status()
@@ -788,7 +792,12 @@ class WorkflowService:
         workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
 
         try:
-            resp = requests.get(f"{workflow_url}/workflows/{version.id}/", timeout=10)
+            from shared.jwt_middleware import get_system_auth_header
+            resp = requests.get(
+                f"{workflow_url}/workflows/{version.id}/",
+                headers=get_system_auth_header(),
+                timeout=10
+            )
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()

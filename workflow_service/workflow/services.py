@@ -93,7 +93,35 @@ class WorkflowService:
 
         return workflow
 
-    def approve_step(self, step_id, user_id, action, comment="", company_id=None):
+    def insert_step(self, workflow_id, step_order, step_name, role_id=None, description=None):
+        """Insert a step at a specific order, shifting subsequent steps."""
+        workflow = self.repo.get_workflow_by_id(workflow_id)
+        if not workflow:
+            raise ValueError("Workflow not found")
+        if workflow.status in ("COMPLETED", "REJECTED"):
+            raise ValueError("Cannot insert step into a completed or rejected workflow")
+
+        return self.repo.insert_step(
+            workflow=workflow,
+            step_order=step_order,
+            step_name=step_name,
+            role_id=role_id,
+            description=description
+        )
+
+    def delete_step(self, step_id):
+        """Delete a step by ID and shift orders of remaining steps."""
+        step = self.repo.get_step_by_id(step_id)
+        if not step:
+            raise ValueError("Step not found")
+        
+        workflow = step.workflow
+        if workflow.status in ("COMPLETED", "REJECTED"):
+            raise ValueError("Cannot delete step from a completed or rejected workflow")
+            
+        self.repo.delete_step(step)
+
+    def approve_step(self, step_id, user_id, action, comment="", company_id=None, is_manager=False):
         """Process step approval/rejection. Auto-creates DigitalSignature on APPROVED."""
         from django.db import transaction
 
@@ -101,8 +129,20 @@ class WorkflowService:
         if not step:
             raise ValueError("Step not found")
 
-        if action not in ("APPROVED", "REJECTED"):
-            raise ValueError("action must be APPROVED or REJECTED")
+        if action not in ("APPROVED", "REJECTED", "FORCE_COMPLETE"):
+            raise ValueError("action must be APPROVED, REJECTED, or FORCE_COMPLETE")
+
+        if action == "FORCE_COMPLETE":
+            with transaction.atomic():
+                self.repo.create_approval(step=step, user_id=user_id, action="APPROVED", comment=comment or "Accepted & Completed by Manager")
+                self.repo.update_step_status(step, "APPROVED")
+
+                workflow = step.workflow
+                if all(s.status == "APPROVED" for s in workflow.steps.all()):
+                    self.repo.update_workflow_status(workflow, "COMPLETED")
+                else:
+                    self.repo.update_workflow_status(workflow, "IN_PROGRESS")
+            return step
 
         # Perform blockchain verification BEFORE modifying database if APPROVED
         sig_hash = None
@@ -115,8 +155,11 @@ class WorkflowService:
                 import requests
                 blockchain_service_url = os.environ.get("BLOCKCHAIN_SERVICE_URL", "http://localhost:8002")
                 
+                from shared.jwt_middleware import get_system_auth_header
+                system_headers = get_system_auth_header()
+
                 # 1. Fetch certificate from blockchain service
-                cert_resp = requests.get(f"{blockchain_service_url}/certificate/{user_id}/", timeout=5)
+                cert_resp = requests.get(f"{blockchain_service_url}/certificate/{user_id}/", headers=system_headers, timeout=5)
                 if cert_resp.status_code != 200:
                     raise ValueError(f"Could not retrieve certificate for user {user_id} from blockchain service")
                 certs = cert_resp.json().get("certificates", [])
@@ -131,7 +174,7 @@ class WorkflowService:
                     "user_id": user_id,
                     "certificate_id": cert_id,
                     "signature_hash": sig_hash
-                }, timeout=15)
+                }, headers=system_headers, timeout=15)
                 
                 if sign_resp.status_code != 200:
                     error_msg = sign_resp.json().get("error", "Unknown error during anchoring")
@@ -143,25 +186,19 @@ class WorkflowService:
 
         with transaction.atomic():
             self.repo.create_approval(step=step, user_id=user_id, action=action, comment=comment)
-            self.repo.update_step_status(step, action)
 
-            if action == "APPROVED" and sig_hash:
-                # 3. Save locally in workflow DB
-                KeyManagementService.create_signature_for_step(
-                    step_id=step_id,
-                    user_id=user_id,
-                    company_id=company_id,
-                    signature_hash=sig_hash
-                )
-
-            workflow = step.workflow
-            if action == "REJECTED":
-                self.repo.update_workflow_status(workflow, "REJECTED")
-            else:
-                if all(s.status == "APPROVED" for s in workflow.steps.all()):
-                    self.repo.update_workflow_status(workflow, "COMPLETED")
-                else:
-                    self.repo.update_workflow_status(workflow, "IN_PROGRESS")
+            if action == "APPROVED":
+                if sig_hash:
+                    # Save locally in workflow DB
+                    KeyManagementService.create_signature_for_step(
+                        step_id=step_id,
+                        user_id=user_id,
+                        company_id=company_id,
+                        signature_hash=sig_hash
+                    )
+            elif action == "REJECTED":
+                self.repo.update_step_status(step, "REJECTED")
+                self.repo.update_workflow_status(step.workflow, "REJECTED")
 
         return step
 

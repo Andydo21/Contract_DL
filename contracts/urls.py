@@ -34,6 +34,9 @@ urlpatterns = [
     path('api/risks/', views.api_risks_list, name='api_risks_list'),
     path('api/workflows/', views.api_workflow_all, name='api_workflow_all'),
     path('api/workflows/steps/<int:step_id>/approve/', views.api_approve_workflow_step, name='api_approve_workflow_step'),
+    path('api/workflows/steps/<int:step_id>/update_role/', views.api_update_workflow_step_role, name='api_update_workflow_step_role'),
+    path('api/workflows/steps/<int:step_id>/delete/', views.api_delete_workflow_step, name='api_delete_workflow_step'),
+    path('api/workflows/<int:workflow_id>/insert_step/', views.api_insert_workflow_step, name='api_insert_workflow_step'),
     path('developer-test/', views.developer_test, name='developer_test'),
     path('api/developer-test/run/', views.api_run_developer_test, name='api_run_developer_test'),
     # Identity Registry

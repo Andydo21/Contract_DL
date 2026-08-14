@@ -161,4 +161,7 @@ WORKFLOW_SERVICE_URL = os.environ.get(
     "WORKFLOW_SERVICE_URL", "http://localhost:8003"
 )
 
+# Authentication Settings
+LOGIN_URL = '/login/'
+
 
