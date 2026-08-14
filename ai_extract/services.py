@@ -294,59 +294,60 @@ class ClauseExtractService:
         if re_extract or not contexts_exist:
             latest_file = version.files.first()
             if not latest_file or not latest_file.file_path:
-                raise ValueError("No file available for this contract version.")
+                if not (contexts_exist or version.ai_extract_clauses.exists()):
+                    raise ValueError("No file available for this contract version.")
+            else:
+                import urllib.parse
+                rel_path = urllib.parse.unquote(latest_file.file_path)
+                url_prefix = settings.MEDIA_URL
+                if rel_path.startswith(url_prefix):
+                    rel_path = rel_path[len(url_prefix):]
+                physical_path = os.path.join(settings.MEDIA_ROOT, rel_path)
 
-            import urllib.parse
-            rel_path = urllib.parse.unquote(latest_file.file_path)
-            url_prefix = settings.MEDIA_URL
-            if rel_path.startswith(url_prefix):
-                rel_path = rel_path[len(url_prefix):]
-            physical_path = os.path.join(settings.MEDIA_ROOT, rel_path)
+                if not os.path.exists(physical_path):
+                    raise ValueError(f"Contract file does not exist on disk: {physical_path}")
 
-            if not os.path.exists(physical_path):
-                raise ValueError(f"Contract file does not exist on disk: {physical_path}")
+                # Read and decrypt file
+                with open(physical_path, 'rb') as f:
+                    encrypted_bytes = f.read()
+                decrypted_bytes = decrypt_pdf(encrypted_bytes)
 
-            # Read and decrypt file
-            with open(physical_path, 'rb') as f:
-                encrypted_bytes = f.read()
-            decrypted_bytes = decrypt_pdf(encrypted_bytes)
+                # Write to a secure temporary file keeping the original extension
+                ext = os.path.splitext(latest_file.file_name)[1].lower() if latest_file.file_name else '.pdf'
+                if not ext:
+                    ext = '.pdf'
+                    
+                temp_dir = tempfile.gettempdir()
+                temp_file_name = f"temp_contract_{version.id}_{os.getpid()}{ext}"
+                temp_file_path = os.path.join(temp_dir, temp_file_name)
 
-            # Write to a secure temporary file keeping the original extension
-            ext = os.path.splitext(latest_file.file_name)[1].lower() if latest_file.file_name else '.pdf'
-            if not ext:
-                ext = '.pdf'
-                
-            temp_dir = tempfile.gettempdir()
-            temp_file_name = f"temp_contract_{version.id}_{os.getpid()}{ext}"
-            temp_file_path = os.path.join(temp_dir, temp_file_name)
+                try:
+                    with open(temp_file_path, 'wb') as temp_file:
+                        temp_file.write(decrypted_bytes)
 
-            try:
-                with open(temp_file_path, 'wb') as temp_file:
-                    temp_file.write(decrypted_bytes)
+                    # Process file with DocumentService
+                    service = DocumentService(ocr_lang="vi")
+                    doc_output = service.process(temp_file_path, split_clauses=False)
 
-                # Process file with DocumentService
-                service = DocumentService(ocr_lang="vi")
-                doc_output = service.process(temp_file_path, split_clauses=False)
+                    # Clean existing ContractContext for this version to avoid duplicates
+                    ContractContext.objects.filter(version=version, context_type='raw_text').delete()
 
-                # Clean existing ContractContext for this version to avoid duplicates
-                ContractContext.objects.filter(version=version, context_type='raw_text').delete()
-
-                # Save ContractContext (pages)
-                for page in doc_output.pages:
-                    ContractContext.objects.create(
-                        version=version,
-                        context_type='raw_text',
-                        source=page.source,
-                        content=page.text,
-                        relevance_score=Decimal(str(round(page.confidence, 2)))
-                    )
-            finally:
-                # Securely delete the temporary decrypted file
-                if os.path.exists(temp_file_path):
-                    try:
-                        os.remove(temp_file_path)
-                    except Exception:
-                        pass
+                    # Save ContractContext (pages)
+                    for page in doc_output.pages:
+                        ContractContext.objects.create(
+                            version=version,
+                            context_type='raw_text',
+                            source=page.source,
+                            content=page.text,
+                            relevance_score=Decimal(str(round(page.confidence, 2)))
+                        )
+                finally:
+                    # Securely delete the temporary decrypted file
+                    if os.path.exists(temp_file_path):
+                        try:
+                            os.remove(temp_file_path)
+                        except Exception:
+                            pass
 
         # 2. Gather raw text from contexts
         raw_text = self._get_raw_text(version)
