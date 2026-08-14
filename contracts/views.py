@@ -338,8 +338,7 @@ def contract_detail(request, contract_id):
     from .models import Contract
     try:
         contract_obj = Contract.objects.get(id=contract_id)
-        is_manager = request.user.is_superuser or (request.user.role and request.user.role.role_name.upper() in ['MANAGER', 'ADMIN'])
-        if not is_manager and contract_obj.company != request.user.company:
+        if not request.user.is_superuser and contract_obj.company != request.user.company:
             return render(request, 'contracts/access_denied.html')
     except Contract.DoesNotExist:
         from django.http import Http404
@@ -362,7 +361,7 @@ def api_contracts_list(request):
         try:
             user = request.user
             is_manager = user.is_superuser or (user.role and user.role.role_name.upper() in ['MANAGER', 'ADMIN'])
-            company = None if is_manager else user.company
+            company = None if user.is_superuser else user.company
             contracts = contract_service.list_all_contracts(company=company)
             return JsonResponse(contracts, safe=False)
         except Exception as e:
@@ -434,8 +433,7 @@ def api_contract_detail(request, contract_id):
         from .models import Contract
         try:
             contract_obj = Contract.objects.get(id=contract_id)
-            is_manager = request.user.is_superuser or (request.user.role and request.user.role.role_name.upper() in ['MANAGER', 'ADMIN'])
-            if not is_manager and contract_obj.company != request.user.company:
+            if not request.user.is_superuser and contract_obj.company != request.user.company:
                 return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
         except Contract.DoesNotExist:
             return JsonResponse({'error': 'Contract not found.'}, status=404)
