@@ -4,7 +4,6 @@ from . import views
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('workflows/', views.workflow_board, name='workflow_board'),
-    path('workflows/<int:workflow_id>/', views.workflow_detail, name='workflow_detail'),
     path('contracts/<int:contract_id>/', views.contract_detail, name='contract_detail'),
     path('analyses/', views.analysis_history, name='analysis_history'),
     path('api/contracts/', views.api_contracts_list, name='api_contracts_list'),
@@ -32,11 +31,6 @@ urlpatterns = [
     path('api/analyses/', views.api_analyses_list, name='api_analyses_list'),
     path('api/analyses/<int:analysis_id>/review/', views.api_submit_review, name='api_submit_review'),
     path('api/risks/', views.api_risks_list, name='api_risks_list'),
-    path('api/workflows/', views.api_workflow_all, name='api_workflow_all'),
-    path('api/workflows/steps/<int:step_id>/approve/', views.api_approve_workflow_step, name='api_approve_workflow_step'),
-    path('api/workflows/steps/<int:step_id>/update_role/', views.api_update_workflow_step_role, name='api_update_workflow_step_role'),
-    path('api/workflows/steps/<int:step_id>/delete/', views.api_delete_workflow_step, name='api_delete_workflow_step'),
-    path('api/workflows/<int:workflow_id>/insert_step/', views.api_insert_workflow_step, name='api_insert_workflow_step'),
     path('developer-test/', views.developer_test, name='developer_test'),
     path('api/developer-test/run/', views.api_run_developer_test, name='api_run_developer_test'),
     # Identity Registry
@@ -55,12 +49,6 @@ urlpatterns = [
     path('api/admin/users/<int:user_id>/delete/', views.api_admin_delete_user, name='api_admin_delete_user'),
     path('api/admin/users/<int:user_id>/retry/', views.api_admin_retry_user, name='api_admin_retry_user'),
     path('api/admin/config/ocr/', views.api_admin_toggle_ocr, name='api_admin_toggle_ocr'),
-
-    # Workflow Key & Signature Management
-    path('api/admin/keys/', views.api_workflow_keys_proxy, name='api_workflow_keys_proxy'),
-    path('api/admin/keys/<int:key_id>/rotate/', views.api_workflow_key_rotate_proxy, name='api_workflow_key_rotate_proxy'),
-    path('api/admin/keys/<int:key_id>/revoke/', views.api_workflow_key_revoke_proxy, name='api_workflow_key_revoke_proxy'),
-    path('api/admin/signatures/', views.api_workflow_signatures_proxy, name='api_workflow_signatures_proxy'),
     path('api/token/', views.api_obtain_token, name='api_obtain_token'),
     path('blockchain-explorer/', views.blockchain_explorer, name='blockchain_explorer'),
     path('api/blockchain/explorer/stats/', views.api_blockchain_stats, name='api_blockchain_stats'),

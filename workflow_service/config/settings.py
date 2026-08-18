@@ -24,8 +24,26 @@ ALLOWED_HOSTS = ['*']
 INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
+    'django.contrib.staticfiles',
     'workflow',
 ]
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+            ],
+        },
+    },
+]
+
+STATIC_URL = '/static/'
 
 MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
@@ -45,6 +63,17 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': db_name,
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'postgrespassword'),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+        'OPTIONS': {
+            'sslmode': os.environ.get('DB_SSLMODE', 'disable'),
+        }
+    },
+    'contract_db': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'contract_db',
         'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'postgrespassword'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),

@@ -65,13 +65,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3. Run/Re-run AI Analysis Trigger (Detailed Page)
     const triggerButtons = document.querySelectorAll('#btn-detail-trigger-analysis, #btn-detail-reanalyze');
-    const scannerLoader = document.getElementById('scanner-loader');
     
     triggerButtons.forEach(btn => {
         btn.addEventListener('click', async () => {
             const contractId = btn.dataset.contractId;
-            if (scannerLoader) scannerLoader.classList.add('active');
-            
+            const analysisTab = document.getElementById('analysis-tab');
+
+            // 1. Ensure Risk Analysis tab is active
+            const panelTabBtns = document.querySelectorAll('.panel-tab-btn');
+            panelTabBtns.forEach(b => {
+                b.classList.remove('active');
+                b.style.color = 'var(--text-muted)';
+                if (b.dataset.target === 'analysis-tab') {
+                    b.classList.add('active');
+                    b.style.color = '#ffffff';
+                }
+            });
+            const panes = document.querySelectorAll('.tab-content-wrapper > .tab-pane');
+            panes.forEach(pane => {
+                if (pane.id === 'analysis-tab') {
+                    pane.style.display = 'block';
+                    pane.classList.add('active');
+                } else {
+                    pane.style.display = 'none';
+                    pane.classList.remove('active');
+                }
+            });
+
+            // 2. Disable trigger buttons
+            triggerButtons.forEach(b => {
+                b.disabled = true;
+                b.style.opacity = '0.7';
+                b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Analyzing...`;
+            });
+
+            // 3. Render inline loading indicator strictly inside Risk Assessment section
+            if (analysisTab) {
+                analysisTab.innerHTML = `
+                    <div class="risk-loading-card" style="text-align: center; color: var(--text-muted); padding: 50px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(99, 102, 241, 0.04); border: 1px dashed rgba(99, 102, 241, 0.3); border-radius: 16px; margin: 12px 0;">
+                        <div style="position: relative; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 28px; color: #a5b4fc;"></i>
+                            <div style="position: absolute; top:0; left:0; width:64px; height:64px; border:3px solid rgba(99,102,241,0.15); border-top-color:#6366f1; border-radius:50%; animation:spin 1s linear infinite;"></div>
+                        </div>
+                        <div>
+                            <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">AI Engine is Scanning Contract Risks...</h3>
+                            <p style="max-width: 400px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Extracting agreement clauses, verifying compliance against legal rules, and calculating risk score...</p>
+                        </div>
+                    </div>
+                `;
+            }
+
             try {
                 const res = await fetch(`/api/contracts/${contractId}/analyze/`, {
                     method: 'POST',
@@ -81,24 +124,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const data = await res.json();
                 
-                setTimeout(() => {
-                    if (scannerLoader) scannerLoader.classList.remove('active');
-                    if (data.success) {
-                        window.location.reload();
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    const errorMsg = data.error || "Unknown error";
+                    const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
+                    if (isModelError) {
+                        showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
                     } else {
-                        const errorMsg = data.error || "Unknown error";
-                        const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
-                        if (isModelError) {
-                            showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
-                        } else {
-                            showToast(errorMsg, "error");
-                        }
+                        showToast(errorMsg, "error");
                     }
-                }, 2500); // 2.5s simulation loader duration
+                    window.location.reload();
+                }
             } catch (err) {
-                if (scannerLoader) scannerLoader.classList.remove('active');
                 console.error(err);
                 showToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
+                window.location.reload();
             }
         });
     });
@@ -138,7 +179,45 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 5. Auto-load workflow status when PENDING_WORKFLOW
+    // 4b. Re-push to Workflow button (Force recreate)
+    const btnRepushWorkflow = document.getElementById('btn-repush-workflow');
+    if (btnRepushWorkflow) {
+        btnRepushWorkflow.addEventListener('click', async () => {
+            if (!confirm('Bạn có chắc chắn muốn reset và tạo lại quy trình phê duyệt (Workflow) cho hợp đồng này không? Toàn bộ các bước ký kết và chữ ký cũ sẽ bị xóa.')) {
+                return;
+            }
+            
+            const contractId = btnRepushWorkflow.dataset.contractId;
+            btnRepushWorkflow.disabled = true;
+            btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Resetting...';
+
+            try {
+                const res = await fetch(`/api/contracts/${contractId}/workflow/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('Đã xóa và tái tạo workflow mới thành công! Đang tải lại...', 'success');
+                    setTimeout(() => window.location.reload(), 1800);
+                } else {
+                    btnRepushWorkflow.disabled = false;
+                    btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push & Reset Workflow';
+                    showToast(data.error || 'Không thể tạo lại workflow.', 'warning');
+                }
+            } catch (err) {
+                btnRepushWorkflow.disabled = false;
+                btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push & Reset Workflow';
+                console.error(err);
+                showToast('Lỗi kết nối: Không thể kết nối tới workflow service.', 'error');
+            }
+        });
+    }
+
+    // 5. Auto-load workflow status
     const workflowContainer = document.getElementById('workflow-steps-container');
     if (workflowContainer) {
         const contractId = workflowContainer.dataset.contractId;
@@ -148,7 +227,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 const wf = data.workflow;
                 if (!wf) {
-                    workflowContainer.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Chưa có workflow nào được tạo.</p>';
+                    const pushContainer = document.getElementById('workflow-push-container');
+                    const statusContainer = document.getElementById('workflow-status-container');
+                    if (pushContainer && statusContainer) {
+                        pushContainer.style.display = 'block';
+                        statusContainer.style.display = 'none';
+                    } else {
+                        workflowContainer.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">Chưa có workflow nào được tạo.</p>';
+                    }
                     return;
                 }
                 const statusColor = { PENDING: '#6366f1', IN_PROGRESS: '#f59e0b', COMPLETED: '#10b981', REJECTED: '#ef4444' };

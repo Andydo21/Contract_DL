@@ -51,7 +51,7 @@
                 <a href="/identity/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-identity">
                     <i class="fa-solid fa-building-shield"></i> Identity Registry
                 </a>
-                <a href="/workflows/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-workflows">
+                <a href="http://localhost:8003/board/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-workflows">
                     <i class="fa-solid fa-diagram-project"></i> Workflow Board
                 </a>
                 {% if user.is_superuser or user.role.role_name.upper == 'MANAGER' or user.role.role_name.upper == 'ADMIN' %}
@@ -242,6 +242,6 @@
     </div>
 
     <!-- External JavaScript -->
-    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.0.3"></script>
+    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.1.4"></script>
 </body>
 </html>

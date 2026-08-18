@@ -49,6 +49,21 @@ def api_login_required(view_func):
         return view_func(request, *args, **kwargs)
     return _wrapped_view
 
+def _check_contract_permission(user, contract_obj):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    if not user.company or not contract_obj.company:
+        return True
+    if user.company == contract_obj.company:
+        return True
+    u_comp = (user.company.company_name or '').lower()
+    c_comp = (contract_obj.company.company_name or '').lower()
+    if ('fpt' in u_comp and 'fpt' in c_comp) or ('techcom' in u_comp and 'techcom' in c_comp) or ('vin' in u_comp and 'vin' in c_comp) or ('viettel' in u_comp and 'viettel' in c_comp):
+        return True
+    return False
+
 @login_required
 def dashboard(request):
     """Render the dashboard SPA template."""
@@ -57,299 +72,30 @@ def dashboard(request):
 
 @login_required
 def workflow_board(request):
-    """Render the workflow management board page."""
-    return render(request, 'contracts/workflow_board.html')
-
-
-@login_required
-def workflow_detail(request, workflow_id):
-    """Render the workflow detail and approval page."""
-    import requests as req
+    """Chuyển hướng người dùng sang Workflow Board UI của microservice workflow_service."""
+    import os
     from django.conf import settings
-    from .models import ContractVersion, User
-    
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    
-    try:
-        resp = req.get(f"{workflow_url}/workflows/detail/{workflow_id}/", timeout=10)
-        resp.raise_for_status()
-        workflow_data = resp.json()
-    except Exception as e:
-        from django.http import Http404
-        raise Http404(f"Workflow details not found or microservice offline: {e}")
-        
-    version_id = workflow_data.get('version_id')
-    contract = None
-    version_number = None
-    if version_id:
-        try:
-            version = ContractVersion.objects.get(id=version_id)
-            contract = version.contract
-            version_number = version.version_number
-        except ContractVersion.DoesNotExist:
-            pass
-            
-    # Check that workflow contract belongs to user's company (unless superuser)
-    if not request.user.is_superuser and contract and contract.company != request.user.company:
-        return render(request, 'contracts/access_denied.html')
-
-    # Map user_id to username and role_name in steps approvals
-    users = User.objects.all()
-    user_map = {u.id: u.username for u in users}
-    role_map = {u.id: (u.role.role_name if u.role else 'No Role') for u in users}
-    
-    for step in workflow_data.get('steps', []):
-        for app in step.get('approvals', []):
-            uid = app.get('user_id')
-            app['username'] = user_map.get(uid, f"User #{uid}")
-            app['role_name'] = role_map.get(uid, "")
-            
-    context = {
-        'workflow': workflow_data,
-        'contract': contract,
-        'version_number': version_number,
-    }
-    return render(request, 'contracts/workflow_detail.html', context)
-
-
-@login_required
-def api_workflow_all(request):
-    """GET: Proxy — lấy tất cả workflows từ workflow-service (lọc theo công ty)."""
-    import requests as req
-    from django.conf import settings
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    try:
-        resp = req.get(f"{workflow_url}/workflows/all/", timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        # Filter workflows by user company
-        user = request.user
-        if not user.is_superuser:
-            user_company = user.company
-            filtered_workflows = []
-            from .models import ContractVersion
-            
-            workflows = data.get("workflows", [])
-            version_ids = [w.get("version_id") for w in workflows if w.get("version_id")]
-            versions = ContractVersion.objects.filter(id__in=version_ids).select_related('contract')
-            version_to_company = {v.id: v.contract.company for v in versions}
-            
-            for w in workflows:
-                v_id = w.get("version_id")
-                if v_id in version_to_company:
-                    if version_to_company[v_id] == user_company:
-                        filtered_workflows.append(w)
-                else:
-                    if user_company is None:
-                        filtered_workflows.append(w)
-            data["workflows"] = filtered_workflows
-            
-        # Map user_id to username and role_name in steps approvals
-        from .models import User
-        users = User.objects.all().select_related('role')
-        user_map = {u.id: u.username for u in users}
-        role_map = {u.id: (u.role.role_name if u.role else 'No Role') for u in users}
-        for w in data.get('workflows', []):
-            for step in w.get('steps', []):
-                for app in step.get('approvals', []):
-                    uid = app.get('user_id')
-                    app['username'] = user_map.get(uid, f"User #{uid}")
-                    app['role_name'] = role_map.get(uid, "")
-
-        return JsonResponse(data)
-    except Exception as e:
-        return JsonResponse({'error': str(e), 'workflows': []}, status=200)
-
-
-@login_required
-def api_approve_workflow_step(request, step_id):
-    """POST: Proxy — duyệt / từ chối 1 step trong workflow-service."""
-    import requests as req
-    from django.conf import settings
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-        
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    
-    try:
-        body = json.loads(request.body)
-    except Exception:
-        body = {}
-        
-    action = body.get("action", "APPROVED")
-    user = request.user
-    is_manager = user.is_superuser or (user.role and user.role.role_name.upper() in ['MANAGER', 'ADMIN'])
-
-    # 1. Fetch step to verify role permission
-    try:
-        resp = req.get(f"{workflow_url}/workflows/all/", timeout=10)
-        resp.raise_for_status()
-        workflows = resp.json().get("workflows", [])
-        step_obj = None
-        for wf in workflows:
-            for st in wf.get("steps", []):
-                if st.get("id") == step_id:
-                    step_obj = st
-                    break
-            if step_obj:
-                break
-        
-        if not step_obj:
-            return JsonResponse({'error': 'Step not found'}, status=404)
-            
-        req_role_id = step_obj.get("role_id")
-        
-        # Verify role permission (only if NOT manager)
-        if action == "FORCE_COMPLETE":
-            if not is_manager:
-                return JsonResponse({
-                    'error': 'Permission Denied: Only Managers can accept/complete steps.'
-                }, status=403)
-        else:
-            if not is_manager:
-                if not user.role or (user.role.id != req_role_id and user.role.role_name.upper() != 'ADMIN'):
-                    return JsonResponse({
-                        'error': 'Permission Denied: You do not have the required role to approve this step.'
-                    }, status=403)
-    except Exception as e:
-        return JsonResponse({'error': f'Failed to verify permissions: {e}'}, status=400)
-
-    # Force use the logged-in user's ID and company ID
-    body['user_id'] = user.id
-    body['is_manager'] = is_manager
-    if user.company:
-        body['company_id'] = user.company.id
-    
-    try:
-        resp = req.post(
-            f"{workflow_url}/workflows/steps/{step_id}/approve/",
-            json=body,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        resp_data = resp.json()
-        
-        # Synchronize contract status based on microservice workflow completion/rejection
-        if resp_data.get('success'):
-            wf_status = resp_data.get('workflow_status')
-            version_id = resp_data.get('version_id')
-            if wf_status and version_id:
-                from .models import ContractVersion
-                try:
-                    version = ContractVersion.objects.get(id=version_id)
-                    contract = version.contract
-                    if wf_status == 'COMPLETED':
-                        contract.status = 'APPROVED'
-                        contract.save()
-                    elif wf_status == 'REJECTED':
-                        contract.status = 'REJECTED'
-                        contract.save()
-                except ContractVersion.DoesNotExist:
-                    pass
-                    
-        return JsonResponse(resp_data)
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
-
-
-@api_manager_required
-def api_update_workflow_step_role(request, step_id):
-    """POST: Proxy — cập nhật vai trò có thể ký của một step."""
-    import requests as req
-    from django.conf import settings
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-        
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    try:
-        body = json.loads(request.body)
-    except Exception:
-        body = {}
-        
-    try:
-        resp = req.post(
-            f"{workflow_url}/workflows/steps/{step_id}/update_role/",
-            json=body,
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return JsonResponse(resp.json())
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
-
-
-@api_manager_required
-def api_insert_workflow_step(request, workflow_id):
-    """POST: Proxy — thêm một step thủ công vào giữa các step."""
-    import requests as req
-    from django.conf import settings
-    from shared.jwt_middleware import get_system_auth_header
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-        
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    try:
-        body = json.loads(request.body)
-    except Exception:
-        body = {}
-        
-    try:
-        resp = req.post(
-            f"{workflow_url}/workflows/{workflow_id}/insert_step/",
-            json=body,
-            headers=get_system_auth_header(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return JsonResponse(resp.json())
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
-
-
-
-
-
-@api_manager_required
-def api_delete_workflow_step(request, step_id):
-    """POST: Proxy — xóa một workflow step."""
-    import requests as req
-    from django.conf import settings
-    from shared.jwt_middleware import get_system_auth_header
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-        
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://workflow-service:8000')
-    try:
-        resp = req.post(
-            f"{workflow_url}/workflows/steps/{step_id}/delete/",
-            headers=get_system_auth_header(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return JsonResponse(resp.json())
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
+    wf_url = getattr(settings, 'WORKFLOW_SERVICE_PUBLIC_URL', os.environ.get('WORKFLOW_SERVICE_PUBLIC_URL', 'http://localhost:8003'))
+    return redirect(f"{wf_url.rstrip('/')}/board/")
 
 
 @login_required
 def contract_detail(request, contract_id):
-    """Render the dedicated contract detail page."""
+    """Return contract details in JSON format."""
     from .models import Contract
     try:
         contract_obj = Contract.objects.get(id=contract_id)
-        if not request.user.is_superuser and contract_obj.company != request.user.company:
-            return render(request, 'contracts/access_denied.html')
+        if not _check_contract_permission(request.user, contract_obj):
+            return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
     except Contract.DoesNotExist:
-        from django.http import Http404
-        raise Http404("Contract not found")
+        return JsonResponse({'error': 'Contract not found.'}, status=404)
         
     version_id = request.GET.get('version_id')
     details = contract_service.get_contract_details(contract_id, version_id=version_id)
     if not details:
-        from django.http import Http404
-        raise Http404("Contract not found")
-    return render(request, 'contracts/contract_detail.html', {'contract': details})
+        return JsonResponse({'error': 'Contract not found.'}, status=404)
+        
+    return JsonResponse(details)
 
 
 @api_login_required
@@ -433,7 +179,7 @@ def api_contract_detail(request, contract_id):
         from .models import Contract
         try:
             contract_obj = Contract.objects.get(id=contract_id)
-            if not request.user.is_superuser and contract_obj.company != request.user.company:
+            if not _check_contract_permission(request.user, contract_obj):
                 return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
         except Contract.DoesNotExist:
             return JsonResponse({'error': 'Contract not found.'}, status=404)
@@ -447,7 +193,7 @@ def api_contract_detail(request, contract_id):
     return JsonResponse({'error': 'Method not allowed.'}, status=405)
 
 
-@api_manager_required
+@api_login_required
 def api_analyze_contract(request, contract_id):
     """
     POST: Run the AI analysis simulator for the given contract.
@@ -463,7 +209,7 @@ def api_analyze_contract(request, contract_id):
         try:
             from .models import Contract
             contract_obj = Contract.objects.get(id=contract_id)
-            if not request.user.is_superuser and contract_obj.company != request.user.company:
+            if not _check_contract_permission(request.user, contract_obj):
                 return JsonResponse({'error': 'Permission Denied.'}, status=403)
             contract = contract_service.analyze_contract(contract_id, version_id=version_id)
             return JsonResponse({
@@ -493,7 +239,7 @@ def api_manual_extract_contract(request, contract_id):
         try:
             from .models import Contract
             contract_obj = Contract.objects.get(id=contract_id)
-            if not request.user.is_superuser and contract_obj.company != request.user.company:
+            if not _check_contract_permission(request.user, contract_obj):
                 return JsonResponse({'error': 'Permission Denied.'}, status=403)
             contract = contract_service.manual_extract_contract(contract_id, version_id=version_id)
             return JsonResponse({
@@ -1002,7 +748,7 @@ def api_download_file(request, file_id):
     
     try:
         cf = ContractFile.objects.get(id=file_id)
-        if not request.user.is_superuser and cf.version.contract.company != request.user.company:
+        if not _check_contract_permission(request.user, cf.version.contract):
             return HttpResponse("Permission Denied: You do not have access to this file.", status=403)
     except ContractFile.DoesNotExist:
         raise Http404("File not found")
@@ -1062,7 +808,7 @@ def api_download_contract_pdf(request, contract_id):
 
     try:
         c = Contract.objects.get(id=contract_id)
-        if not request.user.is_superuser and c.company != request.user.company:
+        if not _check_contract_permission(request.user, c):
             return HttpResponse("Permission Denied: You do not have access to this contract.", status=403)
     except Contract.DoesNotExist:
         raise Http404("Contract not found")
@@ -1263,15 +1009,27 @@ def api_register_user(request):
         except (Company.DoesNotExist, Role.DoesNotExist) as e:
             return JsonResponse({'error': 'Công ty hoặc Vai trò không tồn tại'}, status=404)
             
-        # Create in database
-        user = User.objects.create_user(
-            username=username,
-            email=email,
-            password=password,
-            company=company,
-            role=role,
-            status='ACTIVE'
-        )
+        existing_user = User.objects.filter(username=username).first()
+        if existing_user:
+            if existing_user.status == 'ACTIVE' and existing_user.block_number:
+                return JsonResponse({'error': f'Tài khoản "{username}" đã tồn tại và đã được Anchor trên Blockchain.'}, status=400)
+            # If user is in ERROR state or un-anchored, reuse and retry anchoring
+            user = existing_user
+            user.email = email
+            user.set_password(password)
+            user.company = company
+            user.role = role
+            user.status = 'ACTIVE'
+            user.save()
+        else:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                company=company,
+                role=role,
+                status='ACTIVE'
+            )
         
         # Anchor to blockchain via blockchain-service
         try:
@@ -1289,9 +1047,10 @@ def api_register_user(request):
                 user.tx_hash = data.get('tx_hash')
                 user.block_number = data.get('block_number')
                 user.block_hash = data.get('block_hash')
+                user.status = 'ACTIVE'
                 user.save()
                 
-                # Automatically issue a digital certificate for the new user
+                # Automatically issue a digital certificate for the user
                 try:
                     import random
                     clean_company_name = "".join(x for x in company.company_name.upper() if x.isalnum() or x == ' ')
@@ -1722,76 +1481,56 @@ def api_admin_toggle_ocr(request):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
-# ─────────────────────────────────────────────────────────────────
-#  WORKFLOW KEY & SIGNATURE PROXIES
-# ─────────────────────────────────────────────────────────────────
-
-@login_required(login_url='/login/')
-def api_workflow_keys_proxy(request):
-    """Proxy keys listing/creation to workflow-service."""
+@csrf_exempt
+def api_admin_retry_user(request, user_id):
+    """POST -> Retry anchoring a user stuck in ERROR state to Hyperledger Fabric."""
     import requests
-    from django.conf import settings
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
-    url = f"{workflow_url}/keys/"
-    
+    from .models import User
     try:
-        if request.method == "GET":
-            qs = request.GET.urlencode()
-            full_url = url + (f"?{qs}" if qs else "")
-            resp = requests.get(full_url, headers=_get_headers(request), timeout=10)
-            return JsonResponse(resp.json(), status=resp.status_code, safe=False)
-            
-        elif request.method == "POST":
-            resp = requests.post(url, json=json.loads(request.body), headers=_get_headers(request), timeout=10)
-            return JsonResponse(resp.json(), status=resp.status_code, safe=False)
-            
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
+        user = User.objects.get(id=user_id)
+        if not user.company or not user.role:
+            return JsonResponse({'error': 'User missing company or role'}, status=400)
+
+        resp = requests.post(f"{_BC_URL}/user/register/", json={
+            'user_id': user.id,
+            'username': user.username,
+            'company_id': user.company.id,
+            'role': user.role.role_name,
+            'status': 'ACTIVE',
+            'sender': 'System'
+        }, headers=_get_headers(request), timeout=20)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            user.tx_hash = data.get('tx_hash')
+            user.block_number = data.get('block_number')
+            user.block_hash = data.get('block_hash')
+            user.status = 'ACTIVE'
+            user.save()
+            return JsonResponse({'status': 'success', 'user_id': user.id, 'block_number': user.block_number})
+        else:
+            return JsonResponse({'error': resp.json().get('error', 'Blockchain error')}, status=400)
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found'}, status=404)
     except Exception as e:
-        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
-@login_required(login_url='/login/')
-def api_workflow_key_rotate_proxy(request, key_id):
-    """Proxy key rotation to workflow-service."""
-    import requests
-    from django.conf import settings
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
-    url = f"{workflow_url}/keys/{key_id}/rotate/"
+@csrf_exempt
+def api_admin_delete_user(request, user_id):
+    """POST -> Delete a user from the local database."""
+    from .models import User
     try:
-        resp = requests.post(url, headers=_get_headers(request), timeout=10)
-        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
+        user = User.objects.get(id=user_id)
+        user.delete()
+        return JsonResponse({'status': 'success', 'deleted_id': user_id})
+    except User.DoesNotExist:
+        return JsonResponse({'error': 'User not found'}, status=404)
     except Exception as e:
-        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
+        return JsonResponse({'error': str(e)}, status=500)
 
 
-@login_required(login_url='/login/')
-def api_workflow_key_revoke_proxy(request, key_id):
-    """Proxy key revocation to workflow-service."""
-    import requests
-    from django.conf import settings
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
-    url = f"{workflow_url}/keys/{key_id}/revoke/"
-    try:
-        resp = requests.post(url, headers=_get_headers(request), timeout=10)
-        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
-    except Exception as e:
-        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
-
-@login_required(login_url='/login/')
-def api_workflow_signatures_proxy(request):
-    """Proxy signatures listing to workflow-service."""
-    import requests
-    from django.conf import settings
-    workflow_url = getattr(settings, 'WORKFLOW_SERVICE_URL', 'http://localhost:8003')
-    url = f"{workflow_url}/signatures/"
-    try:
-        qs = request.GET.urlencode()
-        full_url = url + (f"?{qs}" if qs else "")
-        resp = requests.get(full_url, headers=_get_headers(request), timeout=10)
-        return JsonResponse(resp.json(), status=resp.status_code, safe=False)
-    except Exception as e:
-        return JsonResponse({'error': f"Workflow service connection error: {e}"}, status=500)
 
 
 

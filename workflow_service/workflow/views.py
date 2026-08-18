@@ -1,19 +1,49 @@
 import json
-from django.http import JsonResponse
+from django.http import JsonResponse as DjangoJsonResponse
 from .services import WorkflowService, KeyManagementService
+
+def JsonResponse(data, status=200, **kwargs):
+    kwargs.setdefault('json_dumps_params', {})['ensure_ascii'] = False
+    return DjangoJsonResponse(data, status=status, **kwargs)
 
 workflow_service = WorkflowService()
 
 
+from django.shortcuts import render, get_object_or_404
+
 def index(request):
     return JsonResponse({"status": "healthy", "service": "workflow_service"})
+
+
+def workflow_board_page(request):
+    """Render Workflow Board UI page."""
+    return render(request, 'workflow/workflow_board.html')
+
+
+def workflow_detail_page(request, workflow_id):
+    """Render Workflow Detail UI page."""
+    from .models import Workflow
+    workflow = get_object_or_404(Workflow, id=workflow_id)
+    wf_dict = {
+        "workflow_id":   workflow.id,
+        "version_id":    workflow.version_id,
+        "workflow_name": workflow.workflow_name,
+        "status":        workflow.status,
+        "workflow_type": workflow.workflow_type,
+        "reasons":       workflow.reasons,
+        "started_at":    workflow.started_at.isoformat() if workflow.started_at else None,
+        "completed_at":  workflow.completed_at.isoformat() if workflow.completed_at else None,
+        "steps": [_step_to_dict(st) for st in sorted(workflow.steps.all(), key=lambda s: s.step_order)],
+    }
+    return render(request, 'workflow/workflow_detail.html', {"workflow": wf_dict})
 
 
 def list_all_workflows(request):
     """GET /workflows/all/"""
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    workflows = workflow_service.list_all_workflows()
+    
+    workflows = workflow_service.list_workflows_for_user(request.user)
     result = [{
         "workflow_id":   wf.id,
         "version_id":    wf.version_id,
@@ -225,14 +255,8 @@ def update_step_role(request, step_id):
         if role_id is None:
             return JsonResponse({"error": "role_id is required"}, status=400)
         
-        from .models import WorkflowStep
-        try:
-            step = WorkflowStep.objects.get(id=step_id)
-            step.role_id = int(role_id)
-            step.save()
-            return JsonResponse({"success": True, "step_id": step.id, "role_id": step.role_id})
-        except WorkflowStep.DoesNotExist:
-            return JsonResponse({"error": "Step not found"}, status=404)
+        step = workflow_service.update_step_role(step_id, int(role_id))
+        return JsonResponse({"success": True, "step_id": step.id, "role_id": step.role_id})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -285,7 +309,7 @@ def delete_step_view(request, step_id):
 
 def _step_to_dict(st):
     approvals_list = []
-    approvals = list(st.approvals.all())
+    approvals = list(st.approvals.all().order_by('id'))
     for app in approvals:
         approvals_list.append({
             "user_id": app.user_id,
@@ -295,8 +319,7 @@ def _step_to_dict(st):
         })
     comment = None
     if approvals:
-        latest_app = max(approvals, key=lambda a: a.id)
-        comment = latest_app.comment
+        comment = approvals[-1].comment
     return {
         "id": st.id, "step_order": st.step_order, "step_name": st.step_name,
         "role_id": st.role_id, "status": st.status,

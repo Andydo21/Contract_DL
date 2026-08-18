@@ -651,9 +651,20 @@
                             ` : '<span style="color: var(--text-muted);">N/A</span>'}
                         </td>
                         <td>
-                            <button class="tx-link" style="border: none; cursor: pointer; font-family: inherit; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(99, 102, 241, 0.15); border-radius: 6px;" onclick="showLedgerUser(${u.id})">
-                                <i class="fa-solid fa-cube"></i> Query Ledger
-                            </button>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                ${u.status === 'ERROR' ? `
+                                    <button class="tx-link" style="border: none; cursor: pointer; font-family: inherit; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; border-radius: 6px;" onclick="retryUser(${u.id})">
+                                        <i class="fa-solid fa-rotate-right"></i> Retry Anchor
+                                    </button>
+                                ` : `
+                                    <button class="tx-link" style="border: none; cursor: pointer; font-family: inherit; font-size: 11px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(99, 102, 241, 0.15); border-radius: 6px;" onclick="showLedgerUser(${u.id})">
+                                        <i class="fa-solid fa-cube"></i> Query Ledger
+                                    </button>
+                                `}
+                                <button class="copy-btn" style="color: #f87171; font-size: 13px;" onclick="deleteUser(${u.id}, '${u.username}')" title="Delete Staff">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `).join('');
@@ -757,6 +768,49 @@
                 alert('Connection error. Failed to register staff.');
             } finally {
                 setCardLoading('user-card', false);
+            }
+        }
+
+        // Retry Anchoring a staff member stuck in ERROR
+        async function retryUser(userId) {
+            setCardLoading('user-card', true, 'Retrying Anchor to Fabric...');
+            try {
+                const resp = await fetch(`/api/admin/users/${userId}/retry/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') }
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    loadUsers();
+                    alert(`Successfully anchored staff on Ledger!\nBlock: #${data.block_number}`);
+                } else {
+                    alert(`Retry Error: ${data.error}`);
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to connect to server.');
+            } finally {
+                setCardLoading('user-card', false);
+            }
+        }
+
+        // Delete staff member
+        async function deleteUser(userId, username) {
+            if (!confirm(`Are you sure you want to delete staff account '${username}'?`)) return;
+            try {
+                const resp = await fetch(`/api/admin/users/${userId}/delete/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') }
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    loadUsers();
+                } else {
+                    alert(`Delete Error: ${data.error}`);
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Failed to delete staff member.');
             }
         }
 

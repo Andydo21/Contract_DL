@@ -13,6 +13,18 @@ class WorkflowService:
         """Retrieve all workflows ordered by ID descending."""
         return self.repo.get_all_workflows()
 
+    def list_workflows_for_user(self, user):
+        """Retrieve workflows filtered by user's company permission unless superuser."""
+        if not user or not getattr(user, 'is_authenticated', False):
+            return []
+        if getattr(user, 'is_superuser', False):
+            return self.repo.get_all_workflows()
+        
+        company_id = getattr(user, 'company_id', None)
+        if company_id:
+            return self.repo.get_workflows_by_company(company_id)
+        return self.repo.get_all_workflows()
+
     def active_workflow_exists(self, version_id):
         return self.repo.active_workflow_exists(version_id)
 
@@ -28,8 +40,8 @@ class WorkflowService:
         if steps_data is None:
             steps_data = []
 
-        if self.repo.active_workflow_exists(version_id):
-            raise ValueError("A workflow is already active for this contract version")
+        # Clear existing workflow and its signatures if it exists
+        self.repo.delete_workflows_by_version(version_id)
 
         workflow_type = None
         reasons = None
@@ -121,6 +133,10 @@ class WorkflowService:
             
         self.repo.delete_step(step)
 
+    def update_step_role(self, step_id, role_id):
+        """Update required role ID for a step via repository."""
+        return self.repo.update_step_role(step_id, role_id)
+
     def approve_step(self, step_id, user_id, action, comment="", company_id=None, is_manager=False):
         """Process step approval/rejection. Auto-creates DigitalSignature on APPROVED."""
         from django.db import transaction
@@ -158,15 +174,34 @@ class WorkflowService:
                 from shared.jwt_middleware import get_system_auth_header
                 system_headers = get_system_auth_header()
 
-                # 1. Fetch certificate from blockchain service
-                cert_resp = requests.get(f"{blockchain_service_url}/certificate/{user_id}/", headers=system_headers, timeout=5)
-                if cert_resp.status_code != 200:
-                    raise ValueError(f"Could not retrieve certificate for user {user_id} from blockchain service")
-                certs = cert_resp.json().get("certificates", [])
+                # 1. Fetch certificate from blockchain service, auto-issuing if missing
+                certs = []
+                try:
+                    cert_resp = requests.get(f"{blockchain_service_url}/certificate/{user_id}/", headers=system_headers, timeout=5)
+                    if cert_resp.status_code == 200:
+                        certs = cert_resp.json().get("certificates", [])
+                except Exception:
+                    pass
+
                 active_certs = [c for c in certs if c.get("status") == "ACTIVE" and not c.get("revoked")]
                 if not active_certs:
-                    raise ValueError(f"User {user_id} has no active/valid signature certificate on the Blockchain Service")
-                cert_id = active_certs[0]["certificate_id"]
+                    create_resp = requests.post(
+                        f"{blockchain_service_url}/certificates/create/",
+                        json={
+                            "user_id": user_id,
+                            "serial_number": f"CERT-USER-{user_id}-{uuid.uuid4().hex[:8].upper()}",
+                            "issuer": "RiskDL Automated CA",
+                            "valid_days": 365
+                        },
+                        headers=system_headers,
+                        timeout=10
+                    )
+                    if create_resp.status_code in (200, 201):
+                        cert_id = create_resp.json().get("certificate_id")
+                    else:
+                        raise ValueError(f"User {user_id} has no active certificate on Blockchain Service and auto-issuance failed: {create_resp.text}")
+                else:
+                    cert_id = active_certs[0]["certificate_id"]
                 
                 # 2. Call sign endpoint on blockchain service (which verifies user & anchors to Fabric)
                 sign_resp = requests.post(f"{blockchain_service_url}/sign/", json={

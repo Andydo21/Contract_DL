@@ -65,34 +65,110 @@ class JWTMiddleware:
         from django.apps import apps
 
         token = extract_bearer(request.headers.get("Authorization", ""))
+        if not token:
+            token = request.COOKIES.get("jwt_token") or request.COOKIES.get("access_token")
+
+        user_attached = False
 
         if token:
             try:
                 payload = decode_token(token)
-                request.jwt_payload   = payload
-                request.jwt_user_id   = payload.get("user_id") or payload.get("id")
-                request.jwt_username  = payload.get("username", "")
-                request.jwt_role      = payload.get("role", "USER")
+                request.jwt_payload      = payload
+                request.jwt_user_id      = payload.get("user_id") or payload.get("id")
+                request.jwt_username     = payload.get("username", "")
+                request.jwt_role         = payload.get("role", "USER")
+                request.jwt_company_id   = payload.get("company_id")
+                request.jwt_is_superuser = payload.get("is_superuser", False)
                 request._dont_enforce_csrf_checks = True
 
-                # If contracts app is installed (main web), perform DB lookup to attach user
                 if apps.is_installed("contracts"):
                     from django.contrib.auth import get_user_model
                     User = get_user_model()
                     try:
                         user = User.objects.get(id=request.jwt_user_id)
                         request._jwt_user = user
+                        request.user = user
+                        user_attached = True
                     except User.DoesNotExist:
-                        return JsonResponse({"error": "User matching token ID does not exist."}, status=401)
-            except pyjwt.ExpiredSignatureError:
-                return JsonResponse({"error": "Token has expired."}, status=401)
-            except pyjwt.InvalidTokenError as e:
-                return JsonResponse({"error": f"Invalid token: {e}"}, status=401)
-        else:
-            request.jwt_payload   = None
-            request.jwt_user_id   = None
-            request.jwt_username  = ""
-            request.jwt_role      = None
+                        pass
+                else:
+                    class LightweightRole:
+                        def __init__(self, name):
+                            self.role_name = name
+                        def __str__(self):
+                            return self.role_name
+
+                    class LightweightUser:
+                        def __init__(self, uid, username, role_name, company_id, is_superuser=False):
+                            self.id = uid
+                            self.pk = uid
+                            self.username = username
+                            self.is_authenticated = True
+                            self.is_anonymous = False
+                            self.is_superuser = is_superuser
+                            self.company_id = company_id
+                            self.role = LightweightRole(role_name or "USER")
+
+                    request.user = LightweightUser(
+                        uid=request.jwt_user_id,
+                        username=request.jwt_username,
+                        role_name=request.jwt_role,
+                        company_id=request.jwt_company_id,
+                        is_superuser=request.jwt_is_superuser
+                    )
+                    user_attached = True
+            except Exception:
+                pass
+
+        # Fallback to sessionid cookie lookup if user is not attached yet
+        if not user_attached and not apps.is_installed("contracts"):
+            session_key = request.COOKIES.get("sessionid")
+            if session_key:
+                try:
+                    from django.db import connections
+                    db_alias = 'contract_db' if 'contract_db' in connections else 'default'
+                    with connections[db_alias].cursor() as cursor:
+                        cursor.execute("SELECT session_data FROM django_session WHERE session_key = %s", [session_key])
+                        row = cursor.fetchone()
+                        if row:
+                            from django.contrib.sessions.backends.db import SessionStore
+                            s_data = SessionStore().decode(row[0])
+                            uid = s_data.get('_auth_user_id')
+                            if uid:
+                                cursor.execute("""
+                                    SELECT u.id, u.username, r.role_name, u.company_id, u.is_superuser
+                                    FROM contracts_user u
+                                    LEFT JOIN contracts_role r ON u.role_id = r.id
+                                    WHERE u.id = %s
+                                """, [int(uid)])
+                                u_row = cursor.fetchone()
+                                if u_row:
+                                    u_id, u_name, r_name, c_id, is_sup = u_row
+                                    class LightweightRole:
+                                        def __init__(self, name):
+                                            self.role_name = name
+                                        def __str__(self):
+                                            return self.role_name
+
+                                    class LightweightUser:
+                                        def __init__(self, uid, username, role_name, company_id, is_superuser=False):
+                                            self.id = uid
+                                            self.pk = uid
+                                            self.username = username
+                                            self.is_authenticated = True
+                                            self.is_anonymous = False
+                                            self.is_superuser = is_superuser
+                                            self.company_id = company_id
+                                            self.role = LightweightRole(role_name or "USER")
+
+                                    request.user = LightweightUser(u_id, u_name, r_name, c_id, is_sup)
+                                    request.jwt_user_id = u_id
+                                    request.jwt_username = u_name
+                                    request.jwt_role = r_name
+                                    request.jwt_company_id = c_id
+                                    request.jwt_is_superuser = is_sup
+                except Exception:
+                    pass
 
         return self.get_response(request)
 

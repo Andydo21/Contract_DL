@@ -34,45 +34,72 @@ def recommend_workflow(text: str, clause_types: list, contract_type: str):
     signals = [clean_contract_text(c) for c in clause_types if c]
     declared_type = clean_contract_text(contract_type)
 
-    # Build list of URLs to try — KAGGLE_AI_URL has highest priority
+    from dotenv import load_dotenv
+    from django.conf import settings
+    env_file = getattr(settings, 'BASE_DIR').parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file, override=True)
+
     kaggle_url = os.environ.get("KAGGLE_AI_URL", "").rstrip("/")
-    ai_service_url = os.environ.get("AI_SERVICE_URL", "").rstrip("/")
+    if not kaggle_url:
+        print("[recommend_workflow] KAGGLE_AI_URL is not configured in environment.", flush=True)
+        return (
+            "WF_GENERAL",
+            DEFAULT_STEPS,
+            "AI service unavailable (KAGGLE_AI_URL not configured). Using default approval workflow.",
+            None,
+        )
 
-    urls_to_try = []
-    if kaggle_url:
-        urls_to_try.append(kaggle_url)
-    if ai_service_url:
-        urls_to_try.append(ai_service_url)
-    # Local fallbacks
-    urls_to_try += ["http://ai-service:8000", "http://localhost:8001"]
-
-    # Deduplicate while preserving order
-    seen = set()
-    unique_urls = [u for u in urls_to_try if u and not (u in seen or seen.add(u))]
-
-    for url in unique_urls:
-        endpoint = f"{url}/api/v1/recommend_workflow"
+    endpoint = f"{kaggle_url}/api/v1/recommend_workflow"
+    try:
+        from shared.jwt_middleware import get_system_auth_header
+        import json
+        req_payload = {
+            "contract_text": clean_text[:300] + "..." if len(clean_text) > 300 else clean_text,
+            "clause_types": signals,
+            "contract_type": declared_type,
+        }
         try:
-            from shared.jwt_middleware import get_system_auth_header
-            resp = requests.post(
-                endpoint,
-                json={
-                    "contract_text": clean_text,
-                    "clause_types": signals,
-                    "contract_type": declared_type,
-                },
-                headers=get_system_auth_header(),
-                timeout=60,  # Kaggle model may take time on first inference
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                workflow_type = data.get("workflow_type", "WF_GENERAL")
-                steps = data.get("steps", [])
-                reasons = data.get("reasons", "")
-                workflow_name = data.get("workflow_name")
-                return workflow_type, steps, reasons, workflow_name
+            print(f"[recommend_workflow] Sending request directly to Kaggle -> {endpoint}", flush=True)
+            print(f"--- KAGGLE WORKFLOW RECOMMENDATION REQUEST PAYLOAD ---\n{json.dumps(req_payload, ensure_ascii=False, indent=2)}", flush=True)
         except Exception:
-            continue
+            try:
+                print(f"--- KAGGLE WORKFLOW RECOMMENDATION REQUEST PAYLOAD ---\n{json.dumps(req_payload, indent=2)}", flush=True)
+            except Exception:
+                pass
+
+        resp = requests.post(
+            endpoint,
+            json={
+                "contract_text": clean_text,
+                "clause_types": signals,
+                "contract_type": declared_type,
+            },
+            headers=get_system_auth_header(),
+            timeout=300,  # Increased to 300s (5 mins) to allow full AI inference completion
+        )
+        print(f"[recommend_workflow] Response status code: {resp.status_code}", flush=True)
+        if resp.status_code == 200:
+            data = resp.json()
+            try:
+                print(f"--- KAGGLE WORKFLOW RECOMMENDATION RESPONSE PAYLOAD ---\n{json.dumps(data, ensure_ascii=False, indent=2)}", flush=True)
+            except Exception:
+                try:
+                    print(f"--- KAGGLE WORKFLOW RECOMMENDATION RESPONSE PAYLOAD ---\n{json.dumps(data, indent=2)}", flush=True)
+                except Exception:
+                    pass
+            workflow_type = data.get("workflow_type", "WF_GENERAL")
+            steps = data.get("steps", [])
+            reasons = data.get("reasons", "")
+            workflow_name = data.get("workflow_name")
+            return workflow_type, steps, reasons, workflow_name
+        else:
+            try:
+                print(f"[recommend_workflow] Kaggle returned non-200 status code: {resp.status_code} - {resp.text}", flush=True)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[recommend_workflow] Error calling Kaggle endpoint {endpoint}: {e}", flush=True)
 
     # Fallback: AI unreachable — return minimal default workflow
     return (

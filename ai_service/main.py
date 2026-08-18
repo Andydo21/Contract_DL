@@ -94,12 +94,22 @@ def clean_and_parse_json(text: str) -> dict:
 
 
 def _forward_to_kaggle(payload: dict) -> dict:
-    """Forward toàn bộ request sang Kaggle AI Service (ngrok URL)."""
-    url = f"{kaggle_url}/api/v1/analyze"
-    logger.info(f"Forwarding to Kaggle: {url}")
-    resp = requests.post(url, json=payload, timeout=300)  # 5 phút timeout
+    """Forward toàn bộ request sang Kaggle / Local AI Service (ngrok URL)."""
+    url = f"{kaggle_url.rstrip('/')}/api/v1/analyze"
+    logger.info(f"Forwarding to AI Service: {url}")
+    logger.info(f"--- REQUEST PAYLOAD ---\n{json.dumps(payload, ensure_ascii=False, indent=2)}")
+    
+    headers = {
+        "ngrok-skip-browser-warning": "true",
+        "User-Agent": "RiskDL-Backend",
+        "Content-Type": "application/json"
+    }
+    resp = requests.post(url, json=payload, headers=headers, timeout=300)  # 5 phút timeout
     resp.raise_for_status()
-    return resp.json()
+    
+    resp_json = resp.json()
+    logger.info(f"--- RESPONSE PAYLOAD ---\n{json.dumps(resp_json, ensure_ascii=False, indent=2)}")
+    return resp_json
 
 
 def run_ai_analysis(

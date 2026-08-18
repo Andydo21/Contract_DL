@@ -71,11 +71,9 @@
             <div class="analysis-panel">
                 <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 class="panel-title" style="margin: 0;"><i class="fa-solid fa-chart-line"></i> Risk Analysis & Actions</h3>
-                    {% if contract.status != 'DRAFT' %}
-                    <button class="btn" id="btn-detail-reanalyze" data-contract-id="{{ contract.id }}" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; margin: 0; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); color: #818cf8;">
-                        <i class="fa-solid fa-arrows-rotate"></i> Re-Analyze
+                    <button class="btn" id="btn-detail-reanalyze" data-contract-id="{{ contract.id }}" style="padding: 7px 14px; font-size: 12.5px; border-radius: 8px; margin: 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(99,102,241,0.3);">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
                     </button>
-                    {% endif %}
                 </div>
                 
                 <div class="panel-body">
@@ -138,16 +136,14 @@
                     <div class="tab-content-wrapper">
                         <!-- Tab 1: Risk Analysis -->
                         <div class="tab-pane active" id="analysis-tab" style="display: block;">
-                            {% if contract.status == 'DRAFT' %}
-                            <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
-                                <i class="fa-solid fa-microchip-ai" style="font-size: 48px; color: var(--accent-primary); animation: pulse-text 1.5s infinite;"></i>
-                                <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Analysis Pending</h3>
-                                <p style="max-width: 320px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary);">This contract is currently in Draft status. Click below to run the AI risk scanner to extract clauses and flag violations.</p>
-                                <button class="btn" id="btn-detail-trigger-analysis" data-contract-id="{{ contract.id }}" style="margin-top: 8px;">
-                                    <i class="fa-solid fa-play"></i> Run AI Analysis
-                                </button>
+                            <!-- 1. AI Analysis Section (Pending, Progress, or Results) -->
+                            {% if contract.status == 'ANALYZING' %}
+                            <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
+                                <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 36px; color: var(--accent-primary);"></i>
+                                <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">AI Scanning in Progress</h3>
+                                <p style="max-width: 320px; font-size: 13px; color: var(--text-secondary); margin: 0;">Extracting agreement clauses and analyzing legal language...</p>
                             </div>
-                            {% elif contract.analysis %}
+                            {% elif contract.analysis and contract.analysis.model_name != 'N/A' %}
                             <!-- Circular Gauge -->
                             <div class="gauge-area">
                                 <div class="gauge-circle">
@@ -170,7 +166,7 @@
 
                             <!-- Findings -->
                             <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Risks</h4>
-                            <div class="findings-list">
+                            <div class="findings-list" style="margin-bottom: 24px;">
                                 {% for f in contract.findings %}
                                 <div class="finding-item">
                                     <div class="finding-header" onclick="toggleFinding(this)">
@@ -207,8 +203,18 @@
                                 <p style="color: var(--text-muted); font-style: italic;">No specific risks identified.</p>
                                 {% endfor %}
                             </div>
+                            {% else %}
+                            <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
+                                <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 36px; color: var(--accent-primary);"></i>
+                                <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">Run AI Risk Scanner</h3>
+                                <p style="max-width: 320px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin: 0;">Click below to run the AI risk scanner to extract clauses and detect risk violations for this version.</p>
+                                <button class="btn" id="btn-detail-trigger-analysis" data-contract-id="{{ contract.id }}" style="margin-top: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
+                                    <i class="fa-solid fa-play"></i> Run AI Analysis
+                                </button>
+                            </div>
+                            {% endif %}
 
-                            <!-- Reviews -->
+                            <!-- 2. Legal Expert Review Section (Always shown at the bottom) -->
                             <div class="reviews-section">
                                 <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
                                 {% for r in contract.reviews %}
@@ -224,7 +230,7 @@
                                 </div>
                                 {% endfor %}
 
-                                {% if contract.status == 'ANALYZED' %}
+                                {% if not contract.reviews and contract.status != 'APPROVED' %}
                                 <form class="review-form" id="detail-review-form" data-analysis-id="{{ contract.analysis.id }}">
                                     <div class="form-group">
                                         <label class="form-label">Review Verdict *</label>
@@ -242,7 +248,7 @@
                                         <i class="fa-solid fa-signature"></i> Sign & Submit Review
                                     </button>
                                 </form>
-                                {% else %}
+                                {% elif contract.reviews or contract.status == 'APPROVED' %}
                                 <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2); margin-top: 12px;">
                                     <i class="fa-solid fa-circle-check"></i>
                                     <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
@@ -250,35 +256,31 @@
                                 {% endif %}
                             </div>
 
-                            {% if contract.status != 'PENDING_WORKFLOW' %}
                             <!-- Push to Workflow -->
-                            <div class="workflow-push-section" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px;">
+                            <div class="workflow-push-section" id="workflow-push-container" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px; {% if contract.has_workflow %}display: none;{% endif %}">
                                 <h4 class="section-title" style="margin-bottom: 12px;"><i class="fa-solid fa-diagram-project"></i> Approval Workflow</h4>
                                 <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
-                                    Contract đã được phê duyệt. Đẩy lên hệ thống workflow để khởi động quy trình ký kết và lưu trữ chính thức.
+                                    Hợp đồng đã sẵn sàng. Đẩy lên hệ thống workflow để khởi động quy trình ký kết và lưu trữ chính thức.
                                 </p>
                                 <button class="btn" id="btn-push-workflow" data-contract-id="{{ contract.id }}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; display: flex; align-items: center; gap: 8px;">
                                     <i class="fa-solid fa-paper-plane"></i> Push to Workflow
                                 </button>
                             </div>
-                            {% endif %}
 
-                            {% if contract.status == 'PENDING_WORKFLOW' %}
                             <!-- Workflow Status Display -->
-                            <div class="workflow-status-section" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px;">
+                            <div class="workflow-status-section" id="workflow-status-container" style="margin-top: 24px; padding: 20px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.2); border-radius: 14px; {% if not contract.has_workflow %}display: none;{% endif %}">
                                 <h4 class="section-title" style="margin-bottom: 16px;"><i class="fa-solid fa-diagram-project"></i> Workflow Status</h4>
                                 <div id="workflow-steps-container" data-contract-id="{{ contract.id }}">
                                     <p style="color: var(--text-muted); font-size: 13px;"><i class="fa-solid fa-spinner fa-spin"></i> Loading workflow...</p>
                                 </div>
+                                <div style="margin-top: 16px; border-top: 1px solid rgba(99,102,241,0.15); padding-top: 16px; display: flex; justify-content: flex-end;">
+                                    <button class="btn" id="btn-repush-workflow" data-contract-id="{{ contract.id }}" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 12px; padding: 6px 12px; border-radius: 8px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s;">
+                                        <i class="fa-solid fa-arrows-rotate"></i> Re-push & Reset Workflow
+                                    </button>
+                                </div>
                             </div>
-                            {% endif %}
-                            {% else %}
-                            <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
-                                <i class="fa-solid fa-microchip-ai" style="font-size: 48px; margin-bottom: 12px; color: var(--accent-primary);"></i>
-                                <p>AI Analysis is in progress for this contract...</p>
-                            </div>
-                            {% endif %}
                         </div>
+
 
                         <!-- Tab 2: Clauses & Entities -->
                         <div class="tab-pane" id="clauses-tab" style="display: none;">
@@ -425,6 +427,6 @@
     </div>
 
     <!-- External JS -->
-    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.3"></script>
+    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.7"></script>
 </body>
 </html>

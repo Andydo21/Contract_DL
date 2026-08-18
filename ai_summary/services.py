@@ -27,11 +27,16 @@ class AISummaryService:
     def summarize(payload: SummarizeRequest) -> dict:
         require_kaggle_url()
         url = f"{KAGGLE_AI_URL}/api/v1/summarize"
+        req_data = payload.model_dump()
+        import json
         logger.info(f"Forwarding summarize request → {url} ({len(payload.clauses)} clauses)")
+        logger.info(f"--- KAGLGE SUMMARIZE REQUEST PAYLOAD ---\n{json.dumps(req_data, ensure_ascii=False, indent=2)}")
         try:
-            resp = requests.post(url, json=payload.model_dump(), timeout=REQUEST_TIMEOUT)
+            resp = requests.post(url, json=req_data, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
-            return resp.json()
+            resp_json = resp.json()
+            logger.info(f"--- KAGGLE SUMMARIZE RESPONSE PAYLOAD ---\n{json.dumps(resp_json, ensure_ascii=False, indent=2)}")
+            return resp_json
         except requests.RequestException as e:
             logger.error(f"HTTP error calling Kaggle /api/v1/summarize: {e}")
             raise HTTPException(status_code=502, detail=f"Kaggle service error: {str(e)}")
@@ -40,11 +45,16 @@ class AISummaryService:
     def extract_entities(payload: EntityExtractRequest) -> dict:
         require_kaggle_url()
         url = f"{KAGGLE_AI_URL}/api/v1/extract_entities"
+        req_data = payload.model_dump()
+        import json
         logger.info(f"Forwarding extract_entities request → {url}")
+        logger.info(f"--- KAGLGE EXTRACT REQUEST PAYLOAD ---\n{json.dumps(req_data, ensure_ascii=False, indent=2)}")
         try:
-            resp = requests.post(url, json=payload.model_dump(), timeout=REQUEST_TIMEOUT)
+            resp = requests.post(url, json=req_data, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
-            return resp.json()
+            resp_json = resp.json()
+            logger.info(f"--- KAGGLE EXTRACT RESPONSE PAYLOAD ---\n{json.dumps(resp_json, ensure_ascii=False, indent=2)}")
+            return resp_json
         except requests.RequestException as e:
             logger.error(f"HTTP error calling Kaggle /api/v1/extract_entities: {e}")
             raise HTTPException(status_code=502, detail=f"Kaggle service error: {str(e)}")

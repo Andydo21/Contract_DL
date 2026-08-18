@@ -127,7 +127,7 @@ class ContractService:
             contracts = self.contract_repo.get_all_contracts()
         data = []
         for c in contracts:
-            latest_analysis = c.ai_analyses.first()
+            latest_analysis = c.ai_analyses.order_by('-created_at').first()
             data.append({
                 'id': c.id,
                 'contract_code': c.contract_code,
@@ -161,7 +161,15 @@ class ContractService:
             version = ContractVersion.objects.create(contract=c, version_number=1)
             
         latest_file = version.files.first()
-        latest_analysis = version.ai_analyses.first()
+        latest_analysis = version.ai_analyses.order_by('-created_at').first()
+        if not latest_analysis:
+            from decimal import Decimal
+            latest_analysis = self.analysis_repo.create_analysis(
+                contract_or_version=version,
+                model_name="N/A",
+                overall_score=Decimal("0.0"),
+                summary="Chưa thực hiện phân tích AI."
+            )
         
         clauses_data = []
         for cl in version.ai_extract_clauses.all():
@@ -181,18 +189,17 @@ class ContractService:
                 'entities': entities_list
             })
         
+        # Gather reviews from all analyses under this version
         reviews_data = []
-        if latest_analysis:
-            reviews_data = [
-                {
+        for analysis in version.ai_analyses.all():
+            for r in analysis.reviews.all():
+                reviews_data.append({
                     'id': r.id,
                     'comment': r.note,
                     'final_risk_level': r.decision,
-                    'reviewer': r.user.username,
-                    'reviewed_at': r.reviewed_at.isoformat()
-                }
-                for r in latest_analysis.reviews.all()
-            ]
+                    'reviewer': r.user.username if r.user else "Legal Expert",
+                    'reviewed_at': r.reviewed_at.isoformat() if r.reviewed_at else ""
+                })
         
         analysis_data = None
         findings_data = []
@@ -285,6 +292,15 @@ class ContractService:
             'updated_at': summary_obj.updated_at.isoformat(),
         } if summary_obj else None
             
+        # Check if workflow exists for this version
+        has_workflow = False
+        try:
+            wf_status = self.get_workflow_status(c.id, version_id=version.id)
+            if wf_status and wf_status.get("workflow_id"):
+                has_workflow = True
+        except Exception:
+            pass
+
         return {
             'id': c.id,
             'contract_code': c.contract_code,
@@ -304,7 +320,8 @@ class ContractService:
             'active_version_number': version.version_number,
             'active_version_change_summary': version.change_summary,
             'versions': versions_list,
-            'ai_summary': summary_data
+            'ai_summary': summary_data,
+            'has_workflow': has_workflow
         }
 
     def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):
@@ -413,7 +430,7 @@ class ContractService:
             if not version:
                 version = ContractVersion.objects.create(contract=contract, version_number=1, change_summary="Initial version")
         
-        version.ai_extract_clauses.all().delete()
+        # Preserve existing clauses; only clear previous AI analyses & findings for re-analysis
         version.ai_analyses.all().delete()
         
         self._run_ai_analysis_via_api(contract, version)
@@ -489,16 +506,18 @@ class ContractService:
         from django.conf import settings
         from decimal import Decimal
         
-        # 1. Run local rules/document processor clause splitting
-        self.extract_and_save_clauses_via_processor(version)
+        # 1. If clauses don't exist yet, run local rule-based splitting (force_rule_based=True) so we don't call /api/v1/extract_clauses
+        if not version.ai_extract_clauses.exists():
+            self.extract_and_save_clauses_via_processor(version, force_rule_based=True)
         
-        # 2. Save clauses and immediately pre-extract basic entities (so they exist in the DB before AI analysis)
+        # 2. Get clauses and ensure basic entities exist for each clause
         clauses = list(version.ai_extract_clauses.all())
         if not clauses:
             raise ValueError("No clauses found in contract to analyze.")
             
         for cl in clauses:
-            self._extract_and_save_basic_entities(cl)
+            if not cl.ai_extract_entities.exists():
+                self._extract_and_save_basic_entities(cl)
             
         # 3. Retrieve the newly saved ExtractedEntity records to pass in the API payload
         from ai_extract.models import ExtractedEntity
@@ -541,7 +560,7 @@ class ContractService:
         except requests.RequestException as e:
             from django.db import connection
             connection.close()
-            # Revert status to DRAFT so it can be re-run, but keep the extracted clauses
+            # Revert contract status
             contract.status = 'DRAFT'
             contract.save()
             raise RuntimeError(f"AI Service communication failed: {e}")
@@ -562,9 +581,11 @@ class ContractService:
         
         # 5. Match findings returned by the API to the already saved clauses
         for cl in clauses:
+            cl_title = (cl.clause_title or "").strip().lower()
             # Find findings belonging to this clause in the API output
             for finding in result.get("findings", []):
-                if finding.get("clause_title") == cl.clause_title:
+                api_title = (finding.get("clause_title") or "").strip().lower()
+                if api_title == cl_title or (api_title and api_title in cl_title) or (cl_title and cl_title in api_title):
                     # Get or create Risk category
                     risk_name = finding.get("risk_category", "Rủi ro chung")
                     risk_level = finding.get("risk_level", "MEDIUM")
@@ -589,7 +610,8 @@ class ContractService:
             
             # Find any additional entities returned by the API that were not pre-extracted
             for entity in result.get("entities", []):
-                if entity.get("clause_title") == cl.clause_title:
+                api_title = (entity.get("clause_title") or "").strip().lower()
+                if api_title == cl_title or (api_title and api_title in cl_title) or (cl_title and cl_title in api_title):
                     ExtractedEntity.objects.get_or_create(
                         clause=cl,
                         entity_type=entity.get("entity_type"),
@@ -600,7 +622,7 @@ class ContractService:
                         }
                     )
                     
-        # Update status
+        # Update Contract status
         contract.status = 'ANALYZED'
         contract.save()
 
@@ -747,16 +769,21 @@ class WorkflowService:
                 f"{workflow_url}/workflows/",
                 json=payload,
                 headers=get_system_auth_header(),
-                timeout=30,
+                timeout=300,
             )
-            resp.raise_for_status()
-            result = resp.json()
+            if resp.status_code == 409:
+                get_resp = requests.get(
+                    f"{workflow_url}/workflows/{version.id}/",
+                    headers=get_system_auth_header(),
+                    timeout=300,
+                )
+                get_resp.raise_for_status()
+                result = get_resp.json()
+            else:
+                resp.raise_for_status()
+                result = resp.json()
         except requests.RequestException as e:
             raise RuntimeError(f"Workflow service error: {e}")
-
-        # Cập nhật trạng thái contract
-        contract.status = 'PENDING_WORKFLOW'
-        contract.save()
 
         admin_user = User.objects.filter(is_superuser=True).first()
         self.audit_repo.log_action(admin_user, "PUSHED_TO_WORKFLOW", "Contract", contract.id)

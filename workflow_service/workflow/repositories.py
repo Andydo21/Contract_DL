@@ -8,6 +8,24 @@ class WorkflowRepository:
         return Workflow.objects.all().order_by("-id").prefetch_related("steps", "steps__approvals")
 
     @staticmethod
+    def get_workflows_by_company(company_id):
+        """Retrieve workflows for contract versions belonging to contracts owned by company_id."""
+        try:
+            from django.db import connections
+            db_alias = 'contract_db' if 'contract_db' in connections else 'default'
+            with connections[db_alias].cursor() as cursor:
+                cursor.execute("""
+                    SELECT cv.id 
+                    FROM contracts_contractversion cv
+                    JOIN contracts_contract c ON cv.contract_id = c.id
+                    WHERE c.company_id = %s
+                """, [company_id])
+                version_ids = [row[0] for row in cursor.fetchall()]
+                return Workflow.objects.filter(version_id__in=version_ids).order_by("-id").prefetch_related("steps", "steps__approvals")
+        except Exception:
+            return Workflow.objects.all().order_by("-id").prefetch_related("steps", "steps__approvals")
+
+    @staticmethod
     def active_workflow_exists(version_id):
         """Check if there is an active workflow (PENDING or IN_PROGRESS) for a contract version."""
         return Workflow.objects.filter(
@@ -123,3 +141,21 @@ class WorkflowRepository:
                 workflow=workflow,
                 step_order__gt=order_to_remove
             ).update(step_order=F('step_order') - 1)
+
+    @staticmethod
+    def update_step_role(step_id, role_id):
+        """Update required role ID for a step."""
+        step = WorkflowStep.objects.get(id=step_id)
+        step.role_id = role_id
+        step.save()
+        return step
+
+    @staticmethod
+    def delete_workflows_by_version(version_id):
+        """Delete existing workflows and associated signatures for a contract version."""
+        from .models import DigitalSignature
+        existing_wfs = Workflow.objects.filter(version_id=version_id)
+        for wf in existing_wfs:
+            step_ids = list(wf.steps.values_list('id', flat=True))
+            DigitalSignature.objects.filter(step_id__in=step_ids).delete()
+            wf.delete()

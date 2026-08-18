@@ -25,15 +25,18 @@ if (-not (Test-Path "venv\Scripts\activate")) {
 }
 
 Write-Host "Choose an option to run the project:" -ForegroundColor Yellow
-Write-Host "  [1] Start ALL Services (Web, Blockchain, Workflow, AI Inference, AI Summary)" -ForegroundColor White
+Write-Host "  [1] Start ALL Services (Web, Blockchain, Workflow, AI Inference, AI Summary, Legal MCP) [Default]" -ForegroundColor White
 Write-Host "  [2] Start Core Services only (Web, Blockchain, Workflow)" -ForegroundColor White
 Write-Host "  [3] Run End-to-End Blockchain Verification Tests (test_e2e_blockchain.py)" -ForegroundColor White
 Write-Host "  [4] Exit" -ForegroundColor White
 Write-Host ""
 
-$choice = Read-Host "Enter your choice (1-4)"
+$choice = Read-Host "Enter your choice (1-4) [Press ENTER for Option 1]"
 
-if ($choice -eq "4" -or -not $choice) {
+if (-not $choice) {
+    $choice = "1"
+}
+if ($choice -eq "4") {
     Write-Host "Exiting." -ForegroundColor Yellow
     Exit 0
 }
@@ -62,6 +65,11 @@ $runAiService = {
 $runAiSummary = {
     Write-Host "Launching AI Summary Proxy on http://localhost:8004..." -ForegroundColor Green
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle='RiskDL - AI Summary Proxy (Port 8004)'; Get-Content .env | Where-Object { `$_ -match '=' -and `$_ -notmatch '^#' } | ForEach-Object { `$name, `$value = `$_ -split '=', 2; [System.Environment]::SetEnvironmentVariable(`$name.Trim(), `$value.Trim()) }; cd ai_summary; ..\venv\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8004"
+}
+
+$runLegalMcp = {
+    Write-Host "Launching Legal MCP Server on http://127.0.0.1:8005..." -ForegroundColor Green
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle='RiskDL - Legal MCP Server (Port 8005)'; cd ai_service; ..\venv\Scripts\python.exe legal_mcp_server.py"
 }
 
 $startFabricDocker = {
@@ -110,8 +118,9 @@ if ($choice -eq "1") {
     & $runWorkflow
     & $runAiService
     & $runAiSummary
+    & $runLegalMcp
     Write-Host ""
-    Write-Host "All local microservices have been started in separate terminal windows." -ForegroundColor Green
+    Write-Host "All local microservices and Legal MCP Server have been started!" -ForegroundColor Green
     Write-Host "Fabric blockchain network and Explorer are running in Docker." -ForegroundColor Green
     Write-Host "Enjoy testing RiskDL!" -ForegroundColor Cyan
 }
@@ -129,16 +138,13 @@ elseif ($choice -eq "3") {
     Write-Host "Make sure the core services (or at least Blockchain Service) are running first!" -ForegroundColor DarkYellow
     Write-Host ""
     
-    # Load .env variables locally for the test run
     Get-Content .env | Where-Object { $_ -match '=' -and $_ -notmatch '^#' } | ForEach-Object {
         $name, $value = $_ -split '=', 2
         [System.Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim())
     }
     
-    # Set blockchain service url for test client calls
     $env:BLOCKCHAIN_SERVICE_URL = "http://localhost:8002"
     
-    # Run test
     .\venv\Scripts\python.exe test_e2e_blockchain.py
 }
 else {

@@ -181,12 +181,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const res = await fetch(`/api/contracts/${id}/`);
-            if (!res.ok) throw new Error("Failed to fetch contract details");
+            if (!res.ok) {
+                const errJson = await res.json().catch(() => ({}));
+                throw new Error(errJson.error || "Failed to fetch contract details");
+            }
             const data = await res.json();
 
             // Render risk assessment tab content
-            let analysisHTML = '';
-            if (data.analysis) {
+            let aiScanHTML = '';
+            
+            // 1. AI Analysis Status (Gauge & Findings or Pending message)
+            if (data.status === 'ANALYZING') {
+                aiScanHTML += `
+                    <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
+                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 36px; color: var(--accent-primary);"></i>
+                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">AI Scanning in Progress</h3>
+                        <p style="max-width: 320px; font-size: 13px; color: var(--text-secondary); margin: 0;">Extracting agreement clauses and analyzing legal language...</p>
+                    </div>
+                `;
+            } else if (data.analysis && data.analysis.model_name !== 'N/A') {
                 const score = data.analysis.overall_score;
                 let strokeColor = '#10b981';
                 let scoreStatus = 'Low Risk';
@@ -202,12 +215,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     scoreStatusClass = 'score-medium';
                 }
 
-                // SVG Circular gauge dashoffset
                 const r = 36;
-                const circumference = 2 * Math.PI * r; // ~226.2
+                const circumference = 2 * Math.PI * r;
                 const dashoffset = circumference - (score / 100) * circumference;
 
-                // Findings list HTML
                 let findingsHTML = '';
                 if (data.findings && data.findings.length > 0) {
                     data.findings.forEach(f => {
@@ -229,6 +240,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                         <div class="block-label">Risk Explanation</div>
                                         <div class="block-text">${f.explanation}</div>
                                     </div>
+                                    ${f.disadvantaged_party ? `
+                                    <div class="finding-block" style="margin-top: 8px;">
+                                        <div class="block-label" style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Bên gặp bất lợi / Disadvantaged Party</div>
+                                        <div class="block-text" style="font-weight: 600; color: #f87171;">${f.disadvantaged_party}</div>
+                                    </div>` : ''}
                                     ${f.recommendation ? `
                                     <div class="rec-box">
                                         <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
@@ -242,29 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     findingsHTML = `<p style="color: var(--text-muted); font-style: italic;">No specific risks identified.</p>`;
                 }
 
-                // Reviews list HTML
-                let reviewsHTML = '';
-                if (data.reviews && data.reviews.length > 0) {
-                    data.reviews.forEach(r => {
-                        reviewsHTML += `
-                            <div class="review-card">
-                                <div class="review-header">
-                                    <div class="reviewer-info">
-                                        <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
-                                        <span>${r.reviewer}</span>
-                                    </div>
-                                    <span class="risk-badge badge-${r.final_risk_level.toLowerCase()}">${r.final_risk_level} Decision</span>
-                                </div>
-                                <div class="review-comment">"${r.comment}"</div>
-                            </div>
-                        `;
-                    });
-                }
-
-                // Show review form only if contract is not approved, or show a review submission form
-                const showReviewForm = data.status === 'ANALYZED';
-
-                analysisHTML = `
+                aiScanHTML += `
                     <h4 class="section-title"><i class="fa-solid fa-chart-line"></i> Risk Assessment Summary</h4>
                     <div class="gauge-area" style="margin-bottom: 20px;">
                         <div class="gauge-circle">
@@ -285,60 +279,91 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
 
                     <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Clause Violations</h4>
-                    <div class="findings-list">
+                    <div class="findings-list" style="margin-bottom: 24px;">
                         ${findingsHTML}
                     </div>
-
-                    <div class="reviews-section">
-                        <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
-                        ${reviewsHTML}
-                        
-                        ${showReviewForm ? `
-                        <form class="review-form" id="submit-review-form">
-                            <div class="form-group">
-                                <label class="form-label">Review Verdict *</label>
-                                <select class="form-control" name="final_risk_level" required>
-                                    <option value="LOW">LOW RISK - Approved</option>
-                                    <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
-                                    <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Expert Commentary *</label>
-                                <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
-                            </div>
-                            <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
-                                <i class="fa-solid fa-signature"></i> Sign & Submit Review
-                            </button>
-                        </form>
-                        ` : `
-                        <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2);">
-                            <i class="fa-solid fa-circle-check"></i>
-                            <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
-                        </div>
-                        `}
-                    </div>
                 `;
-            } else if (data.status === 'DRAFT') {
-                analysisHTML = `
-                    <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
-                        <i class="fa-solid fa-microchip-ai" style="font-size: 48px; color: var(--accent-primary); animation: pulse-text 1.5s infinite;"></i>
-                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Analysis Pending</h3>
-                        <p style="max-width: 320px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary);">This contract is currently in Draft status. Click below to run the AI risk scanner to extract clauses and flag violations.</p>
-                        <button class="btn" id="btn-trigger-analysis" style="margin-top: 8px;">
+            } else {
+                aiScanHTML += `
+                    <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
+                        <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 36px; color: var(--accent-primary);"></i>
+                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">Run AI Risk Scanner</h3>
+                        <p style="max-width: 320px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin: 0;">Click below to run the AI risk scanner to extract clauses and flag violations.</p>
+                        <button class="btn btn-trigger-analysis" style="margin-top: 4px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
                             <i class="fa-solid fa-play"></i> Run AI Analysis
                         </button>
                     </div>
                 `;
-            } else {
-                analysisHTML = `
-                    <div style="text-align: center; color: var(--text-muted); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px;">
-                        <i class="fa-solid fa-circle-notch fa-spin" style="font-size: 48px; color: var(--accent-primary);"></i>
-                        <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 18px;">AI Scanning in Progress</h3>
-                        <p style="max-width: 320px; font-size: 13.5px; color: var(--text-secondary);">Extracting agreement clauses and analyzing legal language...</p>
-                    </div>
-                `;
             }
+
+            let analysisHTML = `<div id="ai-scanner-results-container">${aiScanHTML}</div>`;
+
+            // 2. Legal Expert Review Section (Always shown at the bottom)
+            let reviewsHTML = '';
+            if (data.reviews && data.reviews.length > 0) {
+                data.reviews.forEach(r => {
+                    reviewsHTML += `
+                        <div class="review-card">
+                            <div class="review-header">
+                                <div class="reviewer-info">
+                                    <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
+                                    <span>${r.reviewer}</span>
+                                </div>
+                                <span class="risk-badge badge-${r.final_risk_level.toLowerCase()}">${r.final_risk_level} Decision</span>
+                            </div>
+                            <div class="review-comment">"${r.comment}"</div>
+                        </div>
+                    `;
+                });
+            }
+
+            const showReviewForm = (!data.reviews || data.reviews.length === 0) && data.status !== 'APPROVED';
+
+            analysisHTML += `
+                <div class="reviews-section">
+                    <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
+                    ${reviewsHTML}
+                    
+                    ${showReviewForm ? `
+                    <form class="review-form" id="submit-review-form">
+                        <div class="form-group">
+                            <label class="form-label">Review Verdict *</label>
+                            <select class="form-control" name="final_risk_level" required>
+                                <option value="LOW">LOW RISK - Approved</option>
+                                <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
+                                <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Expert Commentary *</label>
+                            <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
+                        </div>
+                        <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
+                            <i class="fa-solid fa-signature"></i> Sign & Submit Review
+                        </button>
+                    </form>
+                    ` : `
+                    <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2);">
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
+                    </div>
+                    `}
+
+                    <!-- Workflow Approval Block at the very bottom -->
+                    <div class="workflow-section" style="margin-top: 24px; padding-top: 20px; border-top: 1px dashed rgba(255,255,255,0.1);">
+                        <h4 class="section-title"><i class="fa-solid fa-diagram-project"></i> Workflow Approval System</h4>
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 16px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); gap: 16px; flex-wrap: wrap;">
+                            <div>
+                                <h5 style="margin: 0 0 4px 0; color: #ffffff; font-size: 14px; font-weight: 600;">Khởi tạo quy trình phê duyệt (Workflow)</h5>
+                                <p style="margin: 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.4;">Đẩy hợp đồng và đánh giá rủi ro sang dịch vụ Workflow Service để khởi tạo luồng duyệt.</p>
+                            </div>
+                            <button class="btn btn-push-workflow" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; font-weight: 600; padding: 10px 22px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16,185,129,0.3); cursor: pointer; white-space: nowrap; border-radius: 8px;">
+                                <i class="fa-solid fa-paper-plane"></i> Push to Workflow
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
 
             // Render original clauses list HTML
             let clausesHTML = '';
@@ -371,6 +396,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-trigger-analysis" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.3); cursor: pointer;">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
+                        </button>
                         <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
                             <i class="fa-solid fa-expand"></i> Full Reader Page
                         </a>
@@ -441,14 +469,50 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
             // Bind Run AI Analysis Event if present
-            const triggerAnalysisBtn = document.getElementById('btn-trigger-analysis');
-            if (triggerAnalysisBtn) {
-                triggerAnalysisBtn.addEventListener('click', async () => {
-                    // Show AI Scanner loader overlay
-                    scannerLoader.classList.add('active');
+            const triggerAnalysisBtns = document.querySelectorAll('.btn-trigger-analysis, #btn-trigger-analysis');
+            triggerAnalysisBtns.forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const targetContractId = btn.dataset.contractId || data.id;
+
+                    // 1. Ensure Risk Assessment tab is active
+                    const tabAnalysisBtn = document.getElementById('btn-tab-analysis');
+                    const tabAnalysisContent = document.getElementById('tab-analysis');
+                    if (tabAnalysisBtn && tabAnalysisContent) {
+                        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                        tabAnalysisBtn.classList.add('active');
+                        tabAnalysisContent.classList.add('active');
+                    }
+                    
+                    // 2. Disable trigger buttons to prevent duplicate clicks
+                    triggerAnalysisBtns.forEach(b => {
+                        b.disabled = true;
+                        b.style.opacity = '0.7';
+                        b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Analyzing...`;
+                    });
+
+                    // 3. Render inline loading indicator strictly inside AI scanner section (keeping Legal Expert Review intact)
+                    const scannerContainer = document.getElementById('ai-scanner-results-container') || tabAnalysisContent;
+                    if (scannerContainer) {
+                        scannerContainer.innerHTML = `
+                            <div class="risk-loading-card" style="text-align: center; color: var(--text-muted); padding: 50px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(99, 102, 241, 0.04); border: 1px dashed rgba(99, 102, 241, 0.3); border-radius: 16px; margin: 12px 0;">
+                                <div style="position: relative; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 28px; color: #a5b4fc;"></i>
+                                    <div style="position: absolute; top:0; left:0; width:64px; height:64px; border:3px solid rgba(99,102,241,0.15); border-top-color:#6366f1; border-radius:50%; animation:spin 1s linear infinite;"></div>
+                                </div>
+                                <div>
+                                    <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">AI Engine is Scanning Contract Risks...</h3>
+                                    <p style="max-width: 400px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Sending contract text to Kaggle fine-tuned Qwen2.5-3B model. Extracting clauses and calculating risk scores...</p>
+                                </div>
+                            </div>
+                        `;
+                    }
                     
                     try {
-                        const runRes = await fetch(`/api/contracts/${data.id}/analyze/`, {
+                        const runRes = await fetch(`/api/contracts/${targetContractId}/analyze/`, {
                             method: 'POST',
                             headers: {
                                 'X-CSRFToken': getCookie('csrftoken')
@@ -456,29 +520,63 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                         const runData = await runRes.json();
                         
-                        setTimeout(() => {
-                            scannerLoader.classList.remove('active');
-                            if (runData.success) {
-                                // Reload details panel and contract list
-                                showContractDetail(data.id);
-                                loadContracts(data.id);
+                        if (runData.success) {
+                            // Reload details panel and contract list immediately
+                            await showContractDetail(targetContractId);
+                            await loadContracts(targetContractId);
+                            showToast("Phân tích AI hoàn tất! Form ký duyệt hợp đồng đã sẵn sàng bên dưới.", "success");
+                        } else {
+                            const errorMsg = runData.error || "Unknown error";
+                            const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
+                            if (isModelError) {
+                                showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
                             } else {
-                                const errorMsg = runData.error || "Unknown error";
-                                const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
-                                if (isModelError) {
-                                    showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
-                                } else {
-                                    showToast(errorMsg, "error");
-                                }
+                                showToast(errorMsg, "error");
                             }
-                        }, 2500); // 2.5s simulation duration
+                            await showContractDetail(targetContractId);
+                        }
                     } catch (err) {
-                        scannerLoader.classList.remove('active');
                         console.error(err);
                         showToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
+                        await showContractDetail(targetContractId);
                     }
                 });
-            }
+            });
+
+            // Bind Push to Workflow Event
+            detailPanel.querySelectorAll('.btn-push-workflow').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const targetContractId = btn.getAttribute('data-contract-id') || currentContractId;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Pushing...';
+
+                    try {
+                        const wfRes = await fetch(`/api/contracts/${targetContractId}/workflow/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': getCookie('csrftoken')
+                            },
+                            body: JSON.stringify({ version_id: data.active_version_id || null })
+                        });
+                        const wfData = await wfRes.json();
+                        
+                        if (wfData.success) {
+                            showToast("Đã đẩy hợp đồng lên quy trình phê duyệt Workflow thành công!", "success");
+                            await showContractDetail(targetContractId);
+                            await loadContracts(targetContractId);
+                        } else {
+                            showToast("Lỗi đẩy Workflow: " + (wfData.error || "Không thể đẩy workflow"), "error");
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showToast("Không thể kết nối với dịch vụ Workflow.", "error");
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push to Workflow';
+                    }
+                });
+            });
 
             // Bind Review Form Event if present
             const reviewForm = document.getElementById('submit-review-form');
@@ -488,8 +586,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     const final_risk_level = reviewForm.final_risk_level.value;
                     const comment = reviewForm.comment.value;
                     
+                    const analysisId = (data.analysis && data.analysis.id) ? data.analysis.id : null;
+                    if (!analysisId) {
+                        showToast("Chưa có kết quả phân tích AI để tiến hành ký duyệt.", "warning");
+                        return;
+                    }
+                    
                     try {
-                        const rRes = await fetch(`/api/analyses/${data.analysis.id}/review/`, {
+                        const rRes = await fetch(`/api/analyses/${analysisId}/review/`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -504,11 +608,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             showContractDetail(currentContractId);
                             loadContracts(currentContractId);
                         } else {
-                            alert("Error submitting review: " + (rData.error || "Unknown error"));
+                            showToast("Lỗi gửi đánh giá: " + (rData.error || "Unknown error"), "error");
                         }
                     } catch (err) {
                         console.error(err);
-                        alert("Failed to submit review request.");
+                        showToast("Không thể gửi yêu cầu đánh giá.", "error");
                     }
                 });
             }
@@ -519,7 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="empty-state" style="color: var(--risk-high)">
                     <i class="fa-solid fa-triangle-exclamation" style="font-size: 64px;"></i>
                     <h2>Failed to Load Details</h2>
-                    <p>An error occurred retrieving database records for this contract ID.</p>
+                    <p>${err.message || 'An error occurred retrieving database records for this contract ID.'}</p>
                 </div>
             `;
         }

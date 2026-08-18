@@ -5,6 +5,8 @@ urlpatterns = [
     path('', views.index, name='index'),
 
     # Workflow
+    path('board/', views.workflow_board_page, name='workflow_board_page'),
+    path('board/<int:workflow_id>/', views.workflow_detail_page, name='workflow_detail_page'),
     path('workflows/', views.create_workflow, name='create_workflow'),
     path('workflows/all/', views.list_all_workflows, name='list_all_workflows'),
     path('workflows/<int:version_id>/', views.get_workflow, name='get_workflow'),
