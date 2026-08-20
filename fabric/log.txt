@@ -1,4 +1,10 @@
 Installed chaincodes on peer:
-Package ID: contract_verify_1.0:537dc39989db7448e656a6374b9bb84be12e2889140eaa7c2e0e70656750cb61, Label: contract_verify_1.0
-Package ID: contract_verify_1.0:ff393be55b12d3832e2672ad63467acc7fe0b18ced41761f4c0b55826a6d8841, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:e2efa23d40d222ca0de83fc85188ea67cd4c7ac7effc47e38594940b101bd0f6, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:3434a899db916a7237e62b187f23989e354fd95ea73061079bf7630c7ccb5dcd, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:b497a2e8d50ba481edd5cc106aa346543ec5dfc73a5cabf156e95176b2116749, Label: contract_verify_1.0
 Package ID: contract_verify_1.0:d7f73bbc1d4afc9d69189dc16a465f231baaaf54235ea78fd1283d5125c9ca2c, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:ff393be55b12d3832e2672ad63467acc7fe0b18ced41761f4c0b55826a6d8841, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:9e03bb614a034e7ca6365bdc053498167e5c76793d0298d761f344f2394e45e5, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:537dc39989db7448e656a6374b9bb84be12e2889140eaa7c2e0e70656750cb61, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:995878ca5eca664427968752b70a297170244a83eb8f8ed55a9d966300c221f7, Label: contract_verify_1.0
+Package ID: contract_verify_1.0:d3ff161f726ae9d6dc875593136bc2856e0400ea67ebcc0b47411e733c4bb8c7, Label: contract_verify_1.0

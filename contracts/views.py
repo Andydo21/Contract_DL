@@ -11,6 +11,28 @@ risk_service = RiskService()
 analysis_history_service = AnalysisHistoryService()
 workflow_service = WorkflowService()
 
+def _set_jwt_cookie(response, user):
+    """Attach JWT authorization cookie for cross-service authentication."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return response
+    import jwt, datetime
+    from django.conf import settings
+    role_name = getattr(user.role, 'role_name', 'USER') if hasattr(user, 'role') and user.role else 'USER'
+    company_id = user.company.id if hasattr(user, 'company') and user.company else None
+    payload = {
+        'user_id': user.id,
+        'username': user.username,
+        'role': role_name,
+        'company_id': company_id,
+        'is_superuser': user.is_superuser,
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7),
+        'iat': datetime.datetime.utcnow(),
+    }
+    token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+    response.set_cookie('jwt_token', token, path='/', httponly=False)
+    return response
+
+
 def _get_headers(request=None):
     from shared.jwt_middleware import get_auth_header, get_system_auth_header
     if request and hasattr(request, 'user') and request.user.is_authenticated:
@@ -81,12 +103,12 @@ def workflow_board(request):
 
 @login_required
 def contract_detail(request, contract_id):
-    """Return contract details in JSON format."""
+    """Render Contract Detail UI Page."""
     from .models import Contract
     try:
         contract_obj = Contract.objects.get(id=contract_id)
         if not _check_contract_permission(request.user, contract_obj):
-            return JsonResponse({'error': 'Permission Denied: You do not have access to this contract.'}, status=403)
+            return render(request, 'contracts/access_denied.html')
     except Contract.DoesNotExist:
         return JsonResponse({'error': 'Contract not found.'}, status=404)
         
@@ -95,7 +117,8 @@ def contract_detail(request, contract_id):
     if not details:
         return JsonResponse({'error': 'Contract not found.'}, status=404)
         
-    return JsonResponse(details)
+    response = render(request, 'contracts/contract_detail.html', {'contract': details})
+    return _set_jwt_cookie(response, request.user)
 
 
 @api_login_required
