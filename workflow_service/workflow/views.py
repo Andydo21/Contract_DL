@@ -35,6 +35,8 @@ def workflow_detail_page(request, workflow_id):
         "completed_at":  workflow.completed_at.isoformat() if workflow.completed_at else None,
         "steps": [_step_to_dict(st) for st in sorted(workflow.steps.all(), key=lambda s: s.step_order)],
     }
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'json' in request.headers.get('Accept', '') or request.GET.get('format') == 'json':
+        return JsonResponse({"workflow": wf_dict})
     return render(request, 'workflow/workflow_detail.html', {"workflow": wf_dict})
 
 

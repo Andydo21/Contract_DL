@@ -20,12 +20,17 @@ def _get_headers(request=None):
 
 def manager_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
+        is_ajax_or_api = request.path.startswith('/api/') or request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'json' in request.headers.get('Accept', '')
         if not request.user.is_authenticated:
+            if is_ajax_or_api:
+                return JsonResponse({'error': 'Authentication required.'}, status=401)
             return redirect('/login/')
         user = request.user
         if user.is_superuser:
             return view_func(request, *args, **kwargs)
         if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
+            if is_ajax_or_api:
+                return JsonResponse({'error': 'Permission Denied: Manager role required.'}, status=403)
             return render(request, 'contracts/access_denied.html')
         return view_func(request, *args, **kwargs)
     return _wrapped_view
