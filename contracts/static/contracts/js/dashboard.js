@@ -399,9 +399,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="btn btn-trigger-analysis" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.3); cursor: pointer;">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
                         </button>
-                        <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
-                            <i class="fa-solid fa-expand"></i> Full Reader Page
-                        </a>
+                        <button class="btn" onclick="document.getElementById('btn-tab-fulltext') && document.getElementById('btn-tab-fulltext').click()" style="background: var(--accent-primary); color: #ffffff; border: none; cursor: pointer;">
+                            <i class="fa-solid fa-file-lines"></i> Full Document
+                        </button>
                         ${data.file_path ? `
                         <a href="${data.file_path}" target="_blank" download class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
                             <i class="fa-solid fa-file-pdf"></i> Download PDF
@@ -839,7 +839,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Init load
-    loadContracts();
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialContractId = urlParams.get('contract_id');
+    loadContracts(initialContractId);
+    if (initialContractId) {
+        showContractDetail(initialContractId);
+    }
 });
 
 // Toggle Clause finding details open/close (Global handler)

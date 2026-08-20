@@ -125,7 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="card-actions">
                         <span class="card-timestamp"><i class="fa-regular fa-clock"></i> ${a.created_at}</span>
                         <span class="status-badge ${statusClass}">${a.contract_status}</span>
-                        <a href="/contracts/${a.contract_id}/" class="btn-view">
+                        <a href="/?contract_id=${a.contract_id}" class="btn-view">
                             <i class="fa-solid fa-arrow-up-right-from-square"></i> View Contract
                         </a>
                     </div>
