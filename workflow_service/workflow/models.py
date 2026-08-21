@@ -92,3 +92,19 @@ class DigitalSignature(models.Model):
     def __str__(self):
         return f"Signature for step {self.step_id} by user {self.user_id}"
 
+
+class StepDependency(models.Model):
+    workflow = models.ForeignKey(Workflow, on_delete=models.CASCADE, related_name='dependencies', verbose_name="Workflow")
+    prerequisite_step = models.ForeignKey(WorkflowStep, on_delete=models.CASCADE, related_name='prerequisites_for', verbose_name="Prerequisite Step (Nối đến - Phải xong trước)")
+    dependent_step = models.ForeignKey(WorkflowStep, on_delete=models.CASCADE, related_name='dependent_on', verbose_name="Dependent Step (Bị nối - Bị khóa)")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
+
+    class Meta:
+        verbose_name = 'Step Dependency'
+        verbose_name_plural = 'Step Dependencies'
+        unique_together = ('prerequisite_step', 'dependent_step')
+
+    def __str__(self):
+        return f"{self.prerequisite_step.step_name} -> {self.dependent_step.step_name}"
+
+

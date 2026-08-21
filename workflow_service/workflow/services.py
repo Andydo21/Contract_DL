@@ -5,6 +5,42 @@ from .repositories import WorkflowRepository
 from .rules import recommend_workflow
 
 
+def _step_to_dict(st):
+    approvals_list = []
+    approvals = list(st.approvals.all().order_by('id'))
+    for app in approvals:
+        approvals_list.append({
+            "user_id": app.user_id,
+            "status": app.status,
+            "comment": app.comment,
+            "approved_at": app.approved_at.isoformat() if app.approved_at else None,
+        })
+    comment = None
+    if approvals:
+        comment = approvals[-1].comment
+
+    prereqs = []
+    if hasattr(st, 'dependent_on'):
+        for dep in st.dependent_on.select_related('prerequisite_step').all():
+            prereqs.append({
+                "dep_id": dep.id,
+                "prereq_step_id": dep.prerequisite_step_id,
+                "prereq_step_name": dep.prerequisite_step.step_name,
+                "prereq_step_order": dep.prerequisite_step.step_order,
+                "prereq_step_status": dep.prerequisite_step.status,
+                "is_blocking": dep.prerequisite_step.status != "APPROVED"
+            })
+
+    return {
+        "id": st.id, "step_order": st.step_order, "step_name": st.step_name,
+        "role_id": st.role_id, "status": st.status,
+        "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+        "comment": comment,
+        "approvals": approvals_list,
+        "prerequisites": prereqs,
+    }
+
+
 class WorkflowService:
     def __init__(self):
         self.repo = WorkflowRepository()
@@ -16,7 +52,7 @@ class WorkflowService:
     def list_workflows_for_user(self, user):
         """Retrieve workflows filtered by user's company permission unless superuser."""
         if not user or not getattr(user, 'is_authenticated', False):
-            return []
+            return self.repo.get_all_workflows()
         if getattr(user, 'is_superuser', False):
             return self.repo.get_all_workflows()
         
@@ -33,6 +69,66 @@ class WorkflowService:
 
     def get_workflow_by_id(self, workflow_id):
         return self.repo.get_workflow_by_id(workflow_id)
+
+    def _serialize_workflow(self, wf, contract_info=None):
+        if not wf:
+            return None
+        c_info = contract_info or {}
+        steps = [_step_to_dict(st) for st in sorted(wf.steps.all(), key=lambda s: s.step_order)]
+        
+        deps = list(wf.dependencies.select_related('prerequisite_step', 'dependent_step').all())
+        serialized_deps = [
+            {
+                "id": dep.id,
+                "prerequisite_step_id": dep.prerequisite_step_id,
+                "prerequisite_step_name": dep.prerequisite_step.step_name,
+                "prerequisite_step_order": dep.prerequisite_step.step_order,
+                "prerequisite_step_status": dep.prerequisite_step.status,
+                "dependent_step_id": dep.dependent_step_id,
+                "dependent_step_name": dep.dependent_step.step_name,
+                "dependent_step_order": dep.dependent_step.step_order,
+                "dependent_step_status": dep.dependent_step.status,
+                "is_blocking": dep.prerequisite_step.status != "APPROVED"
+            }
+            for dep in deps
+        ]
+
+        return {
+            "workflow_id":   wf.id,
+            "version_id":    wf.version_id,
+            "contract_id":   c_info.get('contract_id'),
+            "contract_title": c_info.get('contract_title', ''),
+            "contract_code": c_info.get('contract_code', ''),
+            "version_number": c_info.get('version_number', 1),
+            "workflow_name": wf.workflow_name,
+            "status":        wf.status,
+            "workflow_type": wf.workflow_type,
+            "reasons":       wf.reasons,
+            "started_at":    wf.started_at.isoformat() if wf.started_at else None,
+            "completed_at":  wf.completed_at.isoformat() if wf.completed_at else None,
+            "steps":         steps,
+            "dependencies":  serialized_deps,
+        }
+
+    def get_workflow_detail_dict(self, workflow_id):
+        wf = self.repo.get_workflow_by_id(workflow_id)
+        if not wf:
+            return None
+        info_map = self.repo.get_contract_info_by_version_ids([wf.version_id])
+        return self._serialize_workflow(wf, info_map.get(wf.version_id))
+
+    def list_workflows_with_contract_info_for_user(self, user):
+        workflows = self.list_workflows_for_user(user)
+        version_ids = [wf.version_id for wf in workflows]
+        info_map = self.repo.get_contract_info_by_version_ids(version_ids)
+        return [self._serialize_workflow(wf, info_map.get(wf.version_id)) for wf in workflows]
+
+    def get_workflow_dict_by_version(self, version_id):
+        wf = self.get_workflow(version_id)
+        if not wf:
+            return None
+        info_map = self.repo.get_contract_info_by_version_ids([wf.version_id])
+        return self._serialize_workflow(wf, info_map.get(wf.version_id))
 
     def create_workflow(self, version_id, workflow_name, contract_text="", clause_types=None, contract_type="", steps_data=None):
         if clause_types is None:
@@ -51,8 +147,9 @@ class WorkflowService:
             workflow_type, recommended_steps, reasons, ai_workflow_name = recommend_workflow(
                 contract_text, clause_types, contract_type
             )
-            if ai_workflow_name:
-                workflow_name = ai_workflow_name
+            if not workflow_name or workflow_name == "Contract Approval Workflow":
+                if ai_workflow_name:
+                    workflow_name = ai_workflow_name
 
         workflow = self.repo.create_workflow(
             version_id=version_id,
@@ -140,6 +237,7 @@ class WorkflowService:
     def approve_step(self, step_id, user_id, action, comment="", company_id=None, is_manager=False):
         """Process step approval/rejection. Auto-creates DigitalSignature on APPROVED."""
         from django.db import transaction
+        from .models import StepDependency
 
         step = self.repo.get_step_by_id(step_id)
         if not step:
@@ -147,6 +245,15 @@ class WorkflowService:
 
         if action not in ("APPROVED", "REJECTED", "FORCE_COMPLETE"):
             raise ValueError("action must be APPROVED, REJECTED, or FORCE_COMPLETE")
+
+        # Custom Step Dependency Check: Block approval if prerequisite steps are not APPROVED
+        if action in ("APPROVED", "FORCE_COMPLETE"):
+            unmet_deps = StepDependency.objects.filter(
+                dependent_step=step
+            ).exclude(prerequisite_step__status="APPROVED")
+            if unmet_deps.exists():
+                unmet_names = ", ".join([f"'{d.prerequisite_step.step_name}'" for d in unmet_deps])
+                raise ValueError(f"Không thể ký/duyệt bước '{step.step_name}' vì đang bị khóa bởi đường nối phụ thuộc: Bước {unmet_names} chưa hoàn thành.")
 
         if action == "FORCE_COMPLETE":
             with transaction.atomic():
@@ -236,6 +343,36 @@ class WorkflowService:
                 self.repo.update_workflow_status(step.workflow, "REJECTED")
 
         return step
+
+    def add_dependency(self, workflow_id, prerequisite_step_id, dependent_step_id):
+        from .models import StepDependency
+        if int(prerequisite_step_id) == int(dependent_step_id):
+            raise ValueError("Một bước không thể nối phụ thuộc tới chính nó.")
+        
+        prereq = self.repo.get_step_by_id(prerequisite_step_id)
+        dependent = self.repo.get_step_by_id(dependent_step_id)
+        if not prereq or not dependent:
+            raise ValueError("Không tìm thấy các bước để tạo đường nối.")
+        
+        if prereq.workflow_id != int(workflow_id) or dependent.workflow_id != int(workflow_id):
+            raise ValueError("Các bước không thuộc cùng một quy trình (Workflow).")
+
+        if StepDependency.objects.filter(prerequisite_step=dependent, dependent_step=prereq).exists():
+            raise ValueError("Không thể tạo đường nối vòng lặp phụ thuộc qua lại giữa 2 bước.")
+
+        dep, created = StepDependency.objects.get_or_create(
+            workflow_id=workflow_id,
+            prerequisite_step=prereq,
+            dependent_step=dependent
+        )
+        return dep
+
+    def delete_dependency(self, dependency_id):
+        from .models import StepDependency
+        dep = StepDependency.objects.filter(id=dependency_id).first()
+        if not dep:
+            raise ValueError("Không tìm thấy đường nối phụ thuộc này.")
+        dep.delete()
 
 
 class KeyManagementService:

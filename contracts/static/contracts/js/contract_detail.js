@@ -1,4 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // 0. Auto Initial AJAX Fetch on page load
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const contractId = pathParts[1];
+    const urlParams = new URLSearchParams(window.location.search);
+    const versionId = urlParams.get('version_id');
+    if (contractId && window.refreshContractDetailViaAjax) {
+        window.refreshContractDetailViaAjax(contractId, versionId);
+    }
     // 1. Gauge Animation
     const gauge = document.getElementById('gauge-val');
     const gaugeStatus = document.getElementById('gauge-status');
@@ -51,8 +59,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 const data = await res.json();
                 if (data.success) {
-                    // Reload the detail page to show approved status
-                    window.location.reload();
+                    showToast("Submit expert review success!", "success");
+                    const contractId = window.location.pathname.split('/')[2];
+                    if (window.refreshContractDetailViaAjax) {
+                        window.refreshContractDetailViaAjax(contractId);
+                    } else {
+                        window.location.reload();
+                    }
                 } else {
                     alert("Error submitting review: " + (data.error || "Unknown error"));
                 }
@@ -125,7 +138,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 
                 if (data.success) {
-                    window.location.reload();
+                    showToast("AI analysis completed successfully!", "success");
+                    if (window.refreshContractDetailViaAjax) {
+                        window.refreshContractDetailViaAjax(contractId);
+                    }
                 } else {
                     const errorMsg = data.error || "Unknown error";
                     const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
@@ -134,12 +150,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         showToast(errorMsg, "error");
                     }
-                    window.location.reload();
+                    if (window.refreshContractDetailViaAjax) {
+                        window.refreshContractDetailViaAjax(contractId);
+                    }
                 }
             } catch (err) {
                 console.error(err);
                 showToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
-                window.location.reload();
             }
         });
     });
@@ -242,9 +259,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const stepStatusColor = { PENDING: '#6b7280', APPROVED: '#10b981', REJECTED: '#ef4444' };
 
                 workflowContainer.innerHTML = `
-                    <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:12px;font-weight:600;background:${statusColor[wf.status]||'#6366f1'}22;color:${statusColor[wf.status]||'#6366f1'};padding:4px 10px;border-radius:20px;">${wf.status}</span>
-                        <span style="font-size:12px;color:var(--text-muted);">${wf.workflow_name}</span>
+                    <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:12px;font-weight:600;background:${statusColor[wf.status]||'#6366f1'}22;color:${statusColor[wf.status]||'#6366f1'};padding:4px 10px;border-radius:20px;">${wf.status}</span>
+                            <span style="font-size:12px;color:var(--text-muted);">${wf.workflow_name}</span>
+                        </div>
+                        <a href="http://localhost:8003/board/${wf.workflow_id}/" target="_blank" style="font-size:11.5px;color:#a5b4fc;text-decoration:none;font-weight:600;background:rgba(99,102,241,0.12);padding:4px 10px;border-radius:6px;border:1px solid rgba(99,102,241,0.25);display:inline-flex;align-items:center;gap:4px;" title="Open standalone Workflow Detail page">
+                            <i class="fa-solid fa-route"></i> Workflow Detail <i class="fa-solid fa-up-right-from-square" style="font-size:10px;"></i>
+                        </a>
                     </div>
                     <div style="display:flex;flex-direction:column;gap:8px;">
                         ${wf.steps.map(st => `
@@ -268,9 +290,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (versionSelect) {
         versionSelect.addEventListener('change', (e) => {
             const versionId = e.target.value;
-            const url = new URL(window.location.href);
-            url.searchParams.set('version_id', versionId);
-            window.location.href = url.toString();
+            const contractId = window.location.pathname.split('/')[2];
+            if (window.refreshContractDetailViaAjax) {
+                window.refreshContractDetailViaAjax(contractId, versionId);
+            } else {
+                const url = new URL(window.location.href);
+                url.searchParams.set('version_id', versionId);
+                window.location.href = url.toString();
+            }
         });
     }
 
@@ -427,22 +454,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     if (scannerLoader) scannerLoader.classList.remove('active');
                     if (data.success) {
-                        if (data.scan_error) {
-                            showToast("Phiên bản mới đã được tải lên, nhưng hệ thống chưa kết nối được với mô hình AI để phân tích ngay. Bạn có thể bấm Phân tích lại sau.", "warning");
-                            setTimeout(() => {
-                                window.location.href = `/contracts/${contractId}/?version_id=${data.version_id}`;
-                            }, 3000);
-                        } else {
-                            window.location.href = `/contracts/${contractId}/?version_id=${data.version_id}`;
+                        showToast("Phiên bản mới đã được tải lên thành công!", "success");
+                        if (window.refreshContractDetailViaAjax) {
+                            window.refreshContractDetailViaAjax(contractId, data.version_id);
                         }
                     } else {
                         const errorMsg = data.error || "Unknown error";
                         const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
                         if (isModelError) {
-                            showToast("Phiên bản mới đã được tải lên, nhưng hệ thống chưa kết nối được với mô hình AI để phân tích ngay. Bạn có thể bấm Phân tích lại sau.", "warning");
-                            setTimeout(() => {
-                                window.location.href = `/contracts/${contractId}/?version_id=${data.version_id || ''}`;
-                            }, 3000);
+                            showToast("Phiên bản mới đã được tải lên, nhưng hệ thống chưa kết nối được với mô hình AI để phân tích ngay.", "warning");
+                            if (window.refreshContractDetailViaAjax) {
+                                window.refreshContractDetailViaAjax(contractId, data.version_id);
+                            }
                         } else {
                             showToast(errorMsg, "error");
                         }
@@ -512,11 +535,11 @@ document.addEventListener('DOMContentLoaded', () => {
                      if (scannerLoader) scannerLoader.classList.remove('active');
                      if (data.success) {
                          showToast("Trích xuất thủ công hoàn tất!", "success");
-                         setTimeout(() => window.location.reload(), 1500);
+                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
                      } else {
                          showToast(data.error || "Lỗi khi trích xuất thủ công.", "error");
                      }
-                }, 2000);
+                }, 1000);
             } catch (err) {
                 if (scannerLoader) scannerLoader.classList.remove('active');
                 console.error(err);
@@ -551,11 +574,11 @@ document.addEventListener('DOMContentLoaded', () => {
                      if (scannerLoader) scannerLoader.classList.remove('active');
                      if (data.version_id) {
                          showToast("Trích xuất AI hoàn tất!", "success");
-                         setTimeout(() => window.location.reload(), 1500);
+                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
                      } else {
                          showToast(data.error || "Lỗi khi trích xuất AI.", "error");
                      }
-                }, 2500);
+                }, 1000);
             } catch (err) {
                 if (scannerLoader) scannerLoader.classList.remove('active');
                 console.error(err);
@@ -593,11 +616,11 @@ document.addEventListener('DOMContentLoaded', () => {
                      if (scannerLoader) scannerLoader.classList.remove('active');
                      if (data.summary) {
                          showToast("Tóm tắt AI hoàn tất!", "success");
-                         setTimeout(() => window.location.reload(), 1500);
+                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
                      } else {
                          showToast(data.error || "Lỗi khi tạo tóm tắt AI.", "error");
                      }
-                }, 2000);
+                }, 1000);
             } catch (err) {
                 if (scannerLoader) scannerLoader.classList.remove('active');
                 console.error(err);
@@ -748,20 +771,199 @@ window.showToast = function(message, type = 'error') {
     setTimeout(dismiss, 8000);
 };
 
-// Toggle folding/unfolding of risk findings (Global helper)
-window.toggleFinding = function(header) {
+// Toggle clause body (Global helper)
+window.toggleClause = function(header) {
     const item = header.parentElement;
-    item.classList.toggle('active');
-    
-    const body = item.querySelector('.finding-body');
-    const icon = header.querySelector('i');
-    
-    if (item.classList.contains('active')) {
-        body.style.display = 'flex';
-        icon.style.transform = 'rotate(180deg)';
-    } else {
-        body.style.display = 'none';
-        icon.style.transform = 'rotate(0deg)';
+    const body = item.querySelector('.clause-item-body');
+    const icon = header.querySelector('i.fa-chevron-down');
+    if (body) {
+        if (body.style.display === 'none' || !body.style.display) {
+            body.style.display = 'block';
+            if (icon) icon.style.transform = 'rotate(180deg)';
+        } else {
+            body.style.display = 'none';
+            if (icon) icon.style.transform = 'rotate(0deg)';
+        }
+    }
+};
+
+// Pure AJAX refresh of Contract Detail page without full browser reload
+window.refreshContractDetailViaAjax = async function(contractId, versionId = null) {
+    const apiUrl = versionId ? `/api/contracts/${contractId}/?version_id=${versionId}` : `/api/contracts/${contractId}/`;
+    try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) return;
+        const contract = await res.json();
+        
+        if (versionId) {
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('version_id', versionId);
+            window.history.pushState({}, '', currentUrl.toString());
+        }
+
+        // 1. Update Version Select dropdown options
+        const versionSelect = document.getElementById('version-select');
+        if (versionSelect && contract.versions) {
+            versionSelect.innerHTML = contract.versions.map(v => `
+                <option value="${v.id}" ${v.id == contract.active_version_id ? 'selected' : ''}>
+                    v${v.version_number} - ${(v.change_summary || '').substring(0, 20)} (${v.overall_score ? Math.round(v.overall_score) + '%' : 'Pending'})
+                </option>
+            `).join('');
+        }
+
+        // 2. Update Status badge
+        const statusBadges = document.querySelectorAll('.status-badge');
+        statusBadges.forEach(badge => {
+            badge.className = `status-badge status-${(contract.status || '').toLowerCase()}`;
+            badge.textContent = contract.status;
+        });
+
+        // 3. Update Document raw content
+        const docPre = document.querySelector('.doc-content-pre');
+        if (docPre) docPre.textContent = contract.raw_content || '';
+
+        // 4. Update Active Version Info Card
+        const activeVersionInfo = document.querySelector('.active-version-info-card');
+        if (activeVersionInfo) {
+            activeVersionInfo.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-family: 'Outfit', sans-serif; font-weight: 700; color: #ffffff; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <i class="fa-solid fa-code-branch" style="color: var(--accent-primary);"></i> Viewing Version ${contract.active_version_number || 1}
+                    </span>
+                    <span style="font-size: 11.5px; color: var(--text-muted);">
+                        Status: ${contract.status}
+                    </span>
+                </div>
+                ${contract.active_version_change_summary ? `
+                <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.4; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px; padding-top: 8px;">
+                    <strong style="color: var(--accent-primary);">Change Log:</strong> ${contract.active_version_change_summary}
+                </div>` : ''}
+            `;
+        }
+
+        // 5. Update Metadata cards (Code, Type, Value)
+        const metaVals = document.querySelectorAll('.meta-val');
+        if (metaVals.length >= 3) {
+            metaVals[0].textContent = contract.contract_code || 'N/A';
+            metaVals[1].textContent = contract.contract_type || 'N/A';
+            metaVals[2].textContent = '$' + (contract.contract_value ? Number(contract.contract_value).toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00');
+        }
+
+        // 6. Update Gauge & Risk Score
+        const gauge = document.getElementById('gauge-val');
+        const gaugeText = document.querySelector('.gauge-text');
+        const gaugeStatus = document.getElementById('gauge-status');
+        if (gauge && contract.analysis && contract.analysis.overall_score !== undefined) {
+            const score = parseFloat(contract.analysis.overall_score);
+            gauge.dataset.score = score;
+            if (gaugeText) gaugeText.textContent = Math.round(score) + '%';
+            const r = 36;
+            const circumference = 2 * Math.PI * r;
+            const offset = circumference - (score / 100) * circumference;
+            gauge.style.strokeDashoffset = offset;
+            if (score >= 80) {
+                gauge.style.stroke = '#ef4444';
+                if (gaugeStatus) { gaugeStatus.innerHTML = 'High Risk'; gaugeStatus.className = 'gauge-status score-high'; }
+            } else if (score >= 50) {
+                gauge.style.stroke = '#f97316';
+                if (gaugeStatus) { gaugeStatus.innerHTML = 'Medium Risk'; gaugeStatus.className = 'gauge-status score-medium'; }
+            } else {
+                gauge.style.stroke = '#10b981';
+                if (gaugeStatus) { gaugeStatus.innerHTML = 'Low Risk'; gaugeStatus.className = 'gauge-status score-low'; }
+            }
+        }
+
+        // 7. Update AI Summary Box
+        const summaryBox = document.querySelector('.summary-box');
+        if (summaryBox && contract.analysis && contract.analysis.summary) {
+            summaryBox.textContent = contract.analysis.summary;
+        }
+
+        // 8. Update Findings List
+        const findingsList = document.querySelector('.findings-list');
+        if (findingsList) {
+            if (contract.findings && contract.findings.length > 0) {
+                findingsList.innerHTML = contract.findings.map(f => `
+                    <div class="finding-item">
+                        <div class="finding-header" onclick="toggleFinding(this)">
+                            <div class="finding-left">
+                                <span class="risk-badge badge-${(f.risk_level || '').toLowerCase()}">${f.risk_level}</span>
+                                <span>${f.risk_name}</span>
+                            </div>
+                            <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
+                        </div>
+                        <div class="finding-body" style="display: none;">
+                            <div class="finding-block">
+                                <div class="block-label">Violated Clause</div>
+                                <div class="block-text" style="font-weight: 500; color: #ffffff;">${f.clause_title}</div>
+                            </div>
+                            <div class="finding-block">
+                                <div class="block-label">Risk Explanation</div>
+                                <div class="block-text">${f.explanation}</div>
+                            </div>
+                            ${f.disadvantaged_party ? `
+                            <div class="finding-block" style="margin-top: 8px;">
+                                <div class="block-label" style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Bên gặp bất lợi / Disadvantaged Party</div>
+                                <div class="block-text" style="font-weight: 600; color: #f87171;">${f.disadvantaged_party}</div>
+                            </div>` : ''}
+                            ${f.recommendation ? `
+                            <div class="rec-box">
+                                <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
+                                <div class="block-text">${f.recommendation}</div>
+                            </div>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                findingsList.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No specific risks identified.</p>';
+            }
+        }
+
+        // 9. Update Clauses List
+        const clausesList = document.querySelector('.clauses-list');
+        if (clausesList) {
+            if (contract.clauses && contract.clauses.length > 0) {
+                clausesList.innerHTML = contract.clauses.map(cl => `
+                    <div class="clause-item-container" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; overflow: hidden; transition: all 0.2s;">
+                        <div class="clause-item-header" style="padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleClause(this)">
+                            <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 14px; color: #ffffff;">${cl.title}</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 11px; background: rgba(99,102,241,0.15); color: #818cf8; padding: 2px 8px; border-radius: 12px;">${cl.entities ? cl.entities.length : 0} entities</span>
+                                <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
+                            </div>
+                        </div>
+                        <div class="clause-item-body" style="display: none; padding: 16px; border-top: 1px solid rgba(255,255,255,0.04); background: rgba(0,0,0,0.15);">
+                            <p style="font-size: 13px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; margin-top: 0; margin-bottom: 16px;">${cl.content}</p>
+                            ${cl.entities && cl.entities.length > 0 ? `
+                            <div style="border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 12px;">
+                                <h5 style="margin: 0 0 10px 0; font-family: 'Outfit', sans-serif; font-size: 11px; text-transform: uppercase; color: var(--accent-primary); letter-spacing: 0.5px;">Extracted Entities</h5>
+                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                    ${cl.entities.map(ee => `
+                                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <span class="entity-type-badge entity-type-${(ee.entity_type || '').toLowerCase()}">${ee.entity_type}</span>
+                                            <span style="font-size: 12.5px; color: #ffffff; font-weight: 500;">${ee.entity_value}</span>
+                                        </div>
+                                        <span style="font-size: 11px; color: var(--text-muted);">Conf: ${ee.confidence_score ? Number(ee.confidence_score).toFixed(2) : '1.00'}</span>
+                                    </div>
+                                    `).join('')}
+                                </div>
+                            </div>` : '<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;">No entities extracted for this clause.</p>'}
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                clausesList.innerHTML = '<p style="color: var(--text-muted); font-style: italic; text-align: center; padding: 20px 0;">No clauses extracted yet.</p>';
+            }
+        }
+
+        // 10. Update Executive Summary Tab Text
+        const aiSummaryText = document.getElementById('ai-summary-text');
+        if (aiSummaryText && contract.ai_summary) {
+            aiSummaryText.textContent = contract.ai_summary.summary || '';
+        }
+    } catch (err) {
+        console.error("AJAX contract refresh error:", err);
     }
 };
 

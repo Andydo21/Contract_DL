@@ -26,6 +26,40 @@ class WorkflowRepository:
             return Workflow.objects.all().order_by("-id").prefetch_related("steps", "steps__approvals")
 
     @staticmethod
+    def get_contract_info_by_version_ids(version_ids):
+        """
+        Query database joining contracts_contractversion and contracts_contract
+        to retrieve contract title, code, ID, and version_number for given version_ids.
+        """
+        if not version_ids:
+            return {}
+        v_ids = list(set(version_ids))
+        result_map = {}
+        try:
+            from django.db import connections
+            db_alias = 'contract_db' if 'contract_db' in connections else 'default'
+            with connections[db_alias].cursor() as cursor:
+                format_strings = ','.join(['%s'] * len(v_ids))
+                cursor.execute(f"""
+                    SELECT cv.id, c.id, c.title, c.contract_code, cv.version_number
+                    FROM contracts_contractversion cv
+                    JOIN contracts_contract c ON cv.contract_id = c.id
+                    WHERE cv.id IN ({format_strings})
+                """, v_ids)
+                rows = cursor.fetchall()
+                for row in rows:
+                    v_id, c_id, title, code, v_num = row
+                    result_map[v_id] = {
+                        'contract_id': c_id,
+                        'contract_title': title,
+                        'contract_code': code,
+                        'version_number': v_num
+                    }
+        except Exception:
+            pass
+        return result_map
+
+    @staticmethod
     def active_workflow_exists(version_id):
         """Check if there is an active workflow (PENDING or IN_PROGRESS) for a contract version."""
         return Workflow.objects.filter(

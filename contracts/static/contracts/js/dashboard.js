@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Load single contract details
-    async function showContractDetail(id) {
+    async function showContractDetail(id, versionId = null) {
         currentContractId = id;
         detailPanel.innerHTML = `
             <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
@@ -180,7 +180,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
         try {
-            const res = await fetch(`/api/contracts/${id}/`);
+            const apiUrl = versionId ? `/api/contracts/${id}/?version_id=${versionId}` : `/api/contracts/${id}/`;
+            const res = await fetch(apiUrl);
             if (!res.ok) {
                 const errJson = await res.json().catch(() => ({}));
                 throw new Error(errJson.error || "Failed to fetch contract details");
@@ -399,9 +400,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="btn btn-trigger-analysis" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.3); cursor: pointer;">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
                         </button>
-                        <button class="btn" onclick="document.getElementById('btn-tab-fulltext') && document.getElementById('btn-tab-fulltext').click()" style="background: var(--accent-primary); color: #ffffff; border: none; cursor: pointer;">
-                            <i class="fa-solid fa-file-lines"></i> Full Document
-                        </button>
+                        <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
+                            <i class="fa-solid fa-expand"></i> Full Reader Page
+                        </a>
                         ${data.file_path ? `
                         <a href="${data.file_path}" target="_blank" download class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
                             <i class="fa-solid fa-file-pdf"></i> Download PDF
@@ -841,9 +842,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Init load
     const urlParams = new URLSearchParams(window.location.search);
     const initialContractId = urlParams.get('contract_id');
+    const initialVersionId = urlParams.get('version_id');
     loadContracts(initialContractId);
     if (initialContractId) {
-        showContractDetail(initialContractId);
+        showContractDetail(initialContractId, initialVersionId);
     }
 });
 

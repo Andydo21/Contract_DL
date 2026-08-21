@@ -21,23 +21,36 @@ def workflow_board_page(request):
 
 
 def workflow_detail_page(request, workflow_id):
-    """Render Workflow Detail UI page."""
-    from .models import Workflow
-    workflow = get_object_or_404(Workflow, id=workflow_id)
-    wf_dict = {
-        "workflow_id":   workflow.id,
-        "version_id":    workflow.version_id,
-        "workflow_name": workflow.workflow_name,
-        "status":        workflow.status,
-        "workflow_type": workflow.workflow_type,
-        "reasons":       workflow.reasons,
-        "started_at":    workflow.started_at.isoformat() if workflow.started_at else None,
-        "completed_at":  workflow.completed_at.isoformat() if workflow.completed_at else None,
-        "steps": [_step_to_dict(st) for st in sorted(workflow.steps.all(), key=lambda s: s.step_order)],
-    }
-    if request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'json' in request.headers.get('Accept', '') or request.GET.get('format') == 'json':
+    """Render Workflow Detail UI page (HTML) or JSON if requested via AJAX/API."""
+    wf_dict = workflow_service.get_workflow_detail_dict(workflow_id)
+    if not wf_dict:
+        is_ajax = (
+            request.headers.get('x-requested-with') == 'XMLHttpRequest' or
+            request.GET.get('format') == 'json' or
+            'application/json' in request.headers.get('Accept', '')
+        )
+        return JsonResponse({"error": "Workflow not found"}, status=404) if is_ajax else render(request, '404.html', status=404)
+
+    is_json = (
+        request.headers.get('x-requested-with') == 'XMLHttpRequest' or
+        request.GET.get('format') == 'json' or
+        'application/json' in request.headers.get('Accept', '')
+    )
+
+    if is_json:
         return JsonResponse({"workflow": wf_dict})
-    return render(request, 'workflow/workflow_detail.html', {"workflow": wf_dict})
+
+    contract_obj = {
+        'id': wf_dict.get('contract_id'),
+        'title': wf_dict.get('contract_title', 'Contract'),
+        'contract_code': wf_dict.get('contract_code', '')
+    } if wf_dict.get('contract_id') else None
+
+    return render(request, 'workflow/workflow_detail.html', {
+        'workflow': wf_dict,
+        'contract': contract_obj,
+        'version_number': wf_dict.get('version_number', 1)
+    })
 
 
 def list_all_workflows(request):
@@ -45,18 +58,8 @@ def list_all_workflows(request):
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
     
-    workflows = workflow_service.list_workflows_for_user(request.user)
-    result = [{
-        "workflow_id":   wf.id,
-        "version_id":    wf.version_id,
-        "workflow_name": wf.workflow_name,
-        "status":        wf.status,
-        "workflow_type": wf.workflow_type,
-        "reasons":       wf.reasons,
-        "started_at":    wf.started_at.isoformat() if wf.started_at else None,
-        "completed_at":  wf.completed_at.isoformat() if wf.completed_at else None,
-        "steps": [_step_to_dict(st) for st in sorted(wf.steps.all(), key=lambda s: s.step_order)],
-    } for wf in workflows]
+    user = getattr(request, 'user', None)
+    result = workflow_service.list_workflows_with_contract_info_for_user(user)
     return JsonResponse({"workflows": result})
 
 
@@ -85,14 +88,10 @@ def create_workflow(request):
     except ValueError as ve:
         return JsonResponse({"error": str(ve)}, status=409 if "active" in str(ve) else 400)
 
+    wf_dict = workflow_service.get_workflow_detail_dict(workflow.id)
     return JsonResponse({
         "success": True,
-        "workflow_id": workflow.id,
-        "workflow_name": workflow.workflow_name,
-        "status": workflow.status,
-        "workflow_type": workflow.workflow_type,
-        "reasons": workflow.reasons,
-        "steps": [_step_to_dict(st) for st in workflow.steps.order_by("step_order")],
+        "workflow": wf_dict
     }, status=201)
 
 
@@ -100,34 +99,20 @@ def get_workflow(request, version_id):
     """GET /workflows/<version_id>/"""
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    workflow = workflow_service.get_workflow(version_id)
-    if not workflow:
+    wf_dict = workflow_service.get_workflow_dict_by_version(version_id)
+    if not wf_dict:
         return JsonResponse({"error": "No workflow found for this version"}, status=404)
-    return JsonResponse({
-        "workflow_id": workflow.id, "workflow_name": workflow.workflow_name,
-        "status": workflow.status, "workflow_type": workflow.workflow_type,
-        "reasons": workflow.reasons, "version_id": workflow.version_id,
-        "started_at": workflow.started_at.isoformat() if workflow.started_at else None,
-        "completed_at": workflow.completed_at.isoformat() if workflow.completed_at else None,
-        "steps": [_step_to_dict(st) for st in workflow.steps.order_by("step_order")],
-    })
+    return JsonResponse(wf_dict)
 
 
 def get_workflow_by_id_view(request, workflow_id):
     """GET /workflows/detail/<workflow_id>/"""
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    workflow = workflow_service.get_workflow_by_id(workflow_id)
-    if not workflow:
+    wf_dict = workflow_service.get_workflow_detail_dict(workflow_id)
+    if not wf_dict:
         return JsonResponse({"error": "Workflow not found"}, status=404)
-    return JsonResponse({
-        "workflow_id": workflow.id, "workflow_name": workflow.workflow_name,
-        "status": workflow.status, "workflow_type": workflow.workflow_type,
-        "reasons": workflow.reasons, "version_id": workflow.version_id,
-        "started_at": workflow.started_at.isoformat() if workflow.started_at else None,
-        "completed_at": workflow.completed_at.isoformat() if workflow.completed_at else None,
-        "steps": [_step_to_dict(st) for st in workflow.steps.order_by("step_order")],
-    })
+    return JsonResponse(wf_dict)
 
 
 def approve_step(request, step_id):
@@ -300,6 +285,52 @@ def delete_step_view(request, step_id):
         return JsonResponse({"error": "Method not allowed"}, status=405)
     try:
         workflow_service.delete_step(step_id)
+        return JsonResponse({"success": True})
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def add_dependency_view(request, workflow_id):
+    """POST /workflows/<workflow_id>/dependencies/add/"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        body = json.loads(request.body)
+        prereq_id = body.get("prerequisite_step_id")
+        dependent_id = body.get("dependent_step_id")
+
+        if not prereq_id or not dependent_id:
+            return JsonResponse({"error": "Vui lòng chọn cả bước điều kiện (nối đến) và bước bị phụ thuộc (bị nối)."}, status=400)
+
+        dep = workflow_service.add_dependency(
+            workflow_id=workflow_id,
+            prerequisite_step_id=prereq_id,
+            dependent_step_id=dependent_id
+        )
+        return JsonResponse({
+            "success": True,
+            "dependency": {
+                "id": dep.id,
+                "prerequisite_step_id": dep.prerequisite_step_id,
+                "prerequisite_step_name": dep.prerequisite_step.step_name,
+                "dependent_step_id": dep.dependent_step_id,
+                "dependent_step_name": dep.dependent_step.step_name,
+            }
+        }, status=201)
+    except ValueError as ve:
+        return JsonResponse({"error": str(ve)}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def delete_dependency_view(request, dependency_id):
+    """POST /dependencies/<dependency_id>/delete/"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    try:
+        workflow_service.delete_dependency(dependency_id)
         return JsonResponse({"success": True})
     except ValueError as ve:
         return JsonResponse({"error": str(ve)}, status=400)

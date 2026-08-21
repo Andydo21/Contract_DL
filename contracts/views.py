@@ -20,18 +20,13 @@ def _get_headers(request=None):
 
 def manager_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
-        is_ajax_or_api = request.path.startswith('/api/') or request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'json' in request.headers.get('Accept', '')
         if not request.user.is_authenticated:
-            if is_ajax_or_api:
-                return JsonResponse({'error': 'Authentication required.'}, status=401)
-            return redirect('/login/')
+            return JsonResponse({'error': 'Authentication required.'}, status=401)
         user = request.user
         if user.is_superuser:
             return view_func(request, *args, **kwargs)
         if not user.role or user.role.role_name.upper() not in ['MANAGER', 'ADMIN']:
-            if is_ajax_or_api:
-                return JsonResponse({'error': 'Permission Denied: Manager role required.'}, status=403)
-            return render(request, 'contracts/access_denied.html')
+            return JsonResponse({'error': 'Permission Denied: Manager role required.'}, status=403)
         return view_func(request, *args, **kwargs)
     return _wrapped_view
 
@@ -86,7 +81,26 @@ def workflow_board(request):
 
 @login_required
 def contract_detail(request, contract_id):
-    """Return contract details in JSON format."""
+    """Render Contract Detail standalone UI Page (contract_detail.html)."""
+    from .models import Contract
+    try:
+        contract_obj = Contract.objects.get(id=contract_id)
+        if not _check_contract_permission(request.user, contract_obj):
+            return render(request, 'contracts/access_denied.html', status=403)
+    except Contract.DoesNotExist:
+        return render(request, '404.html', status=404)
+        
+    version_id = request.GET.get('version_id')
+    details = contract_service.get_contract_details(contract_id, version_id=version_id)
+    if not details:
+        return render(request, '404.html', status=404)
+        
+    return render(request, 'contracts/contract_detail.html', {'contract': details})
+
+
+@api_login_required
+def api_contract_detail(request, contract_id):
+    """Return contract details in pure JSON format for AJAX callers."""
     from .models import Contract
     try:
         contract_obj = Contract.objects.get(id=contract_id)
