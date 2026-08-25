@@ -102,51 +102,41 @@ def ensure_mandatory_anchor_steps(steps: list) -> list:
 
 def build_dynamic_fallback_workflow(contract_text: str = "", contract_type: str = "") -> tuple:
     """
-    Dynamically extracts clause keywords and generates a custom, highly specific workflow
-    when external AI inference is offline.
+    Standard default workflow when non-AI mode is selected or AI service is offline.
+    Generates a clean, concise 4-step corporate approval workflow.
     """
-    c_text = (contract_text or "").lower()
     c_type = (contract_type or "").strip().upper()
-    
-    raw_steps = []
-    
-    # 1. Technical / SLA check
-    if any(k in c_text for k in ['sla', 'kỹ thuật', 'phần mềm', 'hệ thống', 'bảo trì', 'cloud', 'server', 'dịch vụ']):
-        raw_steps.append({
-            "step_name": "Thẩm định Tiêu chuẩn Kỹ thuật, Hạ tầng Server & Cam kết SLA",
-            "role_id": 7,
-            "description": "Rà soát cam kết thời gian hoạt động (uptime), tiêu chuẩn hạ tầng và mốc hoàn thành bàn giao phần mềm."
-        })
-
-    # 2. Security & Data privacy check
-    if any(k in c_text for k in ['bảo mật', 'security', 'iso 27001', 'dữ liệu', 'privacy', 'nda', 'bí mật']):
-        raw_steps.append({
-            "step_name": "Đánh giá Trách nhiệm Bảo mật Dữ liệu & An toàn Thông tin ISO 27001",
-            "role_id": 8,
-            "description": "Kiểm tra thỏa thuận bảo vệ dữ liệu cá nhân, chống rò rỉ bí mật kinh doanh và an toàn hệ thống."
-        })
-
-    # 3. Finance & Pricing check
-    if any(k in c_text for k in ['giá', 'thanh toán', 'đặt cọc', 'ngân sách', 'chi phí', 'vnd', 'usd', 'thuế', 'phí']):
-        raw_steps.append({
-            "step_name": "Thẩm định Đơn giá Hợp đồng, Tiến độ Thanh toán & Tiền Đặt cọc",
-            "role_id": 6,
-            "description": "Xác nhận lịch giải ngân theo từng giai đoạn, điều khoản đặt cọc và khả năng cân đối dòng tiền."
-        })
-
-    # 4. Legal / Penalties / Termination check
-    raw_steps.append({
-        "step_name": "Rà soát Pháp lý Điều khoản Phạt Vi phạm, Bồi thường & Chấm dứt",
-        "role_id": 4,
-        "description": "Đánh giá tính hợp pháp của các chế tài xử lý vi phạm, mức phạt tối đa và quyền đơn phương chấm dứt."
-    })
-
-    final_steps = ensure_mandatory_anchor_steps(raw_steps)
-
-    wf_type = c_type if c_type.startswith("WF_") else (f"WF_{c_type}" if c_type else "WF_DYNAMIC")
+    wf_type = c_type if c_type.startswith("WF_") else (f"WF_{c_type}" if c_type else "WF_STANDARD")
     label = wf_type.replace("WF_", "").title()
-    reason = f"Quy trình tự động sinh với các bước neo bắt buộc và từ khóa hợp đồng ('{label}')."
-    wf_name = f"Smart Approval Workflow – {label}"
+    wf_name = f"Quy trình Phê duyệt Mặc định – {label}" if label and label != "Standard" else "Quy trình Phê duyệt Mặc định"
+    reason = "Quy trình phê duyệt tiêu chuẩn mặc định (4 bước cơ bản)."
+
+    final_steps = [
+        {
+            "step_order": 1,
+            "step_name": "Rà soát & Tiếp nhận Dự thảo Hợp đồng",
+            "role_id": 4,
+            "description": "Kiểm tra tính đầy đủ của hồ sơ dự thảo, tư cách pháp nhân các bên và hình thức hợp đồng."
+        },
+        {
+            "step_order": 2,
+            "step_name": "Phê duyệt Chủ trương Cấp Quản lý",
+            "role_id": 5,
+            "description": "Cấp quản lý trực tiếp xét duyệt phương án triển khai, chi phí và định hướng hợp đồng."
+        },
+        {
+            "step_order": 3,
+            "step_name": "Thực hiện Ký kết Hợp đồng Chính thức",
+            "role_id": 4,
+            "description": "Đại diện có thẩm quyền của các bên thực hiện ký kết hợp đồng bằng chữ ký số."
+        },
+        {
+            "step_order": 4,
+            "step_name": "Bàn giao & Lưu trữ Kho Hồ sơ Hợp đồng",
+            "role_id": 4,
+            "description": "Lưu trữ bản hợp đồng chính thức và các tài liệu bàn giao liên quan vào hệ thống quản lý."
+        }
+    ]
     
     return wf_type, final_steps, reason, wf_name
 
