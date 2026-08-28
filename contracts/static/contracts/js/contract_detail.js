@@ -222,12 +222,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => window.location.reload(), 1800);
                 } else {
                     btnRepushWorkflow.disabled = false;
-                    btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push & Reset Workflow';
+                    btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push to Workflow';
                     showToast(data.error || 'Không thể tạo lại workflow.', 'warning');
                 }
             } catch (err) {
                 btnRepushWorkflow.disabled = false;
-                btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push & Reset Workflow';
+                btnRepushWorkflow.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-push to Workflow';
                 console.error(err);
                 showToast('Lỗi kết nối: Không thể kết nối tới workflow service.', 'error');
             }

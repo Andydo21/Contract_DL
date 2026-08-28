@@ -294,10 +294,12 @@ class ContractService:
             
         # Check if workflow exists for this version
         has_workflow = False
+        workflow_id = None
         try:
-            wf_status = self.get_workflow_status(c.id, version_id=version.id)
+            wf_status = WorkflowService().get_workflow_status(c.id, version_id=version.id)
             if wf_status and wf_status.get("workflow_id"):
                 has_workflow = True
+                workflow_id = wf_status.get("workflow_id")
         except Exception:
             pass
 
@@ -321,7 +323,8 @@ class ContractService:
             'active_version_change_summary': version.change_summary,
             'versions': versions_list,
             'ai_summary': summary_data,
-            'has_workflow': has_workflow
+            'has_workflow': has_workflow,
+            'workflow_id': workflow_id
         }
 
     def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):

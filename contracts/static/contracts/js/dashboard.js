@@ -358,16 +358,32 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <h5 style="margin: 0 0 4px 0; color: #ffffff; font-size: 14px; font-weight: 600;">Khởi tạo quy trình phê duyệt (Workflow)</h5>
                                 <p style="margin: 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.4;">Đẩy hợp đồng và đánh giá rủi ro sang dịch vụ Workflow Service để khởi tạo luồng duyệt.</p>
                             </div>
-                            <button class="btn btn-push-workflow" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; font-weight: 600; padding: 10px 22px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16,185,129,0.3); cursor: pointer; white-space: nowrap; border-radius: 8px;">
-                                <i class="fa-solid fa-paper-plane"></i> Push to Workflow
-                            </button>
+                            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                                ${data.has_workflow && data.workflow_id ? `
+                                <a href="http://localhost:8003/board/${data.workflow_id}/" target="_blank" style="color: #a5b4fc; text-decoration: none; font-size: 12.5px; font-weight: 600; background: rgba(99,102,241,0.12); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.3); display: inline-flex; align-items: center; gap: 6px;" title="Mở trang chi tiết quy trình phê duyệt">
+                                    <i class="fa-solid fa-route"></i> Xem chi tiết Workflow <i class="fa-solid fa-up-right-from-square" style="font-size: 11px;"></i>
+                                </a>` : ''}
+                                <button class="btn btn-push-workflow" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; font-weight: 600; padding: 10px 22px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16,185,129,0.3); cursor: pointer; white-space: nowrap; border-radius: 8px;">
+                                    ${data.has_workflow ? '<i class="fa-solid fa-arrows-rotate"></i> Re-push to Workflow' : '<i class="fa-solid fa-paper-plane"></i> Push to Workflow'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
             `;
 
             // Render original clauses list HTML
-            let clausesHTML = '';
+            let clausesHTML = `
+                <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+                    <button class="btn btn-manual-extract-dash" data-contract-id="${data.id}" data-version-id="${data.active_version_id || ''}" style="flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); color: #ffffff; font-weight: 500; padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                        <i class="fa-solid fa-gears" style="color: #a5b4fc;"></i> Trích xuất Thủ công
+                    </button>
+                    <button class="btn btn-ai-extract-dash" data-contract-id="${data.id}" data-version-id="${data.active_version_id || ''}" style="flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #ffffff; font-weight: 600; padding: 10px 16px; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(99,102,241,0.3);">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Trích xuất AI
+                    </button>
+                </div>
+            `;
+
             if (data.clauses && data.clauses.length > 0) {
                 data.clauses.forEach(cl => {
                     clausesHTML += `
@@ -381,7 +397,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     `;
                 });
             } else {
-                clausesHTML = `<p style="color: var(--text-muted); font-style: italic; text-align: center; padding: 40px 0;">No clauses found in this contract.</p>`;
+                clausesHTML += `
+                    <div style="text-align: center; padding: 40px 24px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                        <i class="fa-solid fa-file-circle-exclamation" style="font-size: 36px; color: var(--text-muted);"></i>
+                        <h4 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 15px; margin: 0;">Chưa tìm thấy điều khoản (No Clauses Extracted)</h4>
+                        <p style="max-width: 440px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Vui lòng bấm <strong>Trích xuất Thủ công</strong> hoặc <strong>Trích xuất AI</strong> ở trên để bóc tách thông tin điều khoản cho hợp đồng này.</p>
+                    </div>
+                `;
             }
 
             // Render the full detail panel structure
@@ -575,6 +597,102 @@ document.addEventListener('DOMContentLoaded', () => {
                     } finally {
                         btn.disabled = false;
                         btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Push to Workflow';
+                    }
+                });
+            });
+
+            // Bind Manual Extract in Dashboard
+            detailPanel.querySelectorAll('.btn-manual-extract-dash').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const contractId = btn.getAttribute('data-contract-id');
+                    const vId = btn.getAttribute('data-version-id') || null;
+                    const scannerLoader = document.getElementById('scanner-loader');
+                    const origHTML = btn.innerHTML;
+                    
+                    btn.disabled = true;
+                    btn.style.opacity = '0.75';
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang trích xuất thủ công...';
+                    
+                    if (scannerLoader) {
+                        scannerLoader.classList.add('active');
+                        const scannerText = scannerLoader.querySelector('.scanner-text');
+                        if (scannerText) scannerText.innerHTML = "RUNNING RULE-BASED MANUAL EXTRACTION...";
+                    }
+                    
+                    try {
+                        const res = await fetch(`/api/contracts/${contractId}/manual-extract/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': getCookie('csrftoken')
+                            },
+                            body: JSON.stringify({ version_id: vId })
+                        });
+                        const resData = await res.json();
+                        
+                        if (resData.success) {
+                            showToast("Trích xuất thủ công hoàn tất!", "success");
+                            await showContractDetail(contractId, vId);
+                            await loadContracts(contractId);
+                        } else {
+                            showToast(resData.error || "Lỗi khi trích xuất thủ công.", "error");
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showToast("Lỗi kết nối khi trích xuất thủ công.", "error");
+                    } finally {
+                        if (scannerLoader) scannerLoader.classList.remove('active');
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.innerHTML = origHTML;
+                    }
+                });
+            });
+
+            // Bind AI Extract in Dashboard
+            detailPanel.querySelectorAll('.btn-ai-extract-dash').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const contractId = btn.getAttribute('data-contract-id');
+                    const vId = btn.getAttribute('data-version-id') || null;
+                    const scannerLoader = document.getElementById('scanner-loader');
+                    const origHTML = btn.innerHTML;
+                    
+                    btn.disabled = true;
+                    btn.style.opacity = '0.75';
+                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Đang trích xuất AI...';
+                    
+                    if (scannerLoader) {
+                        scannerLoader.classList.add('active');
+                        const scannerText = scannerLoader.querySelector('.scanner-text');
+                        if (scannerText) scannerText.innerHTML = "AI SCANNING CLAUSES & EXTRACTING ENTITIES...";
+                    }
+                    
+                    try {
+                        const res = await fetch(`/api/ai/contracts/${contractId}/extract-entities/`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': getCookie('csrftoken')
+                            },
+                            body: JSON.stringify({ version_id: vId, re_extract: true })
+                        });
+                        const resData = await res.json();
+                        
+                        if (resData.version_id || resData.clauses) {
+                            showToast("Trích xuất AI hoàn tất!", "success");
+                            await showContractDetail(contractId, vId);
+                            await loadContracts(contractId);
+                        } else {
+                            showToast(resData.error || "Lỗi khi trích xuất AI.", "error");
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showToast("Lỗi kết nối khi trích xuất AI.", "error");
+                    } finally {
+                        if (scannerLoader) scannerLoader.classList.remove('active');
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.innerHTML = origHTML;
                     }
                 });
             });

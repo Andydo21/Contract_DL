@@ -959,6 +959,12 @@ def api_register_company(request):
             return JsonResponse({'error': 'Thiếu tên công ty hoặc mã số thuế'}, status=400)
             
         from .models import Company
+        
+        # Check duplicate tax code or company name
+        existing_comp = Company.objects.filter(tax_code=tax_code).first() or Company.objects.filter(company_name=name).first()
+        if existing_comp:
+            return JsonResponse({'error': f'Công ty "{existing_comp.company_name}" (MST: {existing_comp.tax_code}) đã tồn tại trong hệ thống.'}, status=400)
+
         # Create in database
         company = Company.objects.create(
             company_name=name,
@@ -1110,9 +1116,14 @@ def api_register_user(request):
 def api_companies_list(request):
     """GET: Get list of all companies."""
     from .models import Company
-    companies = Company.objects.all().order_by('-id')
+    companies = Company.objects.all().order_by('company_name', '-id')
+    seen = set()
     data = []
     for c in companies:
+        key = (c.tax_code or c.company_name).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
         data.append({
             'id': c.id,
             'company_name': c.company_name,

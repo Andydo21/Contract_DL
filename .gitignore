@@ -22,3 +22,9 @@ Thumbs.db
 # Logs
 explorer_logs/
 
+# Temporary and Scratch Directories
+scratch/
+scripts/
+*.docx
+~$*.docx
+
