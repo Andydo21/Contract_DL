@@ -27,4 +27,6 @@ scratch/
 scripts/
 *.docx
 ~$*.docx
+*.ipynb
+.ipynb_checkpoints/
 
