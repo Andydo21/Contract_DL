@@ -435,6 +435,7 @@ class RAGChatbotAPIView(APIView):
                             "bbox": chunk.get("bbox", []),
                             "page_number": chunk.get("page_number", 1),
                             "score": 98.0, # High score for explicit document match
+                            "image_url": chunk.get("image_url", ""),
                             "file_url": doc.file.url if doc.file else ""
                         })
 
