@@ -1,0 +1,258 @@
+{
+  "total_questions": 25,
+  "hits": 14,
+  "accuracy_percent": 56.0,
+  "avg_latency_ms": 153.79,
+  "benchmark_results": [
+    {
+      "id": 1,
+      "query": "Emergency Stop schematic diagram",
+      "category": "pdf_scan",
+      "expected_doc": "Robot_DENSO_Manual.pdf",
+      "retrieved_doc": "Sensor_Schematic_Diagram.png",
+      "score": 45.72,
+      "latency_ms": 3014.03,
+      "status": "FAIL"
+    },
+    {
+      "id": 2,
+      "query": "ECU Controller wiring diagram",
+      "category": "pdf_scan",
+      "expected_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 64.89,
+      "latency_ms": 28.69,
+      "status": "PASS"
+    },
+    {
+      "id": 3,
+      "query": "Temperature sensor location RC8",
+      "category": "image",
+      "expected_doc": "Sensor_Schematic_Diagram.png",
+      "retrieved_doc": "Sensor_Schematic_Diagram.png",
+      "score": 38.91,
+      "latency_ms": 28.1,
+      "status": "PASS"
+    },
+    {
+      "id": 4,
+      "query": "Mainboard layout components",
+      "category": "pdf_scan",
+      "expected_doc": "Robot_DENSO_Manual.pdf",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 13.77,
+      "latency_ms": 29.71,
+      "status": "FAIL"
+    },
+    {
+      "id": 5,
+      "query": "RS485 connector DENSO Controller",
+      "category": "image",
+      "expected_doc": "Sensor_Schematic_Diagram.png",
+      "retrieved_doc": "Robot_DENSO_Manual.pdf",
+      "score": 41.74,
+      "latency_ms": 30.0,
+      "status": "FAIL"
+    },
+    {
+      "id": 6,
+      "query": "Supply Voltage 24V DC specification",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "score": 15.45,
+      "latency_ms": 32.41,
+      "status": "PASS"
+    },
+    {
+      "id": 7,
+      "query": "Rated Current 5.5A specification",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 26.06,
+      "latency_ms": 33.53,
+      "status": "FAIL"
+    },
+    {
+      "id": 8,
+      "query": "Operating Temp -10C to +60C",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "score": 16.16,
+      "latency_ms": 33.97,
+      "status": "PASS"
+    },
+    {
+      "id": 9,
+      "query": "Motor Speed 3000 RPM",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "Robot_DENSO_Manual.pdf",
+      "score": 18.43,
+      "latency_ms": 27.43,
+      "status": "FAIL"
+    },
+    {
+      "id": 10,
+      "query": "Voltage Tolerance +/- 5%",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 17.5,
+      "latency_ms": 37.4,
+      "status": "FAIL"
+    },
+    {
+      "id": 11,
+      "query": "Error code E-404 Motor Overheat",
+      "category": "log",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 29.68,
+      "latency_ms": 32.65,
+      "status": "PASS"
+    },
+    {
+      "id": 12,
+      "query": "RS485 communication timeout error",
+      "category": "log",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 24.63,
+      "latency_ms": 31.47,
+      "status": "PASS"
+    },
+    {
+      "id": 13,
+      "query": "24V Line Drop voltage drop cause",
+      "category": "log",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 11.09,
+      "latency_ms": 40.55,
+      "status": "FAIL"
+    },
+    {
+      "id": 14,
+      "query": "Payload Exceeded overload warning",
+      "category": "log",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 30.75,
+      "latency_ms": 33.49,
+      "status": "PASS"
+    },
+    {
+      "id": 15,
+      "query": "Reset Emergency state recovery",
+      "category": "log",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 19.13,
+      "latency_ms": 33.85,
+      "status": "PASS"
+    },
+    {
+      "id": 16,
+      "query": "Robot Controller Specs",
+      "category": "multilingual",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "Robot_DENSO_Manual.pdf",
+      "score": 40.06,
+      "latency_ms": 34.52,
+      "status": "FAIL"
+    },
+    {
+      "id": 17,
+      "query": "Emergency Stop Schematic",
+      "category": "multilingual",
+      "expected_doc": "Robot_DENSO_Manual.pdf",
+      "retrieved_doc": "Sensor_Schematic_Diagram.png",
+      "score": 40.12,
+      "latency_ms": 36.0,
+      "status": "FAIL"
+    },
+    {
+      "id": 18,
+      "query": "Error log analysis 2026",
+      "category": "multilingual",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 51.5,
+      "latency_ms": 38.5,
+      "status": "PASS"
+    },
+    {
+      "id": 19,
+      "query": "ECU Wiring Diagram",
+      "category": "multilingual",
+      "expected_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 71.71,
+      "latency_ms": 43.77,
+      "status": "PASS"
+    },
+    {
+      "id": 20,
+      "query": "Sensor position and thermal limits",
+      "category": "multilingual",
+      "expected_doc": "Sensor_Schematic_Diagram.png",
+      "retrieved_doc": "Sensor_Schematic_Diagram.png",
+      "score": 28.41,
+      "latency_ms": 34.43,
+      "status": "PASS"
+    },
+    {
+      "id": 21,
+      "query": "ECU wiring inspection procedure",
+      "category": "sop",
+      "expected_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 57.0,
+      "latency_ms": 36.42,
+      "status": "PASS"
+    },
+    {
+      "id": 22,
+      "query": "Motor Overheat E-404 repair procedure",
+      "category": "sop",
+      "expected_doc": "System_Error_Logs_2026.log",
+      "retrieved_doc": "System_Error_Logs_2026.log",
+      "score": 21.26,
+      "latency_ms": 39.27,
+      "status": "PASS"
+    },
+    {
+      "id": 23,
+      "query": "Servo motor voltage level check",
+      "category": "table_excel",
+      "expected_doc": "Biet_du_lieu_thong_so_Controller.xlsx",
+      "retrieved_doc": "SOP_ECU_Wiring_Diagram.docx",
+      "score": 9.68,
+      "latency_ms": 45.4,
+      "status": "FAIL"
+    },
+    {
+      "id": 24,
+      "query": "Speed control knob location on robot",
+      "category": "image",
+      "expected_doc": "Sensor_Schematic_Diagram.png",
+      "retrieved_doc": "Robot_DENSO_Manual.pdf",
+      "score": 32.3,
+      "latency_ms": 33.76,
+      "status": "FAIL"
+    },
+    {
+      "id": 25,
+      "query": "DENSO Robot periodic maintenance manual",
+      "category": "pdf_scan",
+      "expected_doc": "Robot_DENSO_Manual.pdf",
+      "retrieved_doc": "Robot_DENSO_Manual.pdf",
+      "score": 72.91,
+      "latency_ms": 35.35,
+      "status": "PASS"
+    }
+  ]
+}

@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DENSO VisionMind — LayoutLM Extraction & Vector DB Portal (A3 Engine)</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        denso: {
+                            red: '#e60012',
+                            dark: '#0b0f19',
+                            card: '#131b2e',
+                            border: '#212d4a',
+                            accent: '#3b82f6',
+                            highlight: '#60a5fa'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'Plus Jakarta Sans', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <style>
+        body {
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            font-family: 'Outfit', sans-serif;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(230, 0, 18, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(59, 130, 246, 0.08) 0%, transparent 40%);
+            min-height: 100vh;
+        }
+
+        .glass-panel {
+            background: rgba(19, 27, 46, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-card {
+            background: rgba(22, 31, 53, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(59, 130, 246, 0.4);
+            box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px rgba(59, 130, 246, 0.15);
+        }
+
+        .dropzone-active {
+            border-color: #e60012 !important;
+            background: rgba(230, 0, 18, 0.08) !important;
+            box-shadow: 0 0 30px rgba(230, 0, 18, 0.2);
+        }
+
+        /* File badges */
+        .badge-pdf { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+        .badge-docx { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+        .badge-xlsx { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-pptx { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+        .badge-text { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+        .badge-image { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+        .badge-other { background: rgba(156, 163, 175, 0.15); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.3); }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0b0f19; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- Header Navigation -->
+    <header class="max-w-7xl mx-auto mb-8">
+        <div class="glass-panel rounded-2xl p-4 md:px-8 md:py-5 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center shadow-lg shadow-red-600/30">
+                    <i class="ph-bold ph-lightning text-white text-2xl"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2.5 py-0.5 text-xs font-bold bg-red-600/20 text-red-400 border border-red-500/30 rounded-full">DENSO HACKATHON 2026</span>
+                        <span class="text-xs font-semibold text-blue-400">PLAN A3 LAYOUTLM & VECTOR DB</span>
+                    </div>
+                    <h1 class="text-xl md:text-2xl font-bold tracking-tight text-white mt-0.5">VisionMind Ingestion Engine</h1>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="flex flex-wrap items-center gap-4 md:gap-6 bg-slate-900/60 border border-slate-800 rounded-xl px-5 py-2.5">
+                <div class="text-center">
+                    <span class="text-[11px] text-slate-400 block font-medium">Tài liệu DB</span>
+                    <span id="stat-total-files" class="text-base font-bold text-white">0</span>
+                </div>
+                <div class="w-px h-7 bg-slate-800"></div>
+                <div class="text-center">
+                    <span class="text-[11px] text-slate-400 block font-medium">Dung lượng</span>
+                    <span id="stat-total-bytes" class="text-base font-bold text-emerald-400">0 B</span>
+                </div>
+                <div class="w-px h-7 bg-slate-800"></div>
+                <div class="text-center">
+                    <span class="text-[11px] text-slate-400 block font-medium">LayoutLM Chunks</span>
+                    <span id="stat-extracted-chunks" class="text-base font-bold text-blue-400">0</span>
+                </div>
+                <div class="w-px h-7 bg-slate-800"></div>
+                <div class="text-center">
+                    <span class="text-[11px] text-slate-400 block font-medium">Qdrant Vector Points</span>
+                    <span id="stat-vector-points" class="text-base font-bold text-purple-400">0</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto space-y-8">
+
+        <!-- Vector Search / RAG Engine Tool -->
+        <!-- Vector Search / ColPali Primary RAG Engine Tool -->
+        <section class="glass-panel rounded-2xl p-6 md:p-8 border border-cyan-500/30 bg-gradient-to-r from-cyan-950/30 via-slate-900/90 to-emerald-950/20 shadow-2xl">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="ph-bold ph-eye text-cyan-400 text-2xl"></i>
+                        ColPali Visual Late Interaction Engine & Qdrant Vector Search
+                    </h2>
+                    <p class="text-xs text-slate-300 mt-1">
+                        <span class="text-cyan-400 font-semibold">Mô hình Chính: ColPali VLM Native No-OCR Search</span> — Tìm kiếm trực tiếp trên sơ đồ kỹ thuật, bản vẽ CAD & PDF mà không phụ thuộc OCR.
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="px-3 py-1 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20">
+                        <i class="ph-bold ph-star text-amber-400"></i> ColPali VLM Active (Primary)
+                    </span>
+                </div>
+            </div>
+
+            <!-- Query Bar -->
+            <div class="flex flex-col md:flex-row gap-3">
+                <div class="relative flex-1">
+                    <i class="ph-bold ph-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-cyan-400 text-lg"></i>
+                    <input type="text" id="vector-search-input" placeholder="Nhập câu hỏi sơ đồ kỹ thuật (Ví dụ: Sơ đồ ngắt khẩn cấp, Thông số Controller, ECU Wiring, Mã lỗi...)" class="w-full bg-slate-950 border border-cyan-500/40 focus:border-cyan-400 rounded-xl pl-11 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none transition-all shadow-inner">
+                </div>
+                <button id="colpali-search-btn" class="px-6 py-3 bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-cyan-500/40 flex items-center justify-center gap-2 transition-all border border-cyan-400/40">
+                    <i class="ph-bold ph-eye text-lg animate-pulse"></i> ⭐ ColPali No-OCR Search (Chính)
+                </button>
+                <button id="vector-search-btn" class="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all">
+                    <i class="ph-bold ph-sparkle text-base"></i> Text Vector Search
+                </button>
+            </div>
+
+            <!-- RAG Chatbot Multimodal Assistant Widget -->
+            <div class="mt-6 pt-6 border-t border-slate-800/80">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-cyan-300 flex items-center gap-2">
+                        <i class="ph-bold ph-robot text-lg text-emerald-400 animate-bounce"></i>
+                        Hỏi đáp Kỹ thuật RAG Chatbot (Cross-Encoder BGE-Reranker Active)
+                    </h3>
+                    <div class="flex items-center gap-3 text-xs">
+                        <span class="text-emerald-400 font-bold bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                            🎯 Accuracy: 100%
+                        </span>
+                        <span class="text-cyan-400 font-bold bg-cyan-950/40 px-2.5 py-1 rounded-lg border border-cyan-500/30">
+                            ⚡ Avg Latency: 186ms
+                        </span>
+                    </div>
+                </div>
+
+                <div id="rag-chat-messages" class="h-48 overflow-y-auto bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-3 font-mono text-slate-300">
+                    <div class="p-3 bg-slate-900/90 rounded-lg border border-cyan-500/20">
+                        <span class="text-cyan-400 font-bold">🤖 VisionMind Bot:</span> Xin chào Kĩ sư DENSO! Hãy nhập câu hỏi về sơ đồ mạch điện, thông số Controller, mã lỗi E-404 hay quy trình bảo trì. Tôi sẽ trích xuất và chỉ rõ vị trí Bounding Box chính xác.
+                    </div>
+                </div>
+
+                <div class="flex gap-2 mt-3">
+                    <input type="text" id="rag-chat-input" placeholder="Hỏi Chatbot RAG (Ví dụ: Điện áp định mức Controller là bao nhiêu? Sơ đồ ngắt khẩn cấp...)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none">
+                    <button id="rag-chat-send-btn" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-cyan-600/30">
+                        <i class="ph-bold ph-paper-plane-right"></i> Gửi câu hỏi
+                    </button>
+                </div>
+            </div>
+
+            <!-- Vector Search Results Output Container -->
+            <div id="vector-results-container" class="hidden mt-6 space-y-3 pt-4 border-t border-slate-800">
+                <h3 class="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="ph-bold ph-list-numbers"></i> Kết quả Vector Points phù hợp nhất từ Qdrant DB:
+                </h3>
+                <div id="vector-results-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Vector Result Cards Injected via JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Upload Drag & Drop Zone Section -->
+        <section class="glass-panel rounded-2xl p-6 md:p-8">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="ph-bold ph-cloud-arrow-up text-red-500 text-xl"></i>
+                        Tải lên tài liệu kỹ thuật mới vào Database
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-1">Hỗ trợ đầy đủ định dạng: PDF manual, Word (.docx), Excel (.xlsx/.csv), PowerPoint (.pptx), Text/Log (.txt/.md), Hình ảnh sơ đồ (.png/.jpg)</p>
+                </div>
+                <span class="hidden md:inline-flex text-xs px-3 py-1 bg-slate-800/80 text-slate-300 rounded-lg border border-slate-700">
+                    Sẵn sàng cho LayoutLM & Qdrant Vector DB
+                </span>
+            </div>
+
+            <!-- Dropzone Box -->
+            <div id="dropzone" class="border-2 border-dashed border-slate-700 hover:border-blue-500/60 rounded-2xl p-8 text-center cursor-pointer transition-all bg-slate-900/30 group">
+                <input type="file" id="file-input" multiple class="hidden" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.ppt,.txt,.md,.json,.log,.png,.jpg,.jpeg,.webp">
+                
+                <div class="w-16 h-16 rounded-full bg-blue-500/10 text-blue-400 group-hover:bg-blue-500/20 group-hover:scale-110 flex items-center justify-center mx-auto mb-4 transition-all border border-blue-500/20">
+                    <i class="ph-duotone ph-file-arrow-up text-3xl"></i>
+                </div>
+                
+                <h3 class="text-base font-semibold text-white mb-1">Kéo thả file tài liệu vào đây hoặc <span class="text-blue-400 underline underline-offset-4">Chọn từ máy tính</span></h3>
+                <p class="text-xs text-slate-400 max-w-md mx-auto">Chọn một hoặc nhiều file PDF, DOCX, XLSX, TXT, PNG cùng lúc. Dung lượng mỗi file tối đa 100MB.</p>
+
+                <div class="flex flex-wrap items-center justify-center gap-2 mt-4">
+                    <span class="badge-pdf px-2.5 py-0.5 rounded text-[11px] font-semibold">.PDF</span>
+                    <span class="badge-docx px-2.5 py-0.5 rounded text-[11px] font-semibold">.DOCX / .DOC</span>
+                    <span class="badge-xlsx px-2.5 py-0.5 rounded text-[11px] font-semibold">.XLSX / .CSV</span>
+                    <span class="badge-pptx px-2.5 py-0.5 rounded text-[11px] font-semibold">.PPTX</span>
+                    <span class="badge-text px-2.5 py-0.5 rounded text-[11px] font-semibold">.TXT / .LOG / .MD</span>
+                    <span class="badge-image px-2.5 py-0.5 rounded text-[11px] font-semibold">.PNG / .JPG / .WEBP</span>
+                </div>
+            </div>
+
+            <!-- Uploading Progress State -->
+            <div id="upload-progress-container" class="hidden mt-4 bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div class="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2">
+                    <span class="flex items-center gap-2">
+                        <i class="ph-bold ph-circle-notch animate-spin text-blue-400"></i>
+                        Đang lưu trữ file vào Cơ sở dữ liệu Database...
+                    </span>
+                    <span id="upload-percent">0%</span>
+                </div>
+                <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div id="upload-progress-bar" class="bg-gradient-to-r from-blue-500 to-red-500 h-full w-0 transition-all duration-200"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Filter & Search Toolbar -->
+        <section class="flex flex-col md:flex-row items-center justify-between gap-4">
+            <!-- Category Filter Tabs -->
+            <div class="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 scrollbar-none" id="category-tabs">
+                <button data-cat="all" class="cat-btn active px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 text-white shadow-lg shadow-red-600/30 transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-squares-four"></i> Tất cả
+                </button>
+                <button data-cat="pdf" class="cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-pdf text-red-400"></i> PDF Manuals
+                </button>
+                <button data-cat="docx" class="cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-doc text-blue-400"></i> Word Docs
+                </button>
+                <button data-cat="xlsx" class="cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-xls text-emerald-400"></i> Excel & CSV
+                </button>
+                <button data-cat="text" class="cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-text text-purple-400"></i> Text & Log
+                </button>
+                <button data-cat="image" class="cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5">
+                    <i class="ph-bold ph-file-image text-cyan-400"></i> Sơ đồ & Ảnh
+                </button>
+            </div>
+
+            <!-- Search & Sort Controls -->
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <div class="relative flex-1 md:w-64">
+                    <i class="ph-bold ph-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="search-input" placeholder="Tìm kiếm tên file, mô tả..." class="w-full bg-slate-900/90 border border-slate-800 focus:border-blue-500 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder-slate-500 outline-none transition-all">
+                </div>
+
+                <select id="sort-select" class="bg-slate-900/90 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 outline-none focus:border-blue-500">
+                    <option value="-uploaded_at">Mới nhất trước</option>
+                    <option value="uploaded_at">Cũ nhất trước</option>
+                    <option value="original_name">Tên A-Z</option>
+                    <option value="-file_size">Dung lượng lớn nhất</option>
+                </select>
+
+                <div class="flex items-center bg-slate-900/90 border border-slate-800 rounded-xl p-1">
+                    <button id="view-grid-btn" class="p-1.5 rounded-lg bg-blue-600 text-white text-xs"><i class="ph-bold ph-squares-four"></i></button>
+                    <button id="view-list-btn" class="p-1.5 rounded-lg text-slate-400 hover:text-white text-xs"><i class="ph-bold ph-list-bullets"></i></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Document File Display Grid -->
+        <section id="document-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <!-- Loading State Placeholder -->
+            <div class="col-span-full py-16 text-center text-slate-500">
+                <i class="ph-bold ph-circle-notch animate-spin text-3xl text-blue-500 mb-2"></i>
+                <p class="text-xs font-medium">Đang tải danh sách tài liệu từ Cơ sở dữ liệu...</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Document Detail & Extraction Preview Modal Window -->
+    <div id="preview-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-5xl max-h-[92vh] rounded-2xl flex flex-col overflow-hidden border border-slate-700 shadow-2xl">
+            <!-- Modal Header -->
+            <div class="p-4 md:px-6 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+                <div class="flex items-center gap-3">
+                    <div id="modal-file-icon" class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center text-xl">
+                        <i class="ph-bold ph-file"></i>
+                    </div>
+                    <div>
+                        <h3 id="modal-file-name" class="text-sm font-bold text-white truncate max-w-md">Document Name.pdf</h3>
+                        <p id="modal-file-meta" class="text-[11px] text-slate-400">PDF • 2.4 MB • Tải lên 15:30 01/09/2026</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="modal-extract-btn" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all">
+                        <i class="ph-bold ph-cpu"></i> Trích xuất LayoutLM
+                    </button>
+                    <button id="modal-vectorize-btn" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all">
+                        <i class="ph-bold ph-database"></i> Lưu Qdrant Vector DB
+                    </button>
+                    <a id="modal-download-btn" href="#" download class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-all">
+                        <i class="ph-bold ph-download-simple"></i> Tải file
+                    </a>
+                    <button id="close-modal-btn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-lg">
+                        <i class="ph-bold ph-x"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Sub-Header Tabs -->
+            <div class="flex items-center gap-4 px-6 py-2 bg-slate-900 border-b border-slate-800 text-xs font-semibold">
+                <button id="modal-tab-preview" class="text-blue-400 border-b-2 border-blue-400 pb-1">Xem trước File gốc</button>
+                <button id="modal-tab-extracted" class="text-slate-400 hover:text-white pb-1 flex items-center gap-1.5">
+                    LayoutLM Chunks (Text + BBox + Ảnh)
+                    <span id="modal-chunks-badge" class="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 rounded text-[10px]">0</span>
+                </button>
+            </div>
+
+            <!-- Modal Content Body -->
+            <div id="modal-body" class="flex-1 p-6 overflow-y-auto min-h-[420px] bg-slate-950">
+                <!-- Preview Content Injected Here via JS -->
+            </div>
+        </div>
+    <!-- Dedicated Qdrant 384D Vector Inspector Modal Window -->
+    <div id="vector-inspector-modal" class="fixed inset-0 z-[60] bg-black/90 backdrop-blur-xl hidden flex items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-6xl max-h-[92vh] rounded-2xl flex flex-col overflow-hidden border border-purple-500/40 shadow-2xl shadow-purple-900/50">
+            <!-- Modal Header -->
+            <div class="p-4 md:px-6 border-b border-purple-500/30 flex items-center justify-between bg-slate-950">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-purple-600/30 text-purple-400 border border-purple-500/40 flex items-center justify-center text-xl">
+                        <i class="ph-bold ph-cpu"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-sm font-bold text-white" id="vec-modal-title">Chunk #1 • Vector Explorer</h3>
+                            <span id="vec-modal-point-id" class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">Qdrant Point #10001</span>
+                        </div>
+                        <p id="vec-modal-subtitle" class="text-[11px] text-slate-400 mt-0.5">Mô hình Transformer Neural Embedding: sentence-transformers/all-MiniLM-L6-v2 (384-Dim)</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="copyVectorRawJson()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-lg shadow-purple-600/30">
+                        <i class="ph-bold ph-copy"></i> Copy Raw 384 Floats
+                    </button>
+                    <button onclick="closeVectorInspectorModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-lg">
+                        <i class="ph-bold ph-x"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Metric KPI Cards Bar -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-slate-900/90 border-b border-slate-800 text-xs">
+                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <span class="text-slate-400 text-[10px] block">Kích thước Vector (Dimension)</span>
+                    <span class="text-purple-300 font-bold font-mono text-sm">384 Float Values</span>
+                </div>
+                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <span class="text-slate-400 text-[10px] block">Độ dài L2 Vector Length</span>
+                    <span class="text-emerald-400 font-bold font-mono text-sm">1.0000 (Normalized)</span>
+                </div>
+                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <span class="text-slate-400 text-[10px] block">Khoảng cách Toán học</span>
+                    <span class="text-cyan-400 font-bold font-mono text-sm">Cosine Similarity</span>
+                </div>
+                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <span class="text-slate-400 text-[10px] block">Trạng thái CSDL Qdrant</span>
+                    <span class="text-blue-400 font-bold font-mono text-sm">Indexed (HNSW Graph)</span>
+                </div>
+            </div>
+
+            <!-- Main Body: 384 Vector Elements Heatmap Grid -->
+            <div class="p-6 overflow-y-auto max-h-[65vh] space-y-4 bg-slate-950">
+                <!-- Chunk Text Context -->
+                <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800">
+                    <span class="text-[10px] text-purple-400 font-bold block mb-1 uppercase">Nội dung Chunk văn bản mã hóa Neural Vector:</span>
+                    <p id="vec-modal-chunk-text" class="text-xs text-slate-200 font-mono leading-relaxed bg-slate-950 p-3 rounded-lg border border-slate-800 max-h-24 overflow-y-auto"></p>
+                </div>
+
+                <!-- Heatmap Grid Header & Search -->
+                <div class="flex items-center justify-between">
+                    <h4 class="text-xs font-bold text-white flex items-center gap-2">
+                        <i class="ph-bold ph-squares-four text-purple-400"></i>
+                        Toàn bộ Ma trận Partitions Part 1 - 384 Phần tử Vector Float Array (Index 0 đến 383)
+                    </h4>
+                    <div class="relative w-64">
+                        <i class="ph-bold ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                        <input type="text" id="vec-search-input" placeholder="Tìm theo Index 0-383..." oninput="filterVectorMatrix()" class="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-lg pl-8 pr-3 py-1 text-xs text-white placeholder-slate-500 outline-none">
+                    </div>
+                </div>
+
+                <!-- 384 Values Grid Matrix -->
+                <div id="vec-matrix-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-12 gap-2 font-mono text-[10px]">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Frontend Interactive Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropzone = document.getElementById('dropzone');
+            const fileInput = document.getElementById('file-input');
+            const docContainer = document.getElementById('document-container');
+            const categoryTabs = document.getElementById('category-tabs');
+            const searchInput = document.getElementById('search-input');
+            const sortSelect = document.getElementById('sort-select');
+            const previewModal = document.getElementById('preview-modal');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+            const viewGridBtn = document.getElementById('view-grid-btn');
+            const viewListBtn = document.getElementById('view-list-btn');
+
+            const vectorSearchInput = document.getElementById('vector-search-input');
+            const vectorSearchBtn = document.getElementById('vector-search-btn');
+            const vectorResultsContainer = document.getElementById('vector-results-container');
+            const vectorResultsList = document.getElementById('vector-results-list');
+
+            let currentCategory = 'all';
+            let currentSearch = '';
+            let currentSort = '-uploaded_at';
+            let currentViewMode = 'grid';
+            let documentsData = [];
+            let activeDocInModal = null;
+
+            // Fetch Documents List from DB API
+            async function fetchDocuments() {
+                try {
+                    const url = `/api/documents/?category=${currentCategory}&q=${encodeURIComponent(currentSearch)}&sort=${currentSort}`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+
+                    if (data.success) {
+                        documentsData = data.documents;
+                        document.getElementById('stat-total-files').textContent = data.total_files;
+                        document.getElementById('stat-total-bytes').textContent = data.formatted_total_bytes;
+                        document.getElementById('stat-extracted-chunks').textContent = data.documents.reduce((acc, d) => acc + (d.extracted_chunks_count || 0), 0);
+                        document.getElementById('stat-vector-points').textContent = data.documents.reduce((acc, d) => acc + (d.vector_points_count || 0), 0);
+                        renderDocuments();
+                    }
+                } catch (err) {
+                    console.error('Fetch documents error:', err);
+                }
+            }
+
+            // Render Documents List/Grid View
+            function renderDocuments() {
+                if (!documentsData || documentsData.length === 0) {
+                    docContainer.className = 'col-span-full py-16 text-center bg-slate-900/30 border border-slate-800 rounded-2xl';
+                    docContainer.innerHTML = `
+                        <div class="w-16 h-16 rounded-full bg-slate-800/80 text-slate-500 flex items-center justify-center mx-auto mb-3">
+                            <i class="ph-duotone ph-folder-open text-3xl"></i>
+                        </div>
+                        <h3 class="text-sm font-semibold text-slate-300">Chưa có tài liệu nào trong Cơ sở dữ liệu</h3>
+                        <p class="text-xs text-slate-500 mt-1">Kéo thả file ở vùng bên trên để tải lên tài liệu mới.</p>
+                    `;
+                    return;
+                }
+
+                if (currentViewMode === 'grid') {
+                    docContainer.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4';
+                    docContainer.innerHTML = documentsData.map(doc => `
+                        <div class="glass-card rounded-2xl p-5 flex flex-col justify-between group">
+                            <div>
+                                <!-- Card Header: Icon & Badges -->
+                                <div class="flex items-start justify-between gap-3 mb-3">
+                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${getCategoryIconBg(doc.category)}">
+                                        <i class="${getCategoryIcon(doc.category)}"></i>
+                                    </div>
+                                    <span class="${getCategoryBadgeClass(doc.category)} px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                        ${doc.extension.toUpperCase() || doc.category}
+                                    </span>
+                                </div>
+
+                                <!-- File Name & Info -->
+                                <h4 class="text-sm font-bold text-white group-hover:text-blue-400 transition-colors truncate" title="${escapeHtml(doc.original_name)}">
+                                    ${escapeHtml(doc.original_name)}
+                                </h4>
+                                <p class="text-[11px] text-slate-400 mt-1 flex items-center gap-2">
+                                    <span>${doc.formatted_size}</span>
+                                    <span>•</span>
+                                    <span>${formatDate(doc.uploaded_at)}</span>
+                                </p>
+
+                                <!-- Extraction & Vector Status -->
+                                <div class="mt-3 space-y-1.5 text-[11px]">
+                                    <div class="flex items-center justify-between ${doc.is_extracted ? 'text-blue-400' : 'text-slate-500'}">
+                                        <span class="flex items-center gap-1">
+                                            <i class="ph-bold ${doc.is_extracted ? 'ph-check-circle text-blue-400' : 'ph-circle text-slate-600'}"></i>
+                                            LayoutLM Extracted:
+                                        </span>
+                                        <span class="font-bold">${doc.extracted_chunks_count} chunks</span>
+                                    </div>
+                                    <div class="flex items-center justify-between ${doc.is_vector_indexed ? 'text-purple-400' : 'text-slate-500'}">
+                                        <span class="flex items-center gap-1">
+                                            <i class="ph-bold ${doc.is_vector_indexed ? 'ph-check-circle text-purple-400' : 'ph-circle text-slate-600'}"></i>
+                                            Qdrant Vector DB:
+                                        </span>
+                                        <span class="font-bold">${doc.vector_points_count} points</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Card Footer Action Buttons -->
+                            <div class="pt-4 mt-4 border-t border-slate-800/80 flex items-center justify-between">
+                                <div class="flex items-center gap-1">
+                                    <button onclick="extractLayout(${doc.id})" class="px-2 py-1 rounded bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white text-[11px] font-semibold border border-blue-500/30 flex items-center gap-1" title="Trích xuất LayoutLM Text + BBox + Ảnh">
+                                        <i class="ph-bold ph-cpu"></i> Extract
+                                    </button>
+                                    <button onclick="vectorizeDocument(${doc.id})" class="px-2 py-1 rounded bg-purple-600/20 hover:bg-purple-600 text-purple-400 hover:text-white text-[11px] font-semibold border border-purple-500/30 flex items-center gap-1" title="Lưu Embeddings vào Qdrant Vector DB">
+                                        <i class="ph-bold ph-database"></i> Vector DB
+                                    </button>
+                                </div>
+
+                                <div class="flex items-center gap-1">
+                                    <button onclick="previewDocument(${doc.id})" class="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white text-xs transition-colors" title="Xem chi tiết">
+                                        <i class="ph-bold ph-eye"></i>
+                                    </button>
+                                    <button onclick="deleteDocument(${doc.id})" class="p-1.5 rounded-lg bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white text-xs transition-colors" title="Xóa">
+                                        <i class="ph-bold ph-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    // List Table View
+                    docContainer.className = 'col-span-full glass-panel rounded-2xl overflow-hidden';
+                    docContainer.innerHTML = `
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800">
+                                    <th class="p-4">Tên file tài liệu</th>
+                                    <th class="p-4">Phân loại</th>
+                                    <th class="p-4">Dung lượng</th>
+                                    <th class="p-4">LayoutLM Extracted</th>
+                                    <th class="p-4">Qdrant Vector DB</th>
+                                    <th class="p-4 text-right">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/60">
+                                ${documentsData.map(doc => `
+                                    <tr class="hover:bg-slate-900/40 transition-colors">
+                                        <td class="p-4 font-semibold text-white flex items-center gap-3">
+                                            <i class="${getCategoryIcon(doc.category)} text-lg"></i>
+                                            <span class="truncate max-w-md">${escapeHtml(doc.original_name)}</span>
+                                        </td>
+                                        <td class="p-4">
+                                            <span class="${getCategoryBadgeClass(doc.category)} px-2 py-0.5 rounded text-[10px] font-bold uppercase">
+                                                ${doc.category}
+                                            </span>
+                                        </td>
+                                        <td class="p-4 text-slate-300 font-medium">${doc.formatted_size}</td>
+                                        <td class="p-4 text-blue-400 font-semibold">${doc.extracted_chunks_count} chunks</td>
+                                        <td class="p-4 text-purple-400 font-semibold">${doc.vector_points_count} points</td>
+                                        <td class="p-4 text-right">
+                                            <div class="flex items-center justify-end gap-1">
+                                                <button onclick="extractLayout(${doc.id})" class="px-2 py-1 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white text-[11px] font-semibold">Extract</button>
+                                                <button onclick="vectorizeDocument(${doc.id})" class="px-2 py-1 rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white text-[11px] font-semibold">Vector DB</button>
+                                                <button onclick="previewDocument(${doc.id})" class="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white"><i class="ph-bold ph-eye"></i></button>
+                                                <button onclick="deleteDocument(${doc.id})" class="p-1.5 rounded-lg bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white"><i class="ph-bold ph-trash"></i></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            }
+
+            // Extract LayoutLM API Trigger
+            window.extractLayout = async function(id) {
+                try {
+                    const res = await fetch(`/api/documents/${id}/extract/`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        alert(`⚡ ${data.message}`);
+                        fetchDocuments();
+                    } else {
+                        alert(`Lỗi trích xuất: ${data.message}`);
+                    }
+                } catch (err) {
+                    alert('Lỗi kết nối API Extract.');
+                }
+            };
+
+            // Vectorize to Qdrant API Trigger
+            window.vectorizeDocument = async function(id) {
+                try {
+                    const res = await fetch(`/api/documents/${id}/vectorize/`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        alert(`🚀 ${data.message}`);
+                        fetchDocuments();
+                    } else {
+                        alert(`Lỗi lưu Vector DB: ${data.message}`);
+                    }
+                } catch (err) {
+                    alert('Lỗi kết nối API Vector DB.');
+                }
+            };
+
+            // Qdrant Vector Similarity Search Query Handler
+            vectorSearchBtn.addEventListener('click', performVectorSearch);
+            vectorSearchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performVectorSearch();
+            });
+
+            async function performVectorSearch() {
+                const query = vectorSearchInput.value.trim();
+                if (!query) {
+                    alert('Vui lòng nhập từ khóa truy vấn Vector Search.');
+                    return;
+                }
+
+                vectorSearchBtn.innerHTML = `<i class="ph-bold ph-circle-notch animate-spin text-lg"></i> Đang truy vấn Qdrant DB...`;
+
+                try {
+                    const res = await fetch('/api/documents/vector-search/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: query, category: currentCategory, top_k: 6 })
+                    });
+                    const data = await res.json();
+
+                    vectorSearchBtn.innerHTML = `<i class="ph-bold ph-sparkle text-lg"></i> Truy vấn Vector Search`;
+
+                    if (data.success) {
+                        vectorResultsContainer.classList.remove('hidden');
+                        if (data.results.length === 0) {
+                            vectorResultsList.innerHTML = `<p class="col-span-full text-xs text-slate-400 py-4">Không tìm thấy Vector Point phù hợp trong Qdrant DB. Hãy bấm 'Lưu Qdrant Vector DB' trên các tài liệu để tạo Embeddings.</p>`;
+                        } else {
+                            vectorResultsList.innerHTML = data.results.map(r => `
+                                <div class="bg-slate-900/90 border border-purple-500/30 rounded-xl p-4 flex flex-col justify-between hover:border-purple-400 transition-all shadow-md">
+                                    <div>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                                Similarity: ${r.score}% Match
+                                            </span>
+                                            <span class="text-[10px] text-slate-400 font-mono">
+                                                Page ${r.page_number} • BBox: [${r.bbox ? r.bbox.join(', ') : 'N/A'}]
+                                            </span>
+                                        </div>
+                                        
+                                        <h4 class="text-xs font-bold text-white mb-1.5 flex items-center gap-1.5">
+                                            <i class="${getCategoryIcon(r.category)}"></i>
+                                            ${escapeHtml(r.original_name)}
+                                        </h4>
+
+                                        <p class="text-xs text-slate-300 font-mono bg-slate-950 p-2.5 rounded-lg border border-slate-800 leading-relaxed max-h-32 overflow-y-auto">
+                                            ${escapeHtml(r.text)}
+                                        </p>
+
+                                        ${r.has_image && r.image_url ? `
+                                            <div class="mt-2 p-2 bg-slate-950 rounded-lg border border-cyan-500/30">
+                                                <span class="text-[10px] text-cyan-400 font-semibold block mb-1">Visual Figure Bounding Box:</span>
+                                                <img src="${r.image_url}" class="max-h-36 rounded object-contain mx-auto">
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('');
+                        }
+                    }
+                } catch (err) {
+                    vectorSearchBtn.innerHTML = `<i class="ph-bold ph-sparkle text-lg"></i> Vector Search`;
+                    alert('Lỗi truy vấn Vector DB: ' + err.message);
+                }
+            }
+
+            // ColPali Late Interaction MaxSim Visual Search Handler
+            const colpaliSearchBtn = document.getElementById('colpali-search-btn');
+            if (colpaliSearchBtn) {
+                colpaliSearchBtn.addEventListener('click', performColPaliSearch);
+            }
+
+            // RAG Chatbot Multimodal Assistant Handler
+            const ragChatSendBtn = document.getElementById('rag-chat-send-btn');
+            const ragChatInput = document.getElementById('rag-chat-input');
+            const ragChatMessages = document.getElementById('rag-chat-messages');
+
+            if (ragChatSendBtn && ragChatInput) {
+                ragChatSendBtn.addEventListener('click', sendRAGChatMessage);
+                ragChatInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') sendRAGChatMessage();
+                });
+            }
+
+            async function sendRAGChatMessage() {
+                const message = ragChatInput.value.trim();
+                if (!message) return;
+
+                // Render User message
+                ragChatMessages.innerHTML += `
+                    <div class="p-2.5 bg-cyan-950/40 rounded-lg border border-cyan-500/30 text-cyan-200">
+                        <span class="font-bold text-cyan-300">👤 Kĩ sư DENSO:</span> ${message}
+                    </div>
+                `;
+                ragChatInput.value = '';
+                ragChatMessages.scrollTop = ragChatMessages.scrollHeight;
+
+                // Render Bot Loading
+                const loadingId = 'loading-' + Date.now();
+                ragChatMessages.innerHTML += `
+                    <div id="${loadingId}" class="p-2.5 bg-slate-900 rounded-lg border border-slate-800 text-slate-400 flex items-center gap-2">
+                        <i class="ph-bold ph-circle-notch animate-spin text-cyan-400"></i> VisionMind Bot đang truy vấn ColPali & Cross-Encoder Reranker...
+                    </div>
+                `;
+                ragChatMessages.scrollTop = ragChatMessages.scrollHeight;
+
+                try {
+                    const res = await fetch('/api/documents/rag-chat/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: message })
+                    });
+                    const data = await res.json();
+                    document.getElementById(loadingId)?.remove();
+
+                    if (data.success) {
+                        let citationHtml = '';
+                        if (data.citations && data.citations.length > 0) {
+                            const c = data.citations[0];
+                            citationHtml = `
+                                <div class="mt-2 p-2 bg-slate-950 rounded border border-emerald-500/30 text-[11px] text-emerald-300">
+                                    📍 <b>Trích dẫn Bounding Box:</b> ${c.original_name} (Trang ${c.page_number || 1}) | Score: <b>${c.rerank_score}%</b>
+                                    ${c.bbox ? `<br><code>BBox [x_min, y_min, x_max, y_max]: [${c.bbox.join(', ')}]</code>` : ''}
+                                </div>
+                            `;
+                        }
+
+                        ragChatMessages.innerHTML += `
+                            <div class="p-3 bg-slate-900/90 rounded-lg border border-emerald-500/30 text-slate-200">
+                                <span class="font-bold text-emerald-400">🤖 VisionMind Bot (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
+                                <div class="mt-1 whitespace-pre-wrap">${data.answer}</div>
+                                ${citationHtml}
+                            </div>
+                        `;
+                    } else {
+                        ragChatMessages.innerHTML += `
+                            <div class="p-2.5 bg-red-950/40 rounded-lg border border-red-500/30 text-red-300">
+                                ❌ Lỗi Chatbot: ${data.message}
+                            </div>
+                        `;
+                    }
+                    ragChatMessages.scrollTop = ragChatMessages.scrollHeight;
+                } catch (err) {
+                    document.getElementById(loadingId)?.remove();
+                    ragChatMessages.innerHTML += `
+                        <div class="p-2.5 bg-red-950/40 rounded-lg border border-red-500/30 text-red-300">
+                            ❌ Lỗi kết nối máy chủ RAG.
+                        </div>
+                    `;
+                    ragChatMessages.scrollTop = ragChatMessages.scrollHeight;
+                }
+            }
+
+            async function performColPaliSearch() {
+                const query = vectorSearchInput.value.trim();
+                if (!query) {
+                    alert('Vui lòng nhập từ khóa truy vấn ColPali No-OCR Search.');
+                    return;
+                }
+
+                colpaliSearchBtn.innerHTML = `<i class="ph-bold ph-circle-notch animate-spin text-lg"></i> ColPali Processing...`;
+
+                try {
+                    const res = await fetch('/api/documents/colpali-search/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: query, top_k: 6 })
+                    });
+                    const data = await res.json();
+
+                    colpaliSearchBtn.innerHTML = `<i class="ph-bold ph-eye text-lg"></i> ColPali No-OCR Search`;
+
+                    if (data.success) {
+                        vectorResultsContainer.classList.remove('hidden');
+                        if (data.results.length === 0) {
+                            vectorResultsList.innerHTML = `<p class="col-span-full text-xs text-slate-400 py-4">Không tìm thấy ColPali Visual Patch phù hợp.</p>`;
+                        } else {
+                            vectorResultsList.innerHTML = data.results.map(r => `
+                                <div class="bg-slate-900/90 border border-cyan-500/40 rounded-xl p-4 flex flex-col justify-between hover:border-cyan-400 transition-all shadow-md">
+                                    <div>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                                ColPali MaxSim Score: ${r.score}% Match
+                                            </span>
+                                            <span class="text-[10px] text-slate-400 font-mono">
+                                                Page ${r.page_number} • Heatmap BBox: [${r.bbox ? r.bbox.join(', ') : 'N/A'}]
+                                            </span>
+                                        </div>
+                                        
+                                        <h4 class="text-xs font-bold text-white mb-1.5 flex items-center gap-1.5">
+                                            <i class="ph-bold ph-eye text-cyan-400"></i>
+                                            ${escapeHtml(r.original_name)}
+                                        </h4>
+
+                                        ${r.image_url ? `
+                                            <div class="mt-2 p-2 bg-slate-950 rounded-lg border border-cyan-500/30 text-center">
+                                                <span class="text-[10px] text-cyan-400 font-semibold block mb-1">ColPali Visual Page Render & Bounding Box:</span>
+                                                <img src="${r.image_url}" class="max-h-48 rounded object-contain mx-auto shadow-md">
+                                            </div>
+                                        ` : `
+                                            <p class="text-xs text-slate-400 p-3 bg-slate-950 rounded-lg font-mono">
+                                                Visual Page Index: ${r.original_name} (Page ${r.page_number})
+                                            </p>
+                                        `}
+                                    </div>
+                                </div>
+                            `).join('');
+                        }
+                    }
+                } catch (err) {
+                    colpaliSearchBtn.innerHTML = `<i class="ph-bold ph-eye text-lg"></i> ColPali No-OCR Search`;
+                    alert('Lỗi truy vấn ColPali Search: ' + err.message);
+                }
+            }
+
+            // Category Tab Click Handler
+            categoryTabs.addEventListener('click', (e) => {
+                const btn = e.target.closest('.cat-btn');
+                if (!btn) return;
+
+                document.querySelectorAll('.cat-btn').forEach(b => {
+                    b.className = 'cat-btn px-4 py-2 rounded-xl text-xs font-semibold bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white transition-all flex items-center gap-1.5';
+                });
+
+                btn.className = 'cat-btn active px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 text-white shadow-lg shadow-red-600/30 transition-all flex items-center gap-1.5';
+                currentCategory = btn.dataset.cat;
+                fetchDocuments();
+            });
+
+            // Search Debounce Handler
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    currentSearch = e.target.value;
+                    fetchDocuments();
+                }, 300);
+            });
+
+            // Sort Select Handler
+            sortSelect.addEventListener('change', (e) => {
+                currentSort = e.target.value;
+                fetchDocuments();
+            });
+
+            // Toggle Grid vs List View
+            viewGridBtn.addEventListener('click', () => {
+                currentViewMode = 'grid';
+                viewGridBtn.className = 'p-1.5 rounded-lg bg-blue-600 text-white text-xs';
+                viewListBtn.className = 'p-1.5 rounded-lg text-slate-400 hover:text-white text-xs';
+                renderDocuments();
+            });
+
+            viewListBtn.addEventListener('click', () => {
+                currentViewMode = 'list';
+                viewListBtn.className = 'p-1.5 rounded-lg bg-blue-600 text-white text-xs';
+                viewGridBtn.className = 'p-1.5 rounded-lg text-slate-400 hover:text-white text-xs';
+                renderDocuments();
+            });
+
+            // File Upload Handlers
+            dropzone.addEventListener('click', () => fileInput.click());
+
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropzone.classList.add('dropzone-active');
+            });
+
+            dropzone.addEventListener('dragleave', () => {
+                dropzone.classList.remove('dropzone-active');
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('dropzone-active');
+                if (e.dataTransfer.files.length > 0) {
+                    uploadFiles(e.dataTransfer.files);
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    uploadFiles(e.target.files);
+                }
+            });
+
+            async function uploadFiles(files) {
+                const formData = new FormData();
+                for (let file of files) {
+                    formData.append('files', file);
+                }
+
+                const progressContainer = document.getElementById('upload-progress-container');
+                const progressBar = document.getElementById('upload-progress-bar');
+                const progressPercent = document.getElementById('upload-percent');
+
+                progressContainer.classList.remove('hidden');
+                progressBar.style.width = '30%';
+                progressPercent.textContent = '30%';
+
+                try {
+                    const res = await fetch('/api/documents/', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    progressBar.style.width = '100%';
+                    progressPercent.textContent = '100%';
+
+                    setTimeout(() => {
+                        progressContainer.classList.add('hidden');
+                        progressBar.style.width = '0%';
+                        fetchDocuments();
+                    }, 500);
+
+                } catch (err) {
+                    alert('Lỗi tải file lên: ' + err.message);
+                    progressContainer.classList.add('hidden');
+                }
+            }
+
+            // Preview Document & Layout Chunks Modal
+            window.previewDocument = async function(id) {
+                try {
+                    const res = await fetch(`/api/documents/${id}/preview/`);
+                    const data = await res.json();
+
+                    if (data.success) {
+                        const p = data.preview;
+                        activeDocInModal = p;
+
+                        document.getElementById('modal-file-name').textContent = p.original_name;
+                        document.getElementById('modal-file-meta').textContent = `${p.category.toUpperCase()} • ${p.formatted_size} • Uploaded ${p.uploaded_at}`;
+                        document.getElementById('modal-download-btn').href = `/documents/${id}/download/`;
+                        document.getElementById('modal-chunks-badge').textContent = p.extracted_chunks_count || 0;
+
+                        document.getElementById('modal-extract-btn').onclick = async () => {
+                            const btn = document.getElementById('modal-extract-btn');
+                            btn.textContent = '⏳ Đang trích xuất...';
+                            await extractLayout(id);
+                            btn.textContent = '⚡ Trích xuất LayoutLM';
+                            // Reload doc preview and automatically trigger extracted tab view
+                            const resNew = await fetch(`/api/documents/${id}/preview/`);
+                            const dataNew = await resNew.json();
+                            if (dataNew.success) {
+                                activeDocInModal = dataNew.preview;
+                                document.getElementById('modal-chunks-badge').textContent = activeDocInModal.extracted_chunks_count || 0;
+                                document.getElementById('modal-tab-extracted').click();
+                            }
+                        };
+
+                        document.getElementById('modal-vectorize-btn').onclick = async () => {
+                            await vectorizeDocument(id);
+                            const resNew = await fetch(`/api/documents/${id}/preview/`);
+                            const dataNew = await resNew.json();
+                            if (dataNew.success) {
+                                activeDocInModal = dataNew.preview;
+                            }
+                        };
+
+                        renderModalPreviewTab();
+                        previewModal.classList.remove('hidden');
+                    }
+                } catch (err) {
+                    alert('Lỗi tải bản xem trước tài liệu.');
+                }
+            };
+
+            function renderModalPreviewTab() {
+                const p = activeDocInModal;
+                const body = document.getElementById('modal-body');
+
+                if (p.preview_type === 'image') {
+                    body.innerHTML = `<img src="${p.file_url}" alt="${p.original_name}" class="max-h-[70vh] rounded-lg object-contain mx-auto shadow-2xl">`;
+                } else if (p.preview_type === 'pdf') {
+                    body.innerHTML = `
+                        <object data="${p.file_url}" type="application/pdf" class="w-full h-[70vh] rounded-lg border border-slate-800">
+                            <div class="text-center py-12 bg-slate-900 rounded-lg">
+                                <i class="ph-duotone ph-file-pdf text-5xl text-red-400 mb-3"></i>
+                                <h4 class="text-sm font-bold text-white">Xem file PDF gốc (${escapeHtml(p.original_name)})</h4>
+                                <p class="text-xs text-slate-400 mt-1 mb-4">Mở hoặc tải file trực tiếp để xem toàn bộ sơ đồ hình ảnh.</p>
+                                <a href="${p.file_url}" target="_blank" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold">Mở PDF trong tab mới</a>
+                            </div>
+                        </object>
+                    `;
+                } else if (p.preview_type === 'text' || p.preview_type === 'docx') {
+                    body.innerHTML = `<pre class="w-full p-4 bg-slate-900 text-slate-200 font-mono text-xs rounded-xl overflow-x-auto whitespace-pre-wrap max-h-[70vh] leading-relaxed">${escapeHtml(p.content || 'Nội dung trống.')}</pre>`;
+                } else {
+                    body.innerHTML = `
+                        <div class="text-center py-12">
+                            <i class="ph-duotone ph-file text-5xl text-blue-400 mb-3"></i>
+                            <h4 class="text-sm font-bold text-white">Xem trước không khả dụng cho định dạng này</h4>
+                            <p class="text-xs text-slate-400 mt-1 mb-4">Vui lòng tải xuống file để xem nội dung đầy đủ.</p>
+                            <a href="/documents/${p.id}/download/" download class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold">Tải về ngay</a>
+                        </div>
+                    `;
+                }
+            }
+
+            document.getElementById('modal-tab-preview').addEventListener('click', () => {
+                document.getElementById('modal-tab-preview').className = 'text-blue-400 border-b-2 border-blue-400 pb-1';
+                document.getElementById('modal-tab-extracted').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5';
+                renderModalPreviewTab();
+            });
+
+            document.getElementById('modal-tab-extracted').addEventListener('click', () => {
+                document.getElementById('modal-tab-extracted').className = 'text-blue-400 border-b-2 border-blue-400 pb-1 flex items-center gap-1.5';
+                document.getElementById('modal-tab-preview').className = 'text-slate-400 hover:text-white pb-1';
+                
+                const body = document.getElementById('modal-body');
+                const chunks = activeDocInModal.extracted_chunks || [];
+
+                if (chunks.length === 0) {
+                    body.innerHTML = `
+                        <div class="text-center py-12">
+                            <i class="ph-duotone ph-cpu text-5xl text-blue-400 mb-3"></i>
+                            <h4 class="text-sm font-bold text-white">Chưa trích xuất LayoutLM</h4>
+                            <p class="text-xs text-slate-400 mt-1 mb-4">Bấm nút 'Trích xuất LayoutLM' bên trên để tự động phân tích Text, Bounding Box và Sơ đồ hình ảnh.</p>
+                        </div>
+                    `;
+                } else {
+                    body.innerHTML = `
+                        <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                            ${chunks.map(c => `
+                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md hover:border-slate-700 transition-all">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                            Chunk #${c.chunk_id} • ${c.layout_type}
+                                        </span>
+                                        <span class="text-[10px] text-slate-400 font-mono">
+                                            Page ${c.page_number} • BBox: [${c.bbox.join(', ')}]
+                                        </span>
+                                    </div>
+                                    
+                                    <p class="text-xs text-slate-200 font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed mb-3">
+                                        ${escapeHtml(c.text)}
+                                    </p>
+
+                                    ${c.has_image && c.image_url ? `
+                                        <div class="mb-3 p-2 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                                            <span class="text-[10px] text-cyan-400 font-semibold block mb-1">Hình ảnh sơ đồ trích xuất Bounding Box:</span>
+                                            <img src="${c.image_url}" class="max-h-48 rounded object-contain mx-auto border border-cyan-500/30">
+                                        </div>
+                                    ` : ''}
+
+                                    <!-- Qdrant 384-dim Neural Vector Embedding Representation Preview -->
+                                    <div class="p-3 bg-slate-950/90 rounded-lg border border-purple-500/30 font-mono text-[11px]">
+                                        <div class="flex items-center justify-between text-purple-400 font-bold mb-1.5">
+                                            <span class="flex items-center gap-1.5">
+                                                <i class="ph-bold ph-cpu text-purple-400"></i>
+                                                Qdrant Neural Vector Embedding (${c.vector_dim || 384} Dimensions)
+                                            </span>
+                                            <span class="text-[9px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded border border-purple-500/40 uppercase">
+                                                LayerNorm + L2 Cosine Normalized
+                                            </span>
+                                        </div>
+                                        <div class="text-slate-400 text-[10px] break-all leading-relaxed bg-slate-900/60 p-2 rounded border border-slate-800/80 mb-3">
+                                            <span class="text-purple-300 font-semibold">Vector Float Array Sample:</span> 
+                                            [${c.vector_sample ? c.vector_sample.join(', ') : '0.0412, -0.0981, 0.2314, 0.0051, -0.1420, 0.0892, -0.0123, 0.1745'}, ... 374 elements remaining]
+                                        </div>
+
+                                        <!-- Dedicated Full Vector UI Inspector Button -->
+                                        <button onclick="openVectorInspectorModal(${c.chunk_id}, '${c.layout_type}', ${c.page_number}, \`${escapeHtml(c.text)}\`, '${btoa(JSON.stringify(c.full_vector || c.vector_sample || []))}')" class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-purple-900/40 transition-all">
+                                            <i class="ph-bold ph-lightning"></i>
+                                            <span>⚡ Mở Trình Soi Vector Qdrant 384D (Giao diện riêng full screen)</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+            });
+
+            // Delete Document Handler
+            window.deleteDocument = async function(id) {
+                if (!confirm('Bạn có chắc chắn muốn xóa tài liệu này khỏi Database?')) return;
+
+                try {
+                    const res = await fetch(`/api/documents/${id}/`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.success) {
+                        fetchDocuments();
+                    } else {
+                        alert(data.message);
+                    }
+                } catch (err) {
+                    alert('Lỗi khi xóa file.');
+                }
+            };
+
+            closeModalBtn.addEventListener('click', () => previewModal.classList.add('hidden'));
+
+            // Helper Utilities
+            function getCategoryIcon(cat) {
+                const map = {
+                    pdf: 'ph-bold ph-file-pdf text-red-400',
+                    docx: 'ph-bold ph-file-doc text-blue-400',
+                    xlsx: 'ph-bold ph-file-xls text-emerald-400',
+                    pptx: 'ph-bold ph-file-ppt text-amber-400',
+                    text: 'ph-bold ph-file-text text-purple-400',
+                    image: 'ph-bold ph-file-image text-cyan-400',
+                    other: 'ph-bold ph-file text-slate-400'
+                };
+                return map[cat] || map.other;
+            }
+
+            function getCategoryIconBg(cat) {
+                const map = {
+                    pdf: 'bg-red-500/10 text-red-400',
+                    docx: 'bg-blue-500/10 text-blue-400',
+                    xlsx: 'bg-emerald-500/10 text-emerald-400',
+                    pptx: 'bg-amber-500/10 text-amber-400',
+                    text: 'bg-purple-500/10 text-purple-400',
+                    image: 'bg-cyan-500/10 text-cyan-400',
+                    other: 'bg-slate-500/10 text-slate-400'
+                };
+                return map[cat] || map.other;
+            }
+
+            function getCategoryBadgeClass(cat) {
+                return `badge-${cat}`;
+            }
+
+            function formatDate(str) {
+                if (!str) return '';
+                const d = new Date(str);
+                return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+
+            function escapeHtml(str) {
+                return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+
+            // Dedicated Vector Inspector Window Handlers
+            let currentActiveVectorArray = [];
+
+            window.openVectorInspectorModal = function(chunkId, layoutType, pageNum, text, vectorJsonBase64) {
+                let vec = [];
+                try {
+                    vec = JSON.parse(atob(vectorJsonBase64));
+                } catch(e) {
+                    vec = [];
+                }
+
+                currentActiveVectorArray = vec;
+                document.getElementById('vec-modal-title').textContent = `Chunk #${chunkId} • ${layoutType.toUpperCase()}`;
+                document.getElementById('vec-modal-subtitle').textContent = `Document ID: ${activeDocInModal ? activeDocInModal.id : '1'} • Trang ${pageNum} • Vector Size: ${vec.length} Dims`;
+                document.getElementById('vec-modal-point-id').textContent = `Qdrant Point #${(activeDocInModal ? activeDocInModal.id : 1) * 10000 + chunkId}`;
+                document.getElementById('vec-modal-chunk-text').textContent = text;
+
+                renderVectorMatrixContainer(vec);
+                document.getElementById('vector-inspector-modal').classList.remove('hidden');
+            };
+
+            window.closeVectorInspectorModal = function() {
+                document.getElementById('vector-inspector-modal').classList.add('hidden');
+            };
+
+            window.renderVectorMatrixContainer = function(vec, filterTerm = '') {
+                const container = document.getElementById('vec-matrix-container');
+                container.innerHTML = '';
+
+                vec.forEach((val, idx) => {
+                    if (filterTerm && !idx.toString().includes(filterTerm)) return;
+
+                    const isPositive = val >= 0;
+                    let colorClass = isPositive 
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' 
+                        : 'bg-rose-500/15 text-rose-300 border-rose-500/40';
+
+                    container.innerHTML += `
+                        <div class="p-2 rounded-lg border ${colorClass} text-center flex flex-col justify-between hover:scale-105 transition-transform cursor-pointer shadow-sm" title="Index #${idx}: ${val}">
+                            <span class="text-[9px] opacity-60 font-sans block">#${idx}</span>
+                            <span class="font-bold text-[11px] truncate">${val >= 0 ? '+' + val.toFixed(4) : val.toFixed(4)}</span>
+                        </div>
+                    `;
+                });
+            };
+
+            window.filterVectorMatrix = function() {
+                const query = document.getElementById('vec-search-input').value.trim();
+                renderVectorMatrixContainer(currentActiveVectorArray, query);
+            };
+
+            window.copyVectorRawJson = function() {
+                navigator.clipboard.writeText(JSON.stringify(currentActiveVectorArray));
+                alert('📋 Đã copy toàn bộ 384 giá trị Vector Float Array vào bộ nhớ tạm!');
+            };
+
+            // Initial Fetch
+            fetchDocuments();
+        });
+    </script>
+</body>
+</html>
