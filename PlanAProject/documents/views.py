@@ -421,21 +421,10 @@ class RAGChatbotAPIView(APIView):
 
             latency_ms = round((time.time() - start_time) * 1000, 2)
 
-            # 4. Synthesize Answer with Citation Metadata
-            answer_parts = []
-            if top_citations:
-                best = top_citations[0]
-                answer_parts.append(f"Dựa trên tài liệu **{best.get('original_name', 'Tài liệu DENSO')}** (Độ tin cậy Rerank: {best.get('rerank_score', 95.0)}%):")
-                
-                snippet = best.get('text') or best.get('markdown') or ''
-                if snippet:
-                    answer_parts.append(f"\n```markdown\n{snippet[:400]}\n```")
-                else:
-                    answer_parts.append("\nTìm thấy vị trí sơ đồ bản vẽ kỹ thuật phù hợp nhất trên tài liệu.")
-            else:
-                answer_parts.append("Hệ thống VisionMind RAG chưa tìm thấy tài liệu chứa thông số trùng khớp hoàn toàn. Vui lòng tải thêm bản vẽ/datasheet lên.")
-
-            generated_answer = "\n".join(answer_parts)
+            # 4. Synthesize Answer using Qwen-2.5 LLM Service
+            from documents.services.qwen_service import QwenChatbotService
+            qwen_engine = QwenChatbotService()
+            generated_answer = qwen_engine.generate_answer(query, top_citations)
 
             return Response({
                 'success': True,
