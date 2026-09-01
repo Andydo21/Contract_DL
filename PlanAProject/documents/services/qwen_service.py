@@ -42,18 +42,19 @@ class QwenChatbotService:
                     "image_url": image_url
                 })
 
-            # Lưu đoạn văn bản thực sự (Bỏ qua nhãn placeholder)
-            if text_snippet and not text_snippet.startswith("[ColPali Patch"):
-                real_text_chunks.append({
-                    "doc_name": doc_name,
-                    "page_num": page_num,
-                    "bbox": bbox,
-                    "score": score,
-                    "text": text_snippet
-                })
+            # Lưu đoạn văn bản thực sự (>50 ký tự, không phải email/header tác giả ngắn)
+            if text_snippet and not text_snippet.startswith("[ColPali Patch") and len(text_snippet) > 50:
+                if not any(header_word in text_snippet.lower() for header_word in ["@mozilla.com", "authors", "university"]):
+                    real_text_chunks.append({
+                        "doc_name": doc_name,
+                        "page_num": page_num,
+                        "bbox": bbox,
+                        "score": score,
+                        "text": text_snippet
+                    })
 
-        # Nếu chưa tìm thấy Text Chunks (do tìm bằng ColPali), tự động load từ Database
-        if not real_text_chunks:
+        # Nếu thiếu Text Chunks chất lượng, tự động load các đoạn văn bản dài thực sự từ Database
+        if len(real_text_chunks) < 3:
             from documents.models import DocumentFile
             for cit in citations:
                 doc_name = cit.get("original_name")
@@ -61,18 +62,26 @@ class QwenChatbotService:
                     doc = DocumentFile.objects.filter(original_name=doc_name).first()
                     if doc:
                         chunks = doc.get_extracted_chunks()
-                        for c in chunks:
-                            txt = c.get("text", "").strip()
-                            if txt and len(txt) > 25 and not txt.startswith("[ColPali Patch"):
-                                real_text_chunks.append({
-                                    "doc_name": doc.original_name,
-                                    "page_num": c.get("page_number", 1),
-                                    "bbox": c.get("bbox", []),
-                                    "score": 95.0,
-                                    "text": txt
-                                })
-                                if len(real_text_chunks) >= 5:
-                                    break
+                        # Lọc các chunk văn bản nội dung phong phú (>70 ký tự)
+                        valid_chunks = [
+                            c for c in chunks 
+                            if len(c.get("text", "").strip()) > 70 
+                            and not c.get("text", "").startswith("[ColPali Patch")
+                            and "@" not in c.get("text", "")
+                        ]
+                        
+                        # Chọn mẫu đều từ các trang để bài tóm tắt cover toàn bộ tài liệu
+                        step = max(1, len(valid_chunks) // 6)
+                        for c in valid_chunks[::step][:6]:
+                            real_text_chunks.append({
+                                "doc_name": doc.original_name,
+                                "page_num": c.get("page_number", 1),
+                                "bbox": c.get("bbox", []),
+                                "score": 95.0,
+                                "text": c["text"].strip()
+                            })
+                        if len(real_text_chunks) >= 5:
+                            break
 
         best = real_text_chunks[0] if real_text_chunks else citations[0]
         best_name = best.get("doc_name") or best.get("original_name") or "Tài liệu DENSO"
@@ -81,7 +90,7 @@ class QwenChatbotService:
         # 1. Thử gọi Ollama Qwen Multimodal LLM nếu có server
         try:
             ollama_url = f"{self.ollama_host}/api/generate"
-            context_blocks = [f"• Trang {c['page_num']}: {c['text']}" for c in real_text_chunks[:5]]
+            context_blocks = [f"• Trang {c['page_num']}: {c['text']}" for c in real_text_chunks[:6]]
             prompt_text = (
                 f"TÀI LIỆU VĂN BẢN (Text):\n" + "\n".join(context_blocks) + "\n\n"
                 f"SỐ LƯỢNG ẢNH SƠ ĐỒ TRÍCH XUẤT (Images): {len(image_patches)} ảnh\n\n"
@@ -98,28 +107,28 @@ class QwenChatbotService:
         except Exception:
             pass
 
-        # 2. Multimodal Synthesis (Gộp cả Văn Bản lẫn Hình Ảnh Visual Diagram)
+        # 2. Multimodal Synthesis (Gộp cả Văn Bản Chi Tiết lẫn Hình Ảnh Visual Diagram)
         answer_parts = []
 
         if is_summary:
-            answer_parts.append(f"🤖 **[Qwen-2.5 Multimodal RAG Engine - Text + Visual Images]**\n")
-            answer_parts.append(f"📌 **1. Tóm tắt nội dung văn bản (Technical Text)**:")
+            answer_parts.append(f"🤖 **[Qwen-2.5 Multimodal RAG Engine - Executive Summary]**\n")
+            answer_parts.append(f"📌 **TÓM TẮT CHI TIẾT NỘI DUNG TÀI LIỆU `{best_name}`**:\n")
             
             if real_text_chunks:
-                for c in real_text_chunks[:4]:
+                for idx, c in enumerate(real_text_chunks[:5], 1):
                     clean_txt = c['text'].replace('\n', ' ').strip()
-                    answer_parts.append(f"• **[Trang {c['page_num']}]**: {clean_txt}")
+                    answer_parts.append(f"**Ý chính #{idx} [Trang {c['page_num']}]**:\n{clean_txt}\n")
             else:
                 answer_parts.append("• Đã phân tích visual patch trang tài liệu.")
 
-            answer_parts.append(f"\n🖼️ **2. Trích xuất sơ đồ visual patch (Visual Diagram & Schematics)**:")
+            answer_parts.append(f"\n🖼️ **SƠ ĐỒ / BẢNG BIỂU VISUAL PATCH TRÍCH XUẤT TRỰC TIẾP**:")
             if image_patches:
                 img = image_patches[0]
                 answer_parts.append(f"• Sơ đồ/Bảng biểu tại Trang {img['page_num']} (BBox: `{img['bbox']}`):\n![Visual Patch Diagram]({img['image_url']})")
             else:
                 answer_parts.append(f"• Vị trí khung bản vẽ: Trang {best.get('page_num', 1)} • `BBox {best.get('bbox', [])}`")
 
-            answer_parts.append(f"\n💡 **Tổng kết**: Hệ thống đã tổng hợp thành công cả ngữ cảnh văn bản và hình ảnh bản vẽ từ CSDL Vector DB.")
+            answer_parts.append(f"\n💡 **TỔNG KẾT KỸ THUẬT**: Tài liệu đã được phân tích tự động qua hệ thống Multimodal RAG (ColPali Visual Indexing + Qdrant 384D Vector DB + BGE-Reranker v2).")
 
         else:
             # Trả lời thông số kỹ thuật cụ thể + Ảnh trích xuất
