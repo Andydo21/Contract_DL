@@ -768,18 +768,23 @@
                         let citationHtml = '';
                         if (data.citations && data.citations.length > 0) {
                             const c = data.citations[0];
+                            const imgHtml = c.image_url ? `<div class="mt-2"><img src="${c.image_url}" class="max-h-48 rounded-lg border border-cyan-500/40 shadow-lg object-contain bg-slate-900" alt="Visual Patch Diagram"></div>` : '';
                             citationHtml = `
-                                <div class="mt-2 p-2 bg-slate-950 rounded border border-emerald-500/30 text-[11px] text-emerald-300">
+                                <div class="mt-2 p-2 bg-slate-950 rounded-lg border border-emerald-500/30 text-[11px] text-emerald-300">
                                     📍 <b>Trích dẫn Bounding Box:</b> ${c.original_name} (Trang ${c.page_number || 1}) | Score: <b>${c.rerank_score}%</b>
                                     ${c.bbox ? `<br><code>BBox [x_min, y_min, x_max, y_max]: [${c.bbox.join(', ')}]</code>` : ''}
+                                    ${imgHtml}
                                 </div>
                             `;
                         }
 
+                        // Format Markdown images: ![alt](url) -> <img src="url">
+                        let formattedAnswer = data.answer.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="my-2"><img src="$2" class="max-h-56 rounded-lg border border-cyan-400/50 shadow-md object-contain bg-slate-950" alt="$1"></div>');
+
                         ragChatMessages.innerHTML += `
                             <div class="p-3 bg-slate-900/90 rounded-lg border border-emerald-500/30 text-slate-200">
-                                <span class="font-bold text-emerald-400">🤖 VisionMind Bot (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
-                                <div class="mt-1 whitespace-pre-wrap">${data.answer}</div>
+                                <span class="font-bold text-emerald-400">🤖 Qwen-2.5 Multimodal Bot (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
+                                <div class="mt-1 whitespace-pre-wrap">${formattedAnswer}</div>
                                 ${citationHtml}
                             </div>
                         `;
