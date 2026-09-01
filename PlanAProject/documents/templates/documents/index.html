@@ -175,9 +175,12 @@
                 <div class="flex items-center justify-between mb-3">
                     <h3 class="text-sm font-bold text-cyan-300 flex items-center gap-2">
                         <i class="ph-bold ph-robot text-lg text-emerald-400 animate-bounce"></i>
-                        Hỏi đáp Kỹ thuật RAG Chatbot (Cross-Encoder BGE-Reranker Active)
+                        Hỏi đáp Kỹ thuật Qwen-2.5 RAG Chatbot Engine (Qdrant 384D Vector DB Active)
                     </h3>
                     <div class="flex items-center gap-3 text-xs">
+                        <span class="text-purple-300 font-bold bg-purple-950/60 px-2.5 py-1 rounded-lg border border-purple-500/40">
+                            🧠 Qwen-2.5 LLM Active
+                        </span>
                         <span class="text-emerald-400 font-bold bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-500/30">
                             🎯 Accuracy: 100%
                         </span>
@@ -189,14 +192,14 @@
 
                 <div id="rag-chat-messages" class="h-48 overflow-y-auto bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-3 font-mono text-slate-300">
                     <div class="p-3 bg-slate-900/90 rounded-lg border border-cyan-500/20">
-                        <span class="text-cyan-400 font-bold">🤖 VisionMind Bot:</span> Xin chào Kĩ sư DENSO! Hãy nhập câu hỏi về sơ đồ mạch điện, thông số Controller, mã lỗi E-404 hay quy trình bảo trì. Tôi sẽ trích xuất và chỉ rõ vị trí Bounding Box chính xác.
+                        <span class="text-cyan-400 font-bold">🤖 Qwen-2.5 RAG Bot:</span> Xin chào Kĩ sư DENSO! Tôi là Qwen-2.5 RAG Assistant. Hãy nhập câu hỏi về sơ đồ mạch điện, thông số Controller, mã lỗi E-404 hay quy trình bảo trì. Tôi sẽ đọc hiểu từ Qdrant Vector DB và trích xuất vị trí Bounding Box chính xác!
                     </div>
                 </div>
 
                 <div class="flex gap-2 mt-3">
-                    <input type="text" id="rag-chat-input" placeholder="Hỏi Chatbot RAG (Ví dụ: Điện áp định mức Controller là bao nhiêu? Sơ đồ ngắt khẩn cấp...)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none">
-                    <button id="rag-chat-send-btn" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-cyan-600/30">
-                        <i class="ph-bold ph-paper-plane-right"></i> Gửi câu hỏi
+                    <input type="text" id="rag-chat-input" placeholder="Hỏi Qwen-2.5 RAG Bot (Ví dụ: Điện áp định mức Controller là bao nhiêu? Sơ đồ ngắt khẩn cấp...)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none">
+                    <button id="rag-chat-send-btn" class="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-purple-900/40">
+                        <i class="ph-bold ph-paper-plane-right"></i> Gửi câu hỏi Qwen
                     </button>
                 </div>
             </div>
