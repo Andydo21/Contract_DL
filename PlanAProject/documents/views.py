@@ -414,10 +414,34 @@ class RAGChatbotAPIView(APIView):
             # Tổng hợp Candidates (Vector + ColPali + Graph)
             all_candidates = colpali_results + vec_results + graph_citations
 
+            # 2.6 Check database for specific document text chunks (Summarization & Deep Lookup)
+            from documents.models import DocumentFile
+            matching_docs = DocumentFile.objects.filter(is_extracted=True)
+            for doc in matching_docs:
+                doc_name_lower = doc.original_name.lower()
+                doc_stem = doc_name_lower.split('.')[0] # e.g. "industrial_research_paper"
+                doc_stem_space = doc_stem.replace('_', ' ') # e.g. "industrial research paper"
+                
+                query_lower = query.lower()
+                if doc_name_lower in query_lower or doc_stem in query_lower or doc_stem_space in query_lower:
+                    extracted_chunks = doc.get_extracted_chunks()
+                    for chunk in extracted_chunks[:15]: # Take top text chunks
+                        all_candidates.append({
+                            "original_name": doc.original_name,
+                            "category": doc.category,
+                            "chunk_id": chunk.get("chunk_id", 0),
+                            "layout_type": chunk.get("layout_type", "text"),
+                            "text": chunk.get("text", ""),
+                            "bbox": chunk.get("bbox", []),
+                            "page_number": chunk.get("page_number", 1),
+                            "score": 98.0, # High score for explicit document match
+                            "file_url": doc.file.url if doc.file else ""
+                        })
+
             # 3. BGE-Reranker Cross-Encoder Reranking
             from documents.services.reranker_service import BGERerankerService
             reranker = BGERerankerService()
-            top_citations = reranker.rerank(query, all_candidates, top_k=3)
+            top_citations = reranker.rerank(query, all_candidates, top_k=5)
 
             latency_ms = round((time.time() - start_time) * 1000, 2)
 
