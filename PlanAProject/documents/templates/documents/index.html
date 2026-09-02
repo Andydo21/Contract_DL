@@ -1075,29 +1075,126 @@
                         </div>
                     `;
                 } else {
-                    body.innerHTML = `
-                        <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
-                            ${chunks.map(c => `
-                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md hover:border-slate-700 transition-all">
+                    const totalTables = chunks.filter(c => (c.layout_type || '').toLowerCase().includes('table')).length;
+                    const totalImages = chunks.filter(c => {
+                        const lt = (c.layout_type || '').toLowerCase();
+                        return !lt.includes('table') && (lt.includes('figure') || lt.includes('picture') || lt.includes('image') || lt.includes('diagram') || (c.has_image && c.image_url));
+                    }).length;
+                    const totalBlocks = chunks.length;
+
+                    function renderChunks(filterMode = 'all') {
+                        let targetChunks = chunks;
+                        if (filterMode === 'tables') {
+                            targetChunks = chunks.filter(c => (c.layout_type || '').toLowerCase().includes('table'));
+                        } else if (filterMode === 'images') {
+                            targetChunks = chunks.filter(c => {
+                                const lt = (c.layout_type || '').toLowerCase();
+                                return !lt.includes('table') && (lt.includes('figure') || lt.includes('picture') || lt.includes('image') || lt.includes('diagram') || (c.has_image && c.image_url));
+                            });
+                        }
+
+                        if (targetChunks.length === 0) {
+                            return `<div class="p-8 text-center bg-slate-900/80 rounded-xl border border-slate-800 text-slate-400 text-xs">Không có phần tử nào phù hợp bộ lọc.</div>`;
+                        }
+
+                        return targetChunks.map(c => {
+                            const lt = (c.layout_type || '').toLowerCase();
+                            const isTable = lt.includes('table');
+                            const isImage = !isTable && (lt.includes('figure') || lt.includes('picture') || lt.includes('image') || lt.includes('diagram') || (c.has_image && c.image_url));
+
+                            let cardStyle = 'bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md hover:border-slate-700 transition-all';
+                            if (isTable) {
+                                cardStyle = 'bg-gradient-to-r from-emerald-950/50 via-slate-900 to-slate-900 border-2 border-emerald-500/80 rounded-2xl p-5 shadow-2xl shadow-emerald-900/50 ring-1 ring-emerald-500/40 transition-all';
+                            } else if (isImage) {
+                                cardStyle = 'bg-gradient-to-r from-cyan-950/50 via-slate-900 to-slate-900 border-2 border-cyan-500/80 rounded-2xl p-5 shadow-2xl shadow-cyan-900/50 ring-1 ring-cyan-500/40 transition-all';
+                            }
+
+                            let badgeStyle = 'px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/20 text-blue-300 border border-blue-500/30';
+                            let badgeText = `Chunk #${c.chunk_id} • ${c.layout_type}`;
+
+                            if (isTable) {
+                                badgeStyle = 'px-3 py-1 rounded-lg text-[11px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/60 flex items-center gap-1.5 shadow-md shadow-emerald-500/20';
+                                badgeText = `<i class="ph-bold ph-table text-emerald-400 text-sm"></i> ⭐ BẢNG BIỂU DO SURYA VISION PHÁT HIỆN (${c.layout_type.toUpperCase()})`;
+                            } else if (isImage) {
+                                badgeStyle = 'px-3 py-1 rounded-lg text-[11px] font-extrabold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/60 flex items-center gap-1.5 shadow-md shadow-cyan-500/20';
+                                badgeText = `<i class="ph-bold ph-image text-cyan-400 text-sm"></i> 🖼️ SƠ ĐỒ / HÌNH ẢNH DO LAYOUTLM PHÁT HIỆN (${c.layout_type.toUpperCase()})`;
+                            }
+
+                            let noticeBanner = '';
+                            if (isTable) {
+                                noticeBanner = `
+                                    <div class="mb-3 p-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-xs text-emerald-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-inner">
+                                        <span class="font-bold flex items-center gap-2 text-emerald-300">
+                                            <i class="ph-bold ph-star text-amber-400 text-base animate-pulse"></i>
+                                            📊 MÔ HÌNH SURYA TABLE DETECTOR: Phát hiện Bảng Thông Số Kỹ Thuật (Trang ${c.page_number})
+                                        </span>
+                                        <span class="px-2.5 py-0.5 rounded text-[10px] font-bold bg-emerald-900/80 text-emerald-300 border border-emerald-400/40 font-mono">
+                                            SURYA TABLE MATCH
+                                        </span>
+                                    </div>
+                                `;
+                            } else if (isImage) {
+                                noticeBanner = `
+                                    <div class="mb-3 p-3 bg-cyan-950/80 border border-cyan-500/50 rounded-xl text-xs text-cyan-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-inner">
+                                        <span class="font-bold flex items-center gap-2 text-cyan-300">
+                                            <i class="ph-bold ph-eye text-cyan-400 text-base animate-pulse"></i>
+                                            🖼️ MÔ HÌNH LAYOUTLM PURE VISION: Phát hiện Sơ đồ & Bản vẽ Kỹ thuật (Trang ${c.page_number})
+                                        </span>
+                                        <span class="px-2.5 py-0.5 rounded text-[10px] font-bold bg-cyan-900/80 text-cyan-300 border border-cyan-400/40 font-mono">
+                                            LAYOUTLM FIGURE DETECTED
+                                        </span>
+                                    </div>
+                                `;
+                            }
+
+                            let imageContainer = '';
+                            if (c.has_image && c.image_url) {
+                                if (isTable) {
+                                    imageContainer = `
+                                        <div class="mb-3 p-3 bg-slate-950 rounded-xl border-2 border-emerald-500/50 text-center shadow-lg">
+                                            <span class="text-xs text-emerald-400 font-bold block mb-1.5 flex items-center justify-center gap-1">
+                                                <i class="ph-bold ph-crop text-emerald-400"></i> Visual Bounding Box Bảng biểu do Surya khoanh vùng viền đỏ:
+                                            </span>
+                                            <img src="${c.image_url}" class="max-h-64 rounded-lg object-contain mx-auto border-2 border-emerald-400 shadow-xl">
+                                        </div>
+                                    `;
+                                } else if (isImage) {
+                                    imageContainer = `
+                                        <div class="mb-3 p-3 bg-slate-950 rounded-xl border-2 border-cyan-500/50 text-center shadow-lg">
+                                            <span class="text-xs text-cyan-400 font-bold block mb-1.5 flex items-center justify-center gap-1">
+                                                <i class="ph-bold ph-crop text-cyan-400"></i> Visual Bounding Box Sơ đồ do LayoutLM khoanh vùng viền đỏ:
+                                            </span>
+                                            <img src="${c.image_url}" class="max-h-64 rounded-lg object-contain mx-auto border-2 border-cyan-400 shadow-xl">
+                                        </div>
+                                    `;
+                                } else {
+                                    imageContainer = `
+                                        <div class="mb-3 p-2 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                                            <span class="text-[10px] text-slate-400 font-semibold block mb-1">Hình ảnh trích xuất Bounding Box:</span>
+                                            <img src="${c.image_url}" class="max-h-48 rounded object-contain mx-auto border border-slate-700">
+                                        </div>
+                                    `;
+                                }
+                            }
+
+                            return `
+                                <div class="${cardStyle}">
                                     <div class="flex items-center justify-between mb-2">
-                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                            Chunk #${c.chunk_id} • ${c.layout_type}
+                                        <span class="${badgeStyle}">
+                                            ${badgeText}
                                         </span>
                                         <span class="text-[10px] text-slate-400 font-mono">
                                             Page ${c.page_number} • BBox: [${c.bbox.join(', ')}]
                                         </span>
                                     </div>
                                     
+                                    ${noticeBanner}
+
                                     <p class="text-xs text-slate-200 font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed mb-3">
                                         ${escapeHtml(c.text)}
                                     </p>
 
-                                    ${c.has_image && c.image_url ? `
-                                        <div class="mb-3 p-2 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                                            <span class="text-[10px] text-cyan-400 font-semibold block mb-1">Hình ảnh sơ đồ trích xuất Bounding Box:</span>
-                                            <img src="${c.image_url}" class="max-h-48 rounded object-contain mx-auto border border-cyan-500/30">
-                                        </div>
-                                    ` : ''}
+                                    ${imageContainer}
 
                                     <!-- Qdrant 384-dim Neural Vector Embedding Representation Preview -->
                                     <div class="p-3 bg-slate-950/90 rounded-lg border border-purple-500/30 font-mono text-[11px]">
@@ -1122,9 +1219,87 @@
                                         </button>
                                     </div>
                                 </div>
-                            `).join('')}
+                            `;
+                        }).join('');
+                    }
+
+                    body.innerHTML = `
+                        <div class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+                            <!-- Surya Pure Vision Pipeline Showcase Banner -->
+                            <div class="bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/40 border border-cyan-500/40 rounded-2xl p-5 shadow-xl">
+                                <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4 mb-4">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/30">
+                                            <i class="ph-bold ph-aperture animate-spin-slow"></i>
+                                        </div>
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <span class="px-2.5 py-0.5 text-[10px] font-extrabold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded-full uppercase">SURYA & LAYOUTLM PURE VISION ACTIVE</span>
+                                                <span class="text-xs text-emerald-400 font-semibold flex items-center gap-1"><i class="ph-bold ph-check-circle"></i> Pure PyTorch Neural Model</span>
+                                            </div>
+                                            <h3 class="text-sm font-bold text-white mt-1">Phát hiện Bố cục, Sơ đồ Hình ảnh (LayoutLM) & Bảng biểu (Surya Vision)</h3>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2 text-xs">
+                                        <div class="bg-slate-950 px-3 py-2 rounded-xl border border-slate-800 text-center">
+                                            <span class="text-[10px] text-slate-400 block">Tổng Layout</span>
+                                            <span class="font-bold text-blue-400 text-sm">${totalBlocks}</span>
+                                        </div>
+                                        <div class="bg-slate-950 px-3 py-2 rounded-xl border border-emerald-500/40 text-center">
+                                            <span class="text-[10px] text-emerald-400 font-bold block">Bảng (Surya)</span>
+                                            <span class="font-bold text-emerald-300 text-sm">${totalTables}</span>
+                                        </div>
+                                        <div class="bg-slate-950 px-3 py-2 rounded-xl border border-cyan-500/40 text-center">
+                                            <span class="text-[10px] text-cyan-400 font-bold block">Sơ đồ (LayoutLM)</span>
+                                            <span class="font-bold text-cyan-300 text-sm">${totalImages}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+                                    <span class="text-slate-300 font-bold flex items-center gap-2">
+                                        <i class="ph-bold ph-funnel text-cyan-400"></i> Lọc phần tử theo Mô hình AI:
+                                    </span>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <button id="filter-all-chunks-btn" onclick="window.filterModalChunks('all')" class="px-3 py-1.5 rounded-lg font-bold text-xs bg-blue-600 text-white shadow-md transition-all">
+                                            Tất cả Chunks (${totalBlocks})
+                                        </button>
+                                        <button id="filter-tables-chunks-btn" onclick="window.filterModalChunks('tables')" class="px-3 py-1.5 rounded-lg font-bold text-xs bg-emerald-950 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-800 transition-all flex items-center gap-1">
+                                            <i class="ph-bold ph-star text-amber-400"></i> ⭐ Bảng biểu (Surya: ${totalTables})
+                                        </button>
+                                        <button id="filter-images-chunks-btn" onclick="window.filterModalChunks('images')" class="px-3 py-1.5 rounded-lg font-bold text-xs bg-cyan-950 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-800 transition-all flex items-center gap-1">
+                                            <i class="ph-bold ph-image text-cyan-400"></i> 🖼️ Sơ đồ/Ảnh (LayoutLM: ${totalImages})
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="chunks-list-container">
+                                ${renderChunks('all')}
+                            </div>
                         </div>
                     `;
+
+                    window.filterModalChunks = function(mode) {
+                        const container = document.getElementById('chunks-list-container');
+                        const allBtn = document.getElementById('filter-all-chunks-btn');
+                        const tablesBtn = document.getElementById('filter-tables-chunks-btn');
+                        const imagesBtn = document.getElementById('filter-images-chunks-btn');
+
+                        allBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition-all';
+                        tablesBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-emerald-950 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-800 transition-all flex items-center gap-1';
+                        imagesBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-cyan-950 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-800 transition-all flex items-center gap-1';
+
+                        if (mode === 'tables') {
+                            tablesBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-emerald-600 text-white shadow-lg shadow-emerald-600/40 border border-emerald-400 flex items-center gap-1 transition-all';
+                        } else if (mode === 'images') {
+                            imagesBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-cyan-600 text-white shadow-lg shadow-cyan-600/40 border border-cyan-400 flex items-center gap-1 transition-all';
+                        } else {
+                            allBtn.className = 'px-3 py-1.5 rounded-lg font-bold text-xs bg-blue-600 text-white shadow-md transition-all';
+                        }
+
+                        container.innerHTML = renderChunks(mode);
+                    };
                 }
             });
 

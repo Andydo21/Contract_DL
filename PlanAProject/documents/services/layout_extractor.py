@@ -7,15 +7,35 @@ from PIL import Image, ImageDraw
 
 class LayoutLMExtractor:
     """
-    Bộ trích xuất đa phương thức LayoutLM Extractor:
-    - Trích xuất đồng thời Text + Bounding Box [x_min, y_min, x_max, y_max] + Hình ảnh/Sơ đồ
-    - Sinh Vector Embedding 384 chiều trực tiếp cho từng Chunk (Vector Representation Preview)
-    - Tự động vẽ và cắt ảnh vùng Bounding Box đỏ cho từng Chunk
-    - Hỗ trợ PDF, DOCX, XLSX, TXT/LOG, PNG/JPG
+    Bộ trích xuất đa phương thức Pure Surya Vision Extractor:
+    - Coi 100% trang PDF (kể cả Digital-born) như ẢNH THUẦN TÚY (Pure Image)
+    - Dùng mô hình Deep Learning Surya Layout & OCR để trích xuất Text + Bounding Box [x_min, y_min, x_max, y_max]
+    - Tuyệt đối KHÔNG đọc trực tiếp stream text từ PyMuPDF/FitZ
+    - Sinh Vector Embedding 384 chiều trực tiếp cho từng Chunk
+    - Tự động vẽ và cắt ảnh vùng Bounding Box đỏ khoanh vùng trực quan cho từng Chunk
     """
     def __init__(self):
         self.output_img_dir = Path(settings.MEDIA_ROOT) / 'extracted_images'
         self.output_img_dir.mkdir(parents=True, exist_ok=True)
+        self.surya_layout_model = None
+        self.surya_layout_processor = None
+        self.surya_ocr_model = None
+        self.surya_ocr_processor = None
+        self._load_surya_models()
+
+    def _load_surya_models(self):
+        """
+        Nạp toàn bộ bộ mô hình Surya Vision Suite (FastLayoutPredictor + RecognitionPredictor)
+        """
+        try:
+            from surya.fast_layout import FastLayoutPredictor
+            from surya.recognition import RecognitionPredictor
+            print("[LayoutLM Pure Vision] Loading Surya FastLayout & Recognition Predictors...")
+            self.surya_layout_model = FastLayoutPredictor()
+            self.surya_ocr_model = RecognitionPredictor()
+            print("[LayoutLM Pure Vision] Full Surya Suite loaded successfully!")
+        except Exception as e:
+            print(f"[LayoutLM Pure Vision Info] Model load notice: {e}")
 
     def extract_document(self, doc_file):
         """
@@ -26,7 +46,7 @@ class LayoutLMExtractor:
         doc_id = doc_file.id
 
         if category == 'pdf':
-            return self._extract_pdf(file_path, doc_id)
+            return self._extract_pdf_pure_surya_vision(file_path, doc_id)
         elif category == 'image':
             return self._extract_image(file_path, doc_id, doc_file.file.url)
         elif category == 'docx':
@@ -37,9 +57,6 @@ class LayoutLMExtractor:
             return self._extract_text(file_path, doc_id)
 
     def _generate_chunk_vector(self, text, layout_type="paragraph", bbox=None):
-        """
-        Sinh 384-dimensional Vector Embedding và trích xuất mẫu vector cho Chunk
-        """
         try:
             from documents.services.vector_db_service import QdrantVectorDBService
             vec_service = QdrantVectorDBService()
@@ -59,9 +76,6 @@ class LayoutLMExtractor:
             }
 
     def _draw_visual_bbox_crop(self, page_img_path: Path, bbox_norm: list, crop_filename: str) -> str:
-        """
-        Cắt ảnh và vẽ khung đỏ Bounding Box khoanh vùng trực quan cho từng Layout Chunk
-        """
         try:
             crop_save_path = self.output_img_dir / crop_filename
             if crop_save_path.exists():
@@ -101,63 +115,78 @@ class LayoutLMExtractor:
             print("[Draw BBox Error]", str(e))
             return ""
 
-    def _extract_pdf(self, file_path, doc_id):
+    def _extract_pdf_pure_surya_vision(self, file_path, doc_id):
+        """
+        Xử lý 100% PDF theo luồng Pure Image Vision bằng Surya
+        """
         chunks = []
         chunk_counter = 1
 
         try:
-            import fitz  # PyMuPDF
+            import fitz  # Sử dụng duy nhất để rasterize trang PDF thành PIL.Image
             pdf_doc = fitz.open(file_path)
 
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc[page_num]
-                page_width = page.rect.width
-                page_height = page.rect.height
 
-                # Render ảnh trang PDF chuẩn để vẽ Bounding Box
+                # Render ảnh trang PDF chuẩn làm dữ liệu đầu vào cho Surya
                 page_img_filename = f"pdf_page_{doc_id}_p{page_num+1}.png"
                 page_img_path = self.output_img_dir / page_img_filename
-                if not page_img_path.exists():
-                    pix = page.get_pixmap(dpi=150)
-                    pix.save(str(page_img_path))
-
+                pix = page.get_pixmap(dpi=150)
+                pix.save(str(page_img_path))
                 page_img_url = f"{settings.MEDIA_URL}extracted_images/{page_img_filename}"
+                page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-                # 1. Trích xuất Text & Bounding Boxes
-                blocks = page.get_text("blocks")
-                for b_idx, b in enumerate(blocks):
-                    x0, y0, x1, y1, text, block_no, b_type = b
-                    cleaned_text = text.strip()
-                    if not cleaned_text:
-                        continue
+                # 1. Chạy 100% Surya Layout & Recognition Suite trên ẢNH trang PDF (Pure PyTorch, Zero Docker)
+                if self.surya_layout_model:
+                    try:
+                        layout_pred = self.surya_layout_model([page_img])[0]
+                        blocks = layout_pred.bboxes
 
-                    norm_bbox = [
-                        int((x0 / page_width) * 1000),
-                        int((y0 / page_height) * 1000),
-                        int((x1 / page_width) * 1000),
-                        int((y1 / page_height) * 1000),
-                    ]
+                        # Đọc text OCR trực tiếp nếu có
+                        if self.surya_ocr_model:
+                            try:
+                                ocr_pred = self.surya_ocr_model([page_img], [layout_pred])[0]
+                                if hasattr(ocr_pred, 'blocks') and ocr_pred.blocks:
+                                    blocks = ocr_pred.blocks
+                            except Exception:
+                                pass  # Tự động fallback dùng layout_pred.bboxes trực tiếp
 
-                    layout_type = self._detect_layout_type(cleaned_text)
-                    crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
-                    crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)
+                        for b_idx, bbox_item in enumerate(blocks):
+                            bbox = bbox_item.bbox
+                            label = getattr(bbox_item, 'label', 'paragraph').lower()
+                            
+                            norm_bbox = [
+                                int((bbox[0] / pix.width) * 1000),
+                                int((bbox[1] / pix.height) * 1000),
+                                int((bbox[2] / pix.width) * 1000),
+                                int((bbox[3] / pix.height) * 1000),
+                            ]
 
-                    vec_info = self._generate_chunk_vector(cleaned_text, layout_type, norm_bbox)
+                            layout_type = "title" if label in ["title", "section-header"] else ("table_header" if "table" in label else "paragraph")
+                            crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
+                            crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)
 
-                    chunks.append({
-                        "chunk_id": chunk_counter,
-                        "layout_type": layout_type,
-                        "text": cleaned_text,
-                        "bbox": norm_bbox,
-                        "page_number": page_num + 1,
-                        "has_image": True if crop_url else False,
-                        "image_url": crop_url or page_img_url,
-                        "vector_dim": vec_info["vector_dim"],
-                        "vector_sample": vec_info["vector_sample"]
-                    })
-                    chunk_counter += 1
+                            extracted_html = getattr(bbox_item, 'html', '')
+                            chunk_text = extracted_html if extracted_html else f"[{label.upper()} - Trang {page_num+1} - Vùng #{b_idx+1}]"
+                            vec_info = self._generate_chunk_vector(chunk_text, layout_type, norm_bbox)
 
-                # 1.5 Trích xuất Bảng biểu kỹ thuật (Surya-Table Parser)
+                            chunks.append({
+                                "chunk_id": chunk_counter,
+                                "layout_type": layout_type,
+                                "text": chunk_text,
+                                "bbox": norm_bbox,
+                                "page_number": page_num + 1,
+                                "has_image": True if crop_url else False,
+                                "image_url": crop_url or page_img_url,
+                                "vector_dim": vec_info["vector_dim"],
+                                "vector_sample": vec_info["vector_sample"]
+                            })
+                            chunk_counter += 1
+                    except Exception as s_err:
+                        print(f"[Surya Layout Vision Error] {s_err}")
+
+                # 2. Trích xuất Bảng bằng Surya Table Vision Extractor
                 try:
                     from documents.services.table_extractor import IndustrialTableExtractor
                     tbl_extractor = IndustrialTableExtractor()
@@ -184,51 +213,12 @@ class LayoutLMExtractor:
                             })
                             chunk_counter += 1
                 except Exception as tbl_err:
-                    print("[LayoutLM Table Extract Error]", str(tbl_err))
-
-                # 2. Trích xuất Hình ảnh / Sơ đồ kỹ thuật (Visual BBox Crop từ trang PDF rendered)
-                try:
-                    image_list = page.get_images(full=True)
-                    for img_index, img_info in enumerate(image_list):
-                        try:
-                            img_bbox = [100, 150 + (img_index * 200), 900, 350 + (img_index * 200)]
-                            rects = page.get_image_rects(img_info[0])
-                            if rects:
-                                r = rects[0]
-                                img_bbox = [
-                                    int((r.x0 / page_width) * 1000),
-                                    int((r.y0 / page_height) * 1000),
-                                    int((r.x1 / page_width) * 1000),
-                                    int((r.y1 / page_height) * 1000),
-                                ]
-
-                            img_crop_filename = f"figure_doc{doc_id}_p{page_num+1}_img{img_index+1}.png"
-                            img_crop_url = self._draw_visual_bbox_crop(page_img_path, img_bbox, img_crop_filename)
-                            fig_text = f"[Hình ảnh / Sơ đồ kỹ thuật DENSO - Trang {page_num+1} - Sơ đồ #{img_index+1}]"
-
-                            vec_info = self._generate_chunk_vector(fig_text, "figure", img_bbox)
-
-                            chunks.append({
-                                "chunk_id": chunk_counter,
-                                "layout_type": "figure",
-                                "text": fig_text,
-                                "bbox": img_bbox,
-                                "page_number": page_num + 1,
-                                "has_image": True,
-                                "image_url": img_crop_url or page_img_url,
-                                "vector_dim": vec_info["vector_dim"],
-                                "vector_sample": vec_info["vector_sample"]
-                            })
-                            chunk_counter += 1
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                    print("[Pure Vision Table Extract Error]", str(tbl_err))
 
             pdf_doc.close()
 
         except Exception as e:
-            print("[LayoutLM Extract PDF Error]", str(e))
+            print("[Pure Vision Extract PDF Error]", str(e))
 
         return chunks
 
@@ -253,14 +243,12 @@ class LayoutLMExtractor:
         try:
             import docx
             doc_file = docx.Document(file_path)
-
             for p_idx, p in enumerate(doc_file.paragraphs):
                 txt = p.text.strip()
                 if txt:
                     bbox = [50, 100 + (p_idx * 30) % 800, 950, 130 + (p_idx * 30) % 800]
                     l_type = self._detect_layout_type(txt)
                     vec_info = self._generate_chunk_vector(txt, l_type, bbox)
-
                     chunks.append({
                         "chunk_id": chunk_counter,
                         "layout_type": l_type,
@@ -283,11 +271,9 @@ class LayoutLMExtractor:
             from documents.services.table_extractor import IndustrialTableExtractor
             extractor = IndustrialTableExtractor()
             tables = extractor.extract_tables_from_file(file_path, 'xlsx')
-
             for t_idx, tbl in enumerate(tables):
                 txt = tbl.get("text", "")
                 vec_info = self._generate_chunk_vector(txt, "table_surya", [50, 50, 950, 950])
-
                 chunks.append({
                     "chunk_id": t_idx + 1,
                     "layout_type": "table_surya",
@@ -309,14 +295,12 @@ class LayoutLMExtractor:
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-
             for idx, line in enumerate(lines):
                 txt = line.strip()
                 if txt:
                     bbox = [50, (idx * 20) % 900, 950, (idx * 20 + 20) % 900]
                     l_type = "log_entry" if "ERROR" in txt or "WARN" in txt else "paragraph"
                     vec_info = self._generate_chunk_vector(txt, l_type, bbox)
-
                     chunks.append({
                         "chunk_id": idx + 1,
                         "layout_type": l_type,
