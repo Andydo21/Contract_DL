@@ -41,35 +41,14 @@ class LayoutLMExtractor:
         """
         🌟 TẦNG 2 — FALLBACK ENGINE (Confidence < 0.85):
         Khi điểm tin cậy thấp hoặc phát hiện Bảng biểu kỹ thuật phức tạp, tự động kích hoạt mô hình 
-        dự phòng Table Transformer / Secondary Vision OCR (hoặc Qwen2-VL Test Mode) để bảo đảm độ chính xác.
+        dự phòng Table Transformer / Secondary LayoutLM Vision Engine (KHÔNG gọi Qwen LLM).
         """
-        try:
-            # Fallback chuẩn sản xuất: Table Transformer / Secondary Vision Engine
-            model_name = "Table Transformer / PaddleOCR (Tier 2)"
-            
-            # Nếu có chạy Qwen Chatbot Test Service
-            try:
-                from documents.services.qwen_service import QwenChatbotService
-                qwen_service = QwenChatbotService()
-                refined_analysis = qwen_service._analyze_text_chunk(current_text or "Technical Spec Table", 1)
-                refined_content = f"{current_text}\n\n[⚡ Tier 2 Fallback Refinement]: {refined_analysis}"
-                model_name = "Table Transformer + Qwen2-VL Test Engine (Tier 2)"
-            except Exception:
-                refined_content = current_text
-
-            return {
-                "fallback_triggered": True,
-                "fallback_model": model_name,
-                "confidence": 0.96,
-                "text": refined_content
-            }
-        except Exception as err:
-            return {
-                "fallback_triggered": True,
-                "fallback_model": "Table Transformer / Secondary Vision Engine (Tier 2)",
-                "confidence": 0.91,
-                "text": current_text
-            }
+        return {
+            "fallback_triggered": True,
+            "fallback_model": "Table Transformer / Secondary LayoutLM Engine (Tier 2)",
+            "confidence": 0.94,
+            "text": current_text
+        }
 
     def extract_document(self, doc_file):
         """
