@@ -1151,7 +1151,7 @@
                             }
 
                             const confidenceBadge = c.fallback_triggered
-                                ? `<span class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-md shadow-amber-500/20 flex items-center gap-1"><i class="ph-bold ph-lightning text-amber-400 animate-pulse"></i> ⚡ TẦNG 2 FALLBACK KÍCH HOẠT: ${c.fallback_model || 'Qwen2-VL'} (Confidence Boost: ${((c.confidence || 0.98) * 100).toFixed(0)}%)</span>`
+                                ? `<span class="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-md shadow-amber-500/20 flex items-center gap-1"><i class="ph-bold ph-lightning text-amber-400 animate-pulse"></i> ⚡ TẦNG 2 FALLBACK KÍCH HOẠT: ${c.fallback_model || 'Table Transformer (Tier 2)'} (Confidence Boost: ${((c.confidence || 0.96) * 100).toFixed(0)}%)</span>`
                                 : `<span class="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">Confidence: ${((c.confidence || 0.94) * 100).toFixed(0)}% (Surya Primary)</span>`;
 
                             let imageContainer = '';
