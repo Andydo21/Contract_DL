@@ -1162,23 +1162,30 @@
                     <div class="space-y-5">
                         <!-- Top Toolbar Controls -->
                         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
-                            <div class="flex items-center gap-3">
+                            <div class="flex items-center gap-3 flex-wrap">
                                 <span class="font-bold text-white flex items-center gap-1.5 text-sm">
                                     <i class="ph-bold ph-crop text-red-400 text-base"></i> Full Annotated PDF Page & Bounding Boxes:
                                 </span>
-                                <span class="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold">
-                                    🔴 100% Python Rendered BBoxes: ${allPageChunks.length}
+                                <span id="bbox-search-count-badge" class="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold">
+                                    🔴 BBoxes: ${allPageChunks.length}
                                 </span>
                                 <span class="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono font-semibold">
                                     🔵 ColPali Visual Patches: 16
                                 </span>
                             </div>
 
-                            <div class="flex items-center gap-3">
-                                <span class="text-slate-400 font-medium">Chọn trang:</span>
-                                <select id="visual-page-select" onchange="window.changeVisualPage(this.value)" class="bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 font-bold outline-none cursor-pointer">
-                                    ${pageOptions}
-                                </select>
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <div class="relative">
+                                    <input type="text" id="visual-bbox-search-input" oninput="window.filterVisualBboxChunks(this.value)"
+                                           placeholder="🔍 Tìm kiếm từ khóa Bounding Box..."
+                                           class="bg-slate-950 border border-slate-700 focus:border-red-500 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-56 md:w-72 font-mono shadow-inner transition-all">
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-slate-400 font-medium">Trang:</span>
+                                    <select id="visual-page-select" onchange="window.changeVisualPage(this.value)" class="bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 font-bold outline-none cursor-pointer">
+                                        ${pageOptions}
+                                    </select>
+                                </div>
                             </div>
                         </div>
 
@@ -1214,7 +1221,7 @@
                                 ${allPageChunks.length === 0 ? `
                                     <div class="p-8 text-center text-slate-400 text-xs font-mono">Không có Bounding Box nào ở Trang ${selectedPage}.</div>
                                 ` : `
-                                    <div class="space-y-4 pr-1">
+                                    <div id="bbox-snippets-container" class="space-y-4 pr-1">
                                         ${allPageChunks.map(c => {
                                             const isTable = (c.layout_type || '').toLowerCase().includes('table');
                                             const isImage = !isTable && ((c.layout_type || '').toLowerCase().includes('figure') || (c.has_image && c.image_url));
@@ -1230,7 +1237,8 @@
                                             }
 
                                             return `
-                                                <div class="p-3 rounded-xl border ${borderStyle} shadow-lg transition-all hover:scale-[1.01]">
+                                                <div class="bbox-snippet-card p-3 rounded-xl border ${borderStyle} shadow-lg transition-all hover:scale-[1.01]"
+                                                     data-text="${escapeHtml(c.text)}" data-type="${escapeHtml(c.layout_type)}">
                                                     <div class="flex items-center justify-between gap-2 mb-2">
                                                         <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeBg} border font-mono">
                                                             🔴 BBox #${c.chunk_id} • ${c.layout_type}
@@ -1247,7 +1255,7 @@
                                                         </div>
                                                     ` : ''}
 
-                                                    <p class="text-xs text-slate-300 font-mono bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed max-h-24 overflow-y-auto">
+                                                    <p class="bbox-text-content text-xs text-slate-300 font-mono bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed max-h-24 overflow-y-auto">
                                                         ${escapeHtml(c.text)}
                                                     </p>
                                                 </div>
@@ -1279,6 +1287,32 @@
                         </div>
                     </div>
                 `;
+
+                window.filterVisualBboxChunks = function(query) {
+                    const q = (query || '').toLowerCase().trim();
+                    const cards = document.querySelectorAll('.bbox-snippet-card');
+                    let matchCount = 0;
+
+                    cards.forEach(card => {
+                        const text = (card.getAttribute('data-text') || '').toLowerCase();
+                        const type = (card.getAttribute('data-type') || '').toLowerCase();
+                        const matches = !q || text.includes(q) || type.includes(q);
+
+                        card.style.display = matches ? 'block' : 'none';
+                        if (matches) matchCount++;
+                    });
+
+                    const countBadge = document.getElementById('bbox-search-count-badge');
+                    if (countBadge) {
+                        if (q) {
+                            countBadge.innerHTML = `🔍 Tìm thấy: ${matchCount}/${cards.length}`;
+                            countBadge.className = 'px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold';
+                        } else {
+                            countBadge.innerHTML = `🔴 BBoxes: ${cards.length}`;
+                            countBadge.className = 'px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold';
+                        }
+                    }
+                };
 
                 window.toggleVisualBboxLayer = function() {
                     const showSuryaVal = document.getElementById('chk-surya-bbox')?.checked;
