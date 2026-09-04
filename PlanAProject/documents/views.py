@@ -217,14 +217,15 @@ class VectorSearchAPIView(APIView):
     def post(self, request):
         query = request.data.get('query', '').strip()
         category = request.data.get('category', 'all')
-        top_k = int(request.data.get('top_k', 5))
+        doc_id = request.data.get('document_id')
+        top_k = int(request.data.get('top_k', 10))
 
         if not query:
             return Response({'success': False, 'message': 'Vui lòng nhập từ khóa truy vấn Vector.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             vector_service = QdrantVectorDBService()
-            results = vector_service.vector_search(query_text=query, top_k=top_k, category_filter=category)
+            results = vector_service.vector_search(query_text=query, top_k=top_k, category_filter=category, doc_id_filter=doc_id)
 
             return Response({
                 'success': True,

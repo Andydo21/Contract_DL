@@ -1175,10 +1175,14 @@
                             </div>
 
                             <div class="flex items-center gap-3 flex-wrap">
-                                <div class="relative">
+                                <div class="flex items-center gap-1.5">
                                     <input type="text" id="visual-bbox-search-input" oninput="window.filterVisualBboxChunks(this.value)"
-                                           placeholder="🔍 Tìm kiếm từ khóa Bounding Box..."
-                                           class="bg-slate-950 border border-slate-700 focus:border-red-500 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-56 md:w-72 font-mono shadow-inner transition-all">
+                                           placeholder="🔍 Tìm từ khóa hoặc câu hỏi Vector..."
+                                           class="bg-slate-950 border border-slate-700 focus:border-red-500 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-48 md:w-64 font-mono shadow-inner transition-all">
+                                    <button onclick="window.performQdrantVectorSearch()" title="Truy vấn Vector Cosine Similarity từ Qdrant DB"
+                                            class="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-md shadow-purple-600/30 transition-all hover:scale-105">
+                                        <i class="ph-bold ph-brain text-sm"></i> 🧠 Vector Search
+                                    </button>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <span class="text-slate-400 font-medium">Trang:</span>
@@ -1237,14 +1241,15 @@
                                             }
 
                                             return `
-                                                <div class="bbox-snippet-card p-3 rounded-xl border ${borderStyle} shadow-lg transition-all hover:scale-[1.01]"
-                                                     data-text="${escapeHtml(c.text)}" data-type="${escapeHtml(c.layout_type)}">
+                                                <div class="bbox-snippet-card p-3 rounded-xl border ${borderStyle} shadow-lg transition-all hover:scale-[1.01] cursor-pointer"
+                                                     data-chunk-id="${c.chunk_id}" data-text="${escapeHtml(c.text)}" data-type="${escapeHtml(c.layout_type)}"
+                                                     onclick="window.jumpToBboxPage(${c.page_number || 1}, ${c.chunk_id})">
                                                     <div class="flex items-center justify-between gap-2 mb-2">
-                                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeBg} border font-mono">
+                                                        <button onclick="window.jumpToBboxPage(${c.page_number || 1}, ${c.chunk_id})" class="px-2.5 py-1 rounded-lg text-[10px] font-bold ${badgeBg} border font-mono flex items-center gap-1 shadow-sm transition-all hover:scale-105">
                                                             🔴 BBox #${c.chunk_id} • ${c.layout_type}
-                                                        </span>
-                                                        <span class="text-[10px] text-slate-400 font-mono">
-                                                            BBox: [${(c.bbox || []).join(', ')}]
+                                                        </button>
+                                                        <button onclick="window.jumpToBboxPage(${c.page_number || 1}, ${c.chunk_id})" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono border border-slate-700 hover:text-white hover:border-slate-500 transition-all">
+                                                            Trang ${c.page_number || 1} • BBox: [${(c.bbox || []).join(', ')}]
                                                         </span>
                                                     </div>
 
@@ -1288,29 +1293,107 @@
                     </div>
                 `;
 
-                window.filterVisualBboxChunks = function(query) {
-                    const q = (query || '').toLowerCase().trim();
-                    const cards = document.querySelectorAll('.bbox-snippet-card');
-                    let matchCount = 0;
+                window.jumpToBboxPage = function(pageNum, chunkId) {
+                    pageNum = parseInt(pageNum) || 1;
+                    const visualTab = document.getElementById('modal-tab-visual-bbox');
+                    if (visualTab) visualTab.click();
 
-                    cards.forEach(card => {
-                        const text = (card.getAttribute('data-text') || '').toLowerCase();
-                        const type = (card.getAttribute('data-type') || '').toLowerCase();
-                        const matches = !q || text.includes(q) || type.includes(q);
+                    window.changeVisualPage(pageNum);
 
-                        card.style.display = matches ? 'block' : 'none';
-                        if (matches) matchCount++;
-                    });
+                    setTimeout(() => {
+                        const targetCard = document.querySelector(`.bbox-snippet-card[data-chunk-id="${chunkId}"]`);
+                        if (targetCard) {
+                            targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            targetCard.classList.add('ring-4', 'ring-yellow-400', 'scale-[1.03]');
+                            setTimeout(() => {
+                                targetCard.classList.remove('ring-4', 'ring-yellow-400', 'scale-[1.03]');
+                            }, 3000);
+                        }
+                    }, 200);
+                };
+
+                window.performQdrantVectorSearch = async function() {
+                    const input = document.getElementById('visual-bbox-search-input');
+                    const query = input ? input.value.trim() : '';
+                    if (!query) {
+                        alert('Vui lòng nhập từ khóa để tìm kiếm Qdrant Vector Search!');
+                        return;
+                    }
 
                     const countBadge = document.getElementById('bbox-search-count-badge');
                     if (countBadge) {
-                        if (q) {
-                            countBadge.innerHTML = `🔍 Tìm thấy: ${matchCount}/${cards.length}`;
-                            countBadge.className = 'px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-semibold';
+                        countBadge.innerHTML = '⚡ Đang truy vấn Qdrant Vector...';
+                        countBadge.className = 'px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-semibold animate-pulse';
+                    }
+
+                    try {
+                        const resp = await fetch('/documents/api/search/', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                query: query,
+                                document_id: activeDocInModal.id,
+                                top_k: 10
+                            })
+                        });
+                        const data = await resp.json();
+
+                        if (data.success && data.results && data.results.length > 0) {
+                            if (countBadge) {
+                                countBadge.innerHTML = `🧠 Vector Qdrant Match: ${data.results.length} Kết quả`;
+                                countBadge.className = 'px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-semibold';
+                            }
+
+                            const topMatch = data.results[0];
+                            const topPage = topMatch.page_number || 1;
+
+                            // Chuyển luôn sang trang của kết quả có điểm tương đồng cao nhất
+                            window.changeVisualPage(topPage);
+
+                            const container = document.getElementById('bbox-snippets-container');
+                            if (container) {
+                                container.innerHTML = `
+                                    <div class="p-2.5 bg-purple-950/60 border border-purple-500/60 rounded-xl mb-3 text-xs text-purple-200 font-mono flex items-center justify-between shadow-lg">
+                                        <span class="font-bold flex items-center gap-1.5 text-purple-300">
+                                            <i class="ph-bold ph-brain text-purple-400 text-sm"></i> 🧠 Qdrant Vector Search: "${escapeHtml(query)}"
+                                        </span>
+                                        <button onclick="window.changeVisualPage(${topPage})" class="text-[10px] text-purple-300 hover:text-white underline">Đặt lại</button>
+                                    </div>
+                                    ${data.results.map((res, idx) => {
+                                        const scorePct = (res.score * 100).toFixed(1);
+                                        const isTable = (res.layout_type || '').toLowerCase().includes('table');
+                                        return `
+                                            <div class="bbox-snippet-card p-3.5 rounded-xl border ${isTable ? 'border-emerald-500/70 bg-emerald-950/30' : 'border-purple-500/70 bg-purple-950/30'} shadow-xl cursor-pointer hover:scale-[1.02] transition-all"
+                                                 data-chunk-id="${res.chunk_id}" onclick="window.jumpToBboxPage(${res.page_number || 1}, ${res.chunk_id})">
+                                                <div class="flex items-center justify-between gap-2 mb-2">
+                                                    <span class="px-2.5 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-500/30 text-purple-200 border border-purple-500/50 font-mono flex items-center gap-1">
+                                                        ⚡ Match #${idx + 1} • ${scorePct}% CosSim
+                                                    </span>
+                                                    <span class="px-2.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 font-mono">
+                                                        Trang ${res.page_number || 1} • BBox: [${(res.bbox || []).join(', ')}]
+                                                    </span>
+                                                </div>
+                                                <p class="text-xs text-slate-200 font-mono bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed">
+                                                    ${escapeHtml(res.text)}
+                                                </p>
+                                                <div class="mt-2 text-right">
+                                                    <span class="text-[10px] text-red-400 font-bold hover:underline flex items-center justify-end gap-1">
+                                                        🔴 Chuyển sang Trang ${res.page_number || 1} <i class="ph-bold ph-arrow-right"></i>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                `;
+                            }
                         } else {
-                            countBadge.innerHTML = `🔴 BBoxes: ${cards.length}`;
-                            countBadge.className = 'px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold';
+                            if (countBadge) {
+                                countBadge.innerHTML = '❌ Không có Vector tương đồng';
+                                countBadge.className = 'px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold';
+                            }
                         }
+                    } catch (err) {
+                        console.error('Vector Search Error:', err);
                     }
                 };
 
@@ -1462,9 +1545,9 @@
                                         </span>
                                         <div class="flex items-center gap-2">
                                             ${confidenceBadge}
-                                            <span class="text-[10px] text-slate-400 font-mono">
-                                                Page ${c.page_number} • BBox: [${c.bbox.join(', ')}]
-                                            </span>
+                                            <button onclick="window.jumpToBboxPage(${c.page_number || 1}, ${c.chunk_id})" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-red-600/90 hover:bg-red-500 text-white font-mono flex items-center gap-1 shadow-md transition-all hover:scale-105">
+                                                <i class="ph-bold ph-crop"></i> 🔴 Xem Bounding Box Trang ${c.page_number || 1} • [${(c.bbox || []).join(', ')}]
+                                            </button>
                                         </div>
                                     </div>
                                     

@@ -205,22 +205,19 @@ class QdrantVectorDBService:
             print("[Qdrant Upsert Error]", str(e))
             return 0
 
-    def vector_search(self, query_text, top_k=5, category_filter=None):
+    def vector_search(self, query_text, top_k=5, category_filter=None, doc_id_filter=None):
         if not self.client:
             return []
 
         query_vector = self.generate_embedding(query_text)
 
-        search_filter = None
+        must_conditions = []
         if category_filter and category_filter != 'all':
-            search_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="category",
-                        match=MatchValue(value=category_filter)
-                    )
-                ]
-            )
+            must_conditions.append(FieldCondition(key="category", match=MatchValue(value=category_filter)))
+        if doc_id_filter:
+            must_conditions.append(FieldCondition(key="document_id", match=MatchValue(value=int(doc_id_filter))))
+
+        search_filter = Filter(must=must_conditions) if must_conditions else None
 
         try:
             response = self.client.query_points(
