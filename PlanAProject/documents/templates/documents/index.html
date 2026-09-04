@@ -366,6 +366,32 @@
                 </button>
             </div>
 
+            <!-- Persistent Modal Global Vector & Text Search Toolbar -->
+            <div class="px-6 py-2.5 bg-slate-900/95 border-b border-purple-500/40 flex flex-col md:flex-row items-center justify-between gap-3 text-xs shadow-md">
+                <div class="flex items-center gap-2 text-purple-300 font-bold shrink-0">
+                    <i class="ph-bold ph-brain text-purple-400 text-base"></i>
+                    <span>🧠 SEARCH VECTOR DB (TEXT & COLPALI 2D):</span>
+                    <span id="modal-global-search-badge" class="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-mono">Qdrant Ready</span>
+                </div>
+                <div class="flex items-center gap-2 w-full md:w-auto flex-wrap">
+                    <select id="modal-global-search-type" onchange="window.syncSearchType(this.value)" class="bg-slate-950 border border-purple-500/60 text-purple-300 font-bold rounded-xl px-3 py-1.5 text-xs outline-none cursor-pointer">
+                        <option value="text">🧠 Vector Text (LayoutLM / MiniLM)</option>
+                        <option value="colpali">👁️ Vector ColPali (Visual Patches 2D)</option>
+                    </select>
+                    <div class="relative flex-1 md:w-80">
+                        <input type="text" id="modal-global-search-input" oninput="window.handleGlobalSearchInput(this.value)"
+                               onkeydown="if(event.key==='Enter') window.executeGlobalVectorSearch()"
+                               placeholder="🔍 Nhập từ khóa hoặc câu hỏi Vector..."
+                               class="w-full bg-slate-950 border border-purple-500/50 focus:border-purple-400 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none font-mono shadow-inner">
+                        <i class="ph-bold ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 text-xs"></i>
+                    </div>
+                    <button onclick="window.executeGlobalVectorSearch()" class="px-4 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-purple-900/50 transition-all hover:scale-105">
+                        <i class="ph-bold ph-lightning text-amber-300"></i>
+                        <span>Search Vector</span>
+                    </button>
+                </div>
+            </div>
+
             <!-- Modal Content Body -->
             <div id="modal-body" class="flex-1 p-6 overflow-y-auto min-h-[420px] bg-slate-950">
                 <!-- Preview Content Injected Here via JS -->
@@ -1677,10 +1703,17 @@
                                     </div>
                                 </div>
 
-                                <div class="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
-                                    <span class="text-slate-300 font-bold flex items-center gap-2">
-                                        <i class="ph-bold ph-funnel text-cyan-400"></i> Lọc phần tử theo Mô hình AI:
-                                    </span>
+                                <div class="flex flex-col md:flex-row items-center justify-between gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
+                                    <div class="flex items-center gap-2 w-full md:w-auto">
+                                        <span class="text-slate-300 font-bold flex items-center gap-2 shrink-0">
+                                            <i class="ph-bold ph-funnel text-cyan-400"></i> Lọc phần tử:
+                                        </span>
+                                        <div class="relative flex-1 md:w-64">
+                                            <input type="text" id="tab2-chunk-search-input" oninput="window.searchTab2Chunks(this.value)"
+                                                   placeholder="🔍 Tìm từ khóa trong Chunks..."
+                                                   class="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-lg px-3 py-1 text-xs text-white placeholder-slate-500 outline-none font-mono">
+                                        </div>
+                                    </div>
                                     <div class="flex flex-wrap items-center gap-2">
                                         <button id="filter-all-chunks-btn" onclick="window.filterModalChunks('all')" class="px-3 py-1.5 rounded-lg font-bold text-xs bg-blue-600 text-white shadow-md transition-all">
                                             Tất cả Chunks (${totalBlocks})
@@ -1703,6 +1736,55 @@
                             </div>
                         </div>
                     `;
+
+                    window.searchTab2Chunks = function(query) {
+                        const q = (query || '').toLowerCase().trim();
+                        const container = document.getElementById('chunks-list-container');
+                        if (!container) return;
+                        if (!q) {
+                            container.innerHTML = renderChunks('all');
+                            return;
+                        }
+                        const filtered = chunks.filter(c => (c.text || '').toLowerCase().includes(q) || String(c.chunk_id) === q || (c.layout_type || '').toLowerCase().includes(q));
+                        if (filtered.length === 0) {
+                            container.innerHTML = `<div class="p-8 text-center bg-slate-900/80 rounded-xl border border-slate-800 text-slate-400 text-xs font-mono">Không tìm thấy Chunk nào khớp với từ khóa "${escapeHtml(query)}".</div>`;
+                        } else {
+                            container.innerHTML = renderChunksCustom(filtered);
+                        }
+                    };
+
+                    function renderChunksCustom(customList) {
+                        return customList.map(c => {
+                            const isTable = (c.layout_type || '').toLowerCase().includes('table');
+                            const isImage = !isTable && ((c.layout_type || '').toLowerCase().includes('figure') || (c.has_image && c.image_url));
+
+                            let cardStyle = 'border-slate-800 bg-slate-900/90';
+                            let titleColor = 'text-blue-400';
+                            if (isTable) {
+                                cardStyle = 'border-emerald-500/40 bg-emerald-950/10';
+                                titleColor = 'text-emerald-400';
+                            } else if (isImage) {
+                                cardStyle = 'border-cyan-500/40 bg-cyan-950/10';
+                                titleColor = 'text-cyan-400';
+                            }
+
+                            return `
+                                <div class="glass-card p-4 rounded-xl border ${cardStyle} shadow-lg transition-all hover:scale-[1.01]">
+                                    <div class="flex items-center justify-between gap-2 mb-2">
+                                        <span class="font-bold text-xs ${titleColor} font-mono">
+                                            🔴 Chunk #${c.chunk_id} • ${c.layout_type}
+                                        </span>
+                                        <button onclick="window.jumpToBboxPage(${c.page_number || 1}, ${c.chunk_id})" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-red-600/90 text-white font-mono hover:scale-105 transition-all">
+                                            🔴 Xem Bounding Box Trang ${c.page_number || 1}
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-slate-200 font-mono bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
+                                        ${escapeHtml(c.text)}
+                                    </p>
+                                </div>
+                            `;
+                        }).join('');
+                    }
 
                     window.filterModalChunks = function(mode) {
                         const container = document.getElementById('chunks-list-container');
@@ -1728,6 +1810,65 @@
 
                         container.innerHTML = renderChunks(mode);
                     };
+                }
+            });
+
+            // Global Vector & Text Search Handlers across Modal Tabs
+            window.executeGlobalVectorSearch = async function() {
+                const input = document.getElementById('modal-global-search-input');
+                const query = input ? input.value.trim() : '';
+                const searchTypeSelect = document.getElementById('modal-global-search-type');
+                const searchType = searchTypeSelect ? searchTypeSelect.value : 'text';
+
+                if (!query) {
+                    alert('Vui lòng nhập từ khóa để thực hiện Search Vector!');
+                    return;
+                }
+
+                if (!activeDocInModal || !activeDocInModal.id) {
+                    alert('Không tìm thấy tài liệu active.');
+                    return;
+                }
+
+                const badge = document.getElementById('modal-global-search-badge');
+                if (badge) {
+                    badge.innerHTML = `⚡ Đang tìm Qdrant Vector (${searchType})...`;
+                    badge.className = 'px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[10px] font-mono animate-pulse';
+                }
+
+                // Auto switch to Tab 3 for visual Qdrant search results
+                const bboxTab = document.getElementById('modal-tab-visual-bbox');
+                if (bboxTab) bboxTab.click();
+
+                setTimeout(async () => {
+                    const bboxInput = document.getElementById('visual-bbox-search-input');
+                    if (bboxInput) bboxInput.value = query;
+
+                    const bboxTypeSelect = document.getElementById('vector-search-type-select');
+                    if (bboxTypeSelect) bboxTypeSelect.value = searchType;
+
+                    if (window.performQdrantVectorSearch) {
+                        await window.performQdrantVectorSearch();
+                    }
+                }, 100);
+            };
+
+            window.handleGlobalSearchInput = function(val) {
+                const bboxInput = document.getElementById('visual-bbox-search-input');
+                if (bboxInput) bboxInput.value = val;
+
+                const tab2Input = document.getElementById('tab2-chunk-search-input');
+                if (tab2Input) tab2Input.value = val;
+
+                if (window.searchTab2Chunks) {
+                    window.searchTab2Chunks(val);
+                }
+            };
+
+            window.syncSearchType = function(val) {
+                const bboxTypeSelect = document.getElementById('vector-search-type-select');
+                if (bboxTypeSelect) bboxTypeSelect.value = val;
+            };
                 }
             });
 
