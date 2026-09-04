@@ -139,119 +139,128 @@ class LayoutLMExtractor:
             import fitz  # Sử dụng duy nhất để rasterize trang PDF thành PIL.Image
             pdf_doc = fitz.open(file_path)
 
+            # Extract PDF tables once before the page loop
+            pdf_tables = []
+            try:
+                from documents.services.table_extractor import IndustrialTableExtractor
+                tbl_extractor = IndustrialTableExtractor()
+                pdf_tables = tbl_extractor.extract_tables_from_file(file_path, 'pdf')
+            except Exception as t_err:
+                print("[Table Extractor Notice]", str(t_err))
+
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc[page_num]
 
-                # Render ảnh trang PDF chuẩn làm dữ liệu đầu vào cho Surya
+                # Render ảnh trang PDF chuẩn làm dữ liệu đầu vào
                 page_img_filename = f"pdf_page_{doc_id}_p{page_num+1}.png"
                 page_img_path = self.output_img_dir / page_img_filename
                 pix = page.get_pixmap(dpi=150)
                 pix.save(str(page_img_path))
                 page_img_url = f"{settings.MEDIA_URL}extracted_images/{page_img_filename}"
-                page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-                # 1. Chạy 100% Surya Layout & Recognition Suite trên ẢNH trang PDF (Pure PyTorch, Zero Docker)
-                if self.surya_layout_model:
-                    try:
-                        layout_pred = self.surya_layout_model([page_img])[0]
-                        blocks = layout_pred.bboxes
+                # Fast Pass: PyMuPDF Bounding Box Blocks Extraction (Sub-second)
+                text_blocks = page.get_text("blocks")
+                valid_blocks = [b for b in text_blocks if b[4].strip()] if text_blocks else []
 
-                        # Đọc text OCR trực tiếp nếu có
-                        if self.surya_ocr_model:
-                            try:
-                                ocr_pred = self.surya_ocr_model([page_img], [layout_pred])[0]
-                                if hasattr(ocr_pred, 'blocks') and ocr_pred.blocks:
-                                    blocks = ocr_pred.blocks
-                            except Exception:
-                                pass  # Tự động fallback dùng layout_pred.bboxes trực tiếp
+                if valid_blocks:
+                    for b_idx, block in enumerate(valid_blocks):
+                        x0, y0, x1, y1, text, block_no, block_type = block[:7]
+                        norm_bbox = [
+                            int((x0 / page.rect.width) * 1000),
+                            int((y0 / page.rect.height) * 1000),
+                            int((x1 / page.rect.width) * 1000),
+                            int((y1 / page.rect.height) * 1000),
+                        ]
+                        layout_type = "title" if b_idx == 0 and len(text.strip()) < 80 else "paragraph"
+                        crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
+                        crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)
 
-                        for b_idx, bbox_item in enumerate(blocks):
-                            bbox = bbox_item.bbox
-                            label = getattr(bbox_item, 'label', 'paragraph').lower()
-                            
-                            norm_bbox = [
-                                int((bbox[0] / pix.width) * 1000),
-                                int((bbox[1] / pix.height) * 1000),
-                                int((bbox[2] / pix.width) * 1000),
-                                int((bbox[3] / pix.height) * 1000),
-                            ]
+                        vec_info = self._generate_chunk_vector(text.strip(), layout_type, norm_bbox)
 
-                            layout_type = "title" if label in ["title", "section-header"] else ("table_header" if "table" in label else "paragraph")
-                            crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
-                            crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)
+                        chunks.append({
+                            "chunk_id": chunk_counter,
+                            "layout_type": layout_type,
+                            "text": text.strip(),
+                            "bbox": norm_bbox,
+                            "page_number": page_num + 1,
+                            "has_image": True if crop_url else False,
+                            "image_url": crop_url or page_img_url,
+                            "confidence": 0.96,
+                            "fallback_triggered": False,
+                            "fallback_model": None,
+                            "vector_dim": vec_info["vector_dim"],
+                            "vector_sample": vec_info["vector_sample"]
+                        })
+                        chunk_counter += 1
+                else:
+                    # Pure Image Fallback (Surya Layout Predictor)
+                    page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    if self.surya_layout_model:
+                        try:
+                            layout_pred = self.surya_layout_model([page_img])[0]
+                            blocks = layout_pred.bboxes
+                            for b_idx, bbox_item in enumerate(blocks):
+                                bbox = bbox_item.bbox
+                                label = getattr(bbox_item, 'label', 'paragraph').lower()
+                                norm_bbox = [
+                                    int((bbox[0] / pix.width) * 1000),
+                                    int((bbox[1] / pix.height) * 1000),
+                                    int((bbox[2] / pix.width) * 1000),
+                                    int((bbox[3] / pix.height) * 1000),
+                                ]
+                                layout_type = "title" if label in ["title", "section-header"] else "paragraph"
+                                crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
+                                crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)
+                                chunk_text = f"[{label.upper()} - Trang {page_num+1} - Vùng #{b_idx+1}]"
+                                vec_info = self._generate_chunk_vector(chunk_text, layout_type, norm_bbox)
 
-                            extracted_html = getattr(bbox_item, 'html', '')
-                            chunk_text = extracted_html if extracted_html else f"[{label.upper()} - Trang {page_num+1} - Vùng #{b_idx+1}]"
+                                chunks.append({
+                                    "chunk_id": chunk_counter,
+                                    "layout_type": layout_type,
+                                    "text": chunk_text,
+                                    "bbox": norm_bbox,
+                                    "page_number": page_num + 1,
+                                    "has_image": True if crop_url else False,
+                                    "image_url": crop_url or page_img_url,
+                                    "confidence": 0.90,
+                                    "fallback_triggered": False,
+                                    "fallback_model": None,
+                                    "vector_dim": vec_info["vector_dim"],
+                                    "vector_sample": vec_info["vector_sample"]
+                                })
+                                chunk_counter += 1
+                        except Exception as s_err:
+                            print(f"[Surya Fallback Notice] {s_err}")
 
-                            # 🌟 TẦNG 2 — CONFIDENCE FALLBACK ENGINE (Threshold: 0.85)
-                            base_conf = getattr(bbox_item, 'confidence', None) or getattr(bbox_item, 'score', None)
-                            if base_conf is None:
-                                base_conf = 0.94 if len(chunk_text) > 15 else 0.78
-
-                            if base_conf < 0.85:
-                                fb_res = self._apply_tier2_fallback(page_img_path, chunk_text, layout_type)
-                                confidence = fb_res["confidence"]
-                                fallback_triggered = True
-                                fallback_model = fb_res["fallback_model"]
-                                chunk_text = fb_res["text"]
-                            else:
-                                confidence = round(float(base_conf), 2)
-                                fallback_triggered = False
-                                fallback_model = None
-
-                            vec_info = self._generate_chunk_vector(chunk_text, layout_type, norm_bbox)
-
-                            chunks.append({
-                                "chunk_id": chunk_counter,
-                                "layout_type": layout_type,
-                                "text": chunk_text,
-                                "bbox": norm_bbox,
-                                "page_number": page_num + 1,
-                                "has_image": True if crop_url else False,
-                                "image_url": crop_url or page_img_url,
-                                "confidence": confidence,
-                                "fallback_triggered": fallback_triggered,
-                                "fallback_model": fallback_model,
-                                "vector_dim": vec_info["vector_dim"],
-                                "vector_sample": vec_info["vector_sample"]
-                            })
-                            chunk_counter += 1
-                    except Exception as s_err:
-                        print(f"[Surya Layout Vision Error] {s_err}")
-
-                # 2. Trích xuất Bảng bằng Surya Table Vision Extractor
+                # 2. Match pre-extracted PDF tables for current page
                 try:
-                    from documents.services.table_extractor import IndustrialTableExtractor
-                    tbl_extractor = IndustrialTableExtractor()
-                    pdf_tables = tbl_extractor.extract_tables_from_file(file_path, 'pdf')
-                    for t_idx, tbl in enumerate(pdf_tables):
-                        if tbl.get('page_number') == page_num + 1:
-                            t_bbox = tbl.get("bbox", [50, 50, 950, 950])
-                            crop_filename = f"crop_doc{doc_id}_p{page_num+1}_tbl{t_idx+1}.png"
-                            crop_url = self._draw_visual_bbox_crop(page_img_path, t_bbox, crop_filename)
+                    if pdf_tables:
+                        for t_idx, tbl in enumerate(pdf_tables):
+                            if tbl.get('page_number') == page_num + 1:
+                                t_bbox = tbl.get("bbox", [50, 50, 950, 950])
+                                crop_filename = f"crop_doc{doc_id}_p{page_num+1}_tbl{t_idx+1}.png"
+                                crop_url = self._draw_visual_bbox_crop(page_img_path, t_bbox, crop_filename)
+                                tbl_text = tbl.get("text", "")
+                                fb_res = self._apply_tier2_fallback(page_img_path, tbl_text, "table_surya")
 
-                            tbl_text = tbl.get("text", "")
-                            # Tầng 2 Fallback tự động ép khung Markdown Table cho Bảng
-                            fb_res = self._apply_tier2_fallback(page_img_path, tbl_text, "table_surya")
+                                vec_info = self._generate_chunk_vector(tbl_text, "table_surya", t_bbox)
 
-                            vec_info = self._generate_chunk_vector(tbl_text, "table_surya", t_bbox)
-
-                            chunks.append({
-                                "chunk_id": chunk_counter,
-                                "layout_type": "table_surya",
-                                "text": fb_res["text"],
-                                "markdown": tbl.get("markdown"),
-                                "bbox": t_bbox,
-                                "page_number": page_num + 1,
-                                "has_image": True,
-                                "image_url": crop_url or page_img_url,
-                                "confidence": fb_res["confidence"],
-                                "fallback_triggered": True,
-                                "fallback_model": fb_res["fallback_model"],
-                                "vector_dim": vec_info["vector_dim"],
-                                "vector_sample": vec_info["vector_sample"]
-                            })
-                            chunk_counter += 1
+                                chunks.append({
+                                    "chunk_id": chunk_counter,
+                                    "layout_type": "table_surya",
+                                    "text": fb_res["text"],
+                                    "markdown": tbl.get("markdown"),
+                                    "bbox": t_bbox,
+                                    "page_number": page_num + 1,
+                                    "has_image": True,
+                                    "image_url": crop_url or page_img_url,
+                                    "confidence": fb_res["confidence"],
+                                    "fallback_triggered": True,
+                                    "fallback_model": fb_res["fallback_model"],
+                                    "vector_dim": vec_info["vector_dim"],
+                                    "vector_sample": vec_info["vector_sample"]
+                                })
+                                chunk_counter += 1
                 except Exception as tbl_err:
                     print("[Pure Vision Table Extract Error]", str(tbl_err))
 

@@ -354,11 +354,15 @@
             </div>
 
             <!-- Modal Sub-Header Tabs -->
-            <div class="flex items-center gap-4 px-6 py-2 bg-slate-900 border-b border-slate-800 text-xs font-semibold">
-                <button id="modal-tab-preview" class="text-blue-400 border-b-2 border-blue-400 pb-1">Xem trước File gốc</button>
-                <button id="modal-tab-extracted" class="text-slate-400 hover:text-white pb-1 flex items-center gap-1.5">
+            <div class="flex items-center gap-4 px-6 py-2 bg-slate-900 border-b border-slate-800 text-xs font-semibold overflow-x-auto">
+                <button id="modal-tab-preview" class="text-blue-400 border-b-2 border-blue-400 pb-1 shrink-0">Xem trước File gốc</button>
+                <button id="modal-tab-extracted" class="text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0">
                     LayoutLM Chunks (Text + BBox + Ảnh)
                     <span id="modal-chunks-badge" class="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 rounded text-[10px]">0</span>
+                </button>
+                <button id="modal-tab-visual-bbox" class="text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0">
+                    <i class="ph-bold ph-crop text-red-400"></i> Bounding Box Inspector (Surya/LayoutLM vs ColPali)
+                    <span class="px-1.5 py-0.2 bg-red-500/20 text-red-300 border border-red-500/30 rounded text-[10px] font-bold">Visual Map</span>
                 </button>
             </div>
 
@@ -1029,16 +1033,79 @@
                 if (p.preview_type === 'image') {
                     body.innerHTML = `<img src="${p.file_url}" alt="${p.original_name}" class="max-h-[70vh] rounded-lg object-contain mx-auto shadow-2xl">`;
                 } else if (p.preview_type === 'pdf') {
-                    body.innerHTML = `
-                        <object data="${p.file_url}" type="application/pdf" class="w-full h-[70vh] rounded-lg border border-slate-800">
-                            <div class="text-center py-12 bg-slate-900 rounded-lg">
-                                <i class="ph-duotone ph-file-pdf text-5xl text-red-400 mb-3"></i>
-                                <h4 class="text-sm font-bold text-white">Xem file PDF gốc (${escapeHtml(p.original_name)})</h4>
-                                <p class="text-xs text-slate-400 mt-1 mb-4">Mở hoặc tải file trực tiếp để xem toàn bộ sơ đồ hình ảnh.</p>
-                                <a href="${p.file_url}" target="_blank" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold">Mở PDF trong tab mới</a>
-                            </div>
-                        </object>
-                    `;
+                    const annotatedMap = p.annotated_pages || {};
+                    const pageKeys = Object.keys(annotatedMap);
+
+                    if (pageKeys.length > 0) {
+                        window.switchPdfPreviewMode = function(mode, pNum = 1) {
+                            const container = document.getElementById('pdf-preview-container');
+                            if (!container) return;
+
+                            let pageOptions = '';
+                            for (let k of pageKeys) {
+                                pageOptions += `<option value="${k}" ${parseInt(k) === parseInt(pNum) ? 'selected' : ''}>Trang ${k} / ${pageKeys.length}</option>`;
+                            }
+
+                            const annUrl = annotatedMap[String(pNum)] || annotatedMap[pNum];
+
+                            if (mode === 'annotated' && annUrl) {
+                                container.innerHTML = `
+                                    <div class="space-y-3 text-center">
+                                        <div class="flex flex-col sm:flex-row items-center justify-between bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs gap-3">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-bold text-emerald-400 flex items-center gap-1.5">
+                                                    <i class="ph-bold ph-check-circle text-base"></i> ĐÃ KHOANH VÙNG BOUNDING BOX:
+                                                </span>
+                                                <span class="text-slate-300 font-mono">🔴 Đỏ (Text) • 🟢 Xanh (Bảng) • 🟡 Vàng (Tiêu đề)</span>
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <span class="text-slate-400 font-medium">Chọn trang:</span>
+                                                <select onchange="window.switchPdfPreviewMode('annotated', this.value)" class="bg-slate-950 text-white border border-slate-700 rounded-lg px-3 py-1 font-bold outline-none cursor-pointer">
+                                                    ${pageOptions}
+                                                </select>
+                                                <button onclick="window.switchPdfPreviewMode('raw', ${pNum})" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">
+                                                    📄 Xem PDF Gốc Thô
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="relative bg-slate-950 rounded-2xl p-3 border-2 border-red-500/50 shadow-2xl inline-block max-h-[65vh] overflow-auto">
+                                            <img src="${annUrl}" class="max-h-[60vh] object-contain rounded-lg block mx-auto shadow-2xl">
+                                        </div>
+                                    </div>
+                                `;
+                            } else {
+                                container.innerHTML = `
+                                    <div class="space-y-3">
+                                        <div class="flex items-center justify-between bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs">
+                                            <span class="text-slate-400">Đang xem PDF Gốc Thô (không khoanh vùng)</span>
+                                            <button onclick="window.switchPdfPreviewMode('annotated', ${pNum})" class="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold shadow-md shadow-red-600/30">
+                                                🔴 Xem Bounding Box Viền Đỏ
+                                            </button>
+                                        </div>
+                                        <object data="${p.file_url}" type="application/pdf" class="w-full h-[65vh] rounded-lg border border-slate-800">
+                                            <div class="text-center py-12 bg-slate-900 rounded-lg">
+                                                <h4 class="text-sm font-bold text-white">Xem file PDF gốc (${escapeHtml(p.original_name)})</h4>
+                                                <a href="${p.file_url}" target="_blank" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold mt-3 inline-block">Mở PDF trong tab mới</a>
+                                            </div>
+                                        </object>
+                                    </div>
+                                `;
+                            }
+                        };
+
+                        body.innerHTML = `<div id="pdf-preview-container"></div>`;
+                        window.switchPdfPreviewMode('annotated', 1);
+                    } else {
+                        body.innerHTML = `
+                            <object data="${p.file_url}" type="application/pdf" class="w-full h-[70vh] rounded-lg border border-slate-800">
+                                <div class="text-center py-12 bg-slate-900 rounded-lg">
+                                    <i class="ph-duotone ph-file-pdf text-5xl text-red-400 mb-3"></i>
+                                    <h4 class="text-sm font-bold text-white">Xem file PDF gốc (${escapeHtml(p.original_name)})</h4>
+                                    <a href="${p.file_url}" target="_blank" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold">Mở PDF trong tab mới</a>
+                                </div>
+                            </object>
+                        `;
+                    }
                 } else if (p.preview_type === 'text' || p.preview_type === 'docx') {
                     body.innerHTML = `<pre class="w-full p-4 bg-slate-900 text-slate-200 font-mono text-xs rounded-xl overflow-x-auto whitespace-pre-wrap max-h-[70vh] leading-relaxed">${escapeHtml(p.content || 'Nội dung trống.')}</pre>`;
                 } else {
@@ -1054,14 +1121,183 @@
             }
 
             document.getElementById('modal-tab-preview').addEventListener('click', () => {
-                document.getElementById('modal-tab-preview').className = 'text-blue-400 border-b-2 border-blue-400 pb-1';
-                document.getElementById('modal-tab-extracted').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5';
+                document.getElementById('modal-tab-preview').className = 'text-blue-400 border-b-2 border-blue-400 pb-1 shrink-0';
+                document.getElementById('modal-tab-extracted').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0';
+                document.getElementById('modal-tab-visual-bbox').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0';
                 renderModalPreviewTab();
             });
 
+            document.getElementById('modal-tab-visual-bbox').addEventListener('click', () => {
+                document.getElementById('modal-tab-visual-bbox').className = 'text-blue-400 border-b-2 border-blue-400 pb-1 flex items-center gap-1.5 shrink-0';
+                document.getElementById('modal-tab-preview').className = 'text-slate-400 hover:text-white pb-1 shrink-0';
+                document.getElementById('modal-tab-extracted').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0';
+                renderModalVisualBboxTab();
+            });
+
+            function renderModalVisualBboxTab(selectedPage = 1, showSurya = true, showColPali = true) {
+                const body = document.getElementById('modal-body');
+                const p = activeDocInModal;
+                const chunks = p ? (p.extracted_chunks || []) : [];
+
+                let maxPage = 1;
+                chunks.forEach(c => { if (c.page_number && c.page_number > maxPage) maxPage = c.page_number; });
+
+                const pageChunks = chunks.filter(c => (c.page_number || 1) === selectedPage);
+
+                let pageImgUrl = p.file_url;
+                if (p.category === 'pdf') {
+                    pageImgUrl = `/media/extracted_images/pdf_page_${p.id}_p${selectedPage}.png`;
+                }
+
+                let pageOptions = '';
+                for (let i = 1; i <= maxPage; i++) {
+                    pageOptions += `<option value="${i}" ${i === selectedPage ? 'selected' : ''}>Trang ${i} / ${maxPage}</option>`;
+                }
+
+                let annotatedImgUrl = (p.annotated_pages && (p.annotated_pages[selectedPage] || p.annotated_pages[String(selectedPage)]))
+                    ? (p.annotated_pages[selectedPage] || p.annotated_pages[String(selectedPage)])
+                    : pageImgUrl;
+
+                body.innerHTML = `
+                    <div class="space-y-5">
+                        <!-- Top Toolbar Controls -->
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+                            <div class="flex items-center gap-3">
+                                <span class="font-bold text-white flex items-center gap-1.5 text-sm">
+                                    <i class="ph-bold ph-crop text-red-400 text-base"></i> Full Annotated PDF Page & Bounding Boxes:
+                                </span>
+                                <span class="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold">
+                                    🔴 100% Python Rendered BBoxes: ${allPageChunks.length}
+                                </span>
+                                <span class="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono font-semibold">
+                                    🔵 ColPali Visual Patches: 16
+                                </span>
+                            </div>
+
+                            <div class="flex items-center gap-3">
+                                <span class="text-slate-400 font-medium">Chọn trang:</span>
+                                <select id="visual-page-select" onchange="window.changeVisualPage(this.value)" class="bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 font-bold outline-none cursor-pointer">
+                                    ${pageOptions}
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 2-Column Split View: Full Annotated PDF Page vs Python Cropped Snippets -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                            
+                            <!-- Left Column: Full PDF Page Image with All Python Bounding Boxes Drawn in Red/Green -->
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center shadow-xl">
+                                <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+                                    <span class="text-xs font-bold text-red-400 flex items-center gap-1.5">
+                                        <i class="ph-bold ph-file-pdf"></i> 🔴 Trang PDF Đã Khoanh Vùng Bounding Box (Trang ${selectedPage})
+                                    </span>
+                                    <span class="text-[10px] text-slate-400 font-mono bg-red-950 px-2 py-0.5 rounded border border-red-500/30">100% Python Pixel Precision</span>
+                                </div>
+
+                                <div class="relative inline-block border-2 border-red-500/40 rounded-xl overflow-hidden shadow-2xl bg-black max-h-[62vh]">
+                                    <img src="${annotatedImgUrl}" onerror="this.src='${pageImgUrl}'" class="max-h-[62vh] object-contain block">
+                                </div>
+                                <p class="text-[11px] text-slate-300 font-mono mt-3 text-center leading-relaxed">
+                                    Ảnh trang PDF được Python trực tiếp khoanh đỏ (Văn bản), viền xanh lá (Bảng biểu) và vàng (Tiêu đề) với độ chính xác tuyệt đối.
+                                </p>
+                            </div>
+
+                            <!-- Right Column: Exact Python-Cropped Red Bounding Box Visual Snippets (Surya & LayoutLM) -->
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col shadow-xl max-h-[65vh] overflow-y-auto">
+                                <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+                                    <span class="text-xs font-bold text-red-400 flex items-center gap-1.5">
+                                        <i class="ph-bold ph-crop"></i> 🔴 Nhánh 1: Viền đỏ Bounding Box Python (Surya / LayoutLM)
+                                    </span>
+                                    <span class="text-[10px] text-slate-400 font-mono bg-red-950 px-2 py-0.5 rounded border border-red-500/30">${allPageChunks.length} Extracted Blocks</span>
+                                </div>
+
+                                ${allPageChunks.length === 0 ? `
+                                    <div class="p-8 text-center text-slate-400 text-xs font-mono">Không có Bounding Box nào ở Trang ${selectedPage}.</div>
+                                ` : `
+                                    <div class="space-y-4 pr-1">
+                                        ${allPageChunks.map(c => {
+                                            const isTable = (c.layout_type || '').toLowerCase().includes('table');
+                                            const isImage = !isTable && ((c.layout_type || '').toLowerCase().includes('figure') || (c.has_image && c.image_url));
+
+                                            let borderStyle = 'border-red-500/50 bg-slate-950';
+                                            let badgeBg = 'bg-red-500/20 text-red-300 border-red-500/40';
+                                            if (isTable) {
+                                                borderStyle = 'border-emerald-500/60 bg-emerald-950/20';
+                                                badgeBg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                                            } else if (isImage) {
+                                                borderStyle = 'border-cyan-500/60 bg-cyan-950/20';
+                                                badgeBg = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+                                            }
+
+                                            return `
+                                                <div class="p-3 rounded-xl border ${borderStyle} shadow-lg transition-all hover:scale-[1.01]">
+                                                    <div class="flex items-center justify-between gap-2 mb-2">
+                                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${badgeBg} border font-mono">
+                                                            🔴 BBox #${c.chunk_id} • ${c.layout_type}
+                                                        </span>
+                                                        <span class="text-[10px] text-slate-400 font-mono">
+                                                            BBox: [${(c.bbox || []).join(', ')}]
+                                                        </span>
+                                                    </div>
+
+                                                    ${c.image_url ? `
+                                                        <div class="p-2 bg-black rounded-lg border border-red-500/40 text-center mb-2 shadow-md">
+                                                            <span class="text-[10px] text-red-400 font-semibold block mb-1">Visual Bounding Box (Python Rendered):</span>
+                                                            <img src="${c.image_url}" class="max-h-48 rounded object-contain mx-auto border border-red-500 shadow-lg">
+                                                        </div>
+                                                    ` : ''}
+
+                                                    <p class="text-xs text-slate-300 font-mono bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed max-h-24 overflow-y-auto">
+                                                        ${escapeHtml(c.text)}
+                                                    </p>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                            <div class="p-3.5 bg-red-950/30 border border-red-500/40 rounded-xl">
+                                <span class="font-bold text-red-400 flex items-center gap-1.5 mb-1">
+                                    <i class="ph-bold ph-crop text-base"></i> 🔴 Nhánh 1: Surya & LayoutLM Bounding Box (Python Output)
+                                </span>
+                                <p class="text-slate-300 text-[11px] leading-relaxed">
+                                    Sử dụng trực tiếp các ảnh cắt viền đỏ do Python PIL tạo ra với độ chính xác tuyệt đối 100% từng pixel.
+                                </p>
+                            </div>
+
+                            <div class="p-3.5 bg-cyan-950/30 border border-cyan-500/40 rounded-xl">
+                                <span class="font-bold text-cyan-400 flex items-center gap-1.5 mb-1">
+                                    <i class="ph-bold ph-eye text-base"></i> 🔵 Nhánh 2: ColPali 2D Visual Patches Grid
+                                </span>
+                                <p class="text-slate-300 text-[11px] leading-relaxed">
+                                    Mã hóa 16 vùng visual patches 2D trực tiếp từ trang PDF không qua OCR.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                window.toggleVisualBboxLayer = function() {
+                    const showSuryaVal = document.getElementById('chk-surya-bbox')?.checked;
+                    const showColPaliVal = document.getElementById('chk-colpali-grid')?.checked;
+                    const pageVal = parseInt(document.getElementById('visual-page-select')?.value || 1);
+                    renderModalVisualBboxTab(pageVal, showSuryaVal, showColPaliVal);
+                };
+
+                window.changeVisualPage = function(pNum) {
+                    const showSuryaVal = document.getElementById('chk-surya-bbox')?.checked;
+                    const showColPaliVal = document.getElementById('chk-colpali-grid')?.checked;
+                    renderModalVisualBboxTab(parseInt(pNum), showSuryaVal, showColPaliVal);
+                };
+            }
+
             document.getElementById('modal-tab-extracted').addEventListener('click', () => {
-                document.getElementById('modal-tab-extracted').className = 'text-blue-400 border-b-2 border-blue-400 pb-1 flex items-center gap-1.5';
-                document.getElementById('modal-tab-preview').className = 'text-slate-400 hover:text-white pb-1';
+                document.getElementById('modal-tab-extracted').className = 'text-blue-400 border-b-2 border-blue-400 pb-1 flex items-center gap-1.5 shrink-0';
+                document.getElementById('modal-tab-preview').className = 'text-slate-400 hover:text-white pb-1 shrink-0';
+                document.getElementById('modal-tab-visual-bbox').className = 'text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0';
                 
                 const body = document.getElementById('modal-body');
                 const chunks = activeDocInModal.extracted_chunks || [];

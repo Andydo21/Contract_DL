@@ -36,71 +36,93 @@
    - 8.2. `graph_rag_engine.py`: Neo4j Knowledge Graph Driver & Cypher Builder
    - 8.3. `hybrid_retriever.py`: RRF & Cross-Encoder Reranking Engine
    - 8.4. `bbox_calculator.py`: Thuật toán tính Bounding Box
-   - 8.5. `local_vlm_client.py`: vLLM Async Client
-   - 8.6. `main_server.py`: FastAPI Web Controller Server
+   - 8.5. `qwen_service.py`: Qwen-2.5 Multimodal RAG Engine
+   - 8.6. `views.py`: RAG Chatbot Orchestrator Controller
 
 ---
 
 # 1. KIẾN TRÚC TỔNG QUAN HỆ THỐNG & LUỒNG DỮ LIỆU
 
-## 1.1. Sơ đồ Luồng Kỹ thuật End-to-End
+## 1.1. Sơ đồ Luồng Kỹ thuật End-to-End (Code-Accurate Pipeline Diagram)
 
 ```text
                                     ┌─────────────────────────────────────────┐
                                     │    PDF SCAN / BẢN VẼ / BẢNG THÔNG SỐ    │
                                     └────────────────────┬────────────────────┘
                                                          │
-                                                         ▼
-                                    ┌─────────────────────────────────────────┐
-                                    │   Pdf2Image Renderer (300 DPI / RGB)    │
-                                    └────────────────────┬────────────────────┘
-                                                         │
-                                                         ▼
-                                    ┌─────────────────────────────────────────┐
-                                    │ Surya Layout Engine & Surya Table Rec   │
-                                    │ - 2D Visual Table/Diagram Boundary BBox │
-                                    │ - Reconstruct Markdown Tables 2D        │
-                                    └────────────────────┬────────────────────┘
-                                                         │
-                                                         ▼
-                                    ┌─────────────────────────────────────────┐
-                                    │ LayoutLMv3 Chunking & Image Cropper     │
-                                    │ - 2D Spatial Positional Embeddings      │
-                                    │ - Crop Red-Box BBox Images (.png)       │
-                                    └───────────┬─────────────────┬───────────┘
-                                                │                 │
-                           (Patch Embeddings)   │                 │ (Graph Relations)
-                                                ▼                 ▼
- ┌───────────────────────────────────────────────────┐   ┌───────────────────────────────────────────────────┐
- │ QDRANT MULTI-VECTOR DB                            │   │ NEO4J KNOWLEDGE GRAPH DB                          │
- │ - Collection: `denso_visual_patches`              │   │ - Nodes: Error, Machine, Component, Drawing       │
- │ - Distance: Cosine MaxSim + SQ8 Quantization      │   │ - Edges: CAUSED_BY, CONNECTED_TO, REFERENCED_IN   │
- └─────────────────────────┬─────────────────────────┘   └─────────────────────────┬─────────────────────────┘
-                           │                                                       │
-                           │ (MaxSim Top-30)                                       │ (Cypher Path Match)
-                           └─────────────────────────┬─────────────────────────────┘
-                                                     ▼
-                                ┌─────────────────────────────────────────┐
-                                │ Reciprocal Rank Fusion (RRF) & BM25     │
-                                └────────────────────┬────────────────────┘
-                                                     │ (Top-20 Candidates)
-                                                     ▼
-                                ┌─────────────────────────────────────────┐
-                                │ BGE-Reranker-v2-m3 (Cross-Encoder CUDA) │
-                                └────────────────────┬────────────────────┘
-                                                     │ (Top-5 Context Blocks & Patches)
-                                                     ▼
-                                ┌─────────────────────────────────────────┐
-                                │ Qwen-2.5 Multimodal RAG Engine          │
-                                │ - Direct Text Quote + In-Depth Reasoning│
-                                │ - Inline Cropped Bounding Box Image Preview│
-                                └────────────────────┬────────────────────┘
-                                                     │
-                                                     ▼
-                                ┌─────────────────────────────────────────┐
-                                │ Output: Deep Executive Summary / Answer │
-                                │ Grounded Quotes + BBox Images (.png)    │
-                                └─────────────────────────────────────────┘
+                        ┌────────────────────────────────┴────────────────────────────────┐
+                        │                 DOCUMENT INGESTION ROUTER                       │
+                        └───────────────┬─────────────────────────┬───────────────────────┘
+                                        │                         │
+                                        ▼                         ▼
+   ┌──────────────────────────────────────────┐  ┌──────────────────────────────────────────┐
+   │ BRANCH 1: SURYA & LAYOUTLM EXTRACTION    │  │ BRANCH 2: COLPALI NO-OCR VISUAL INDEXING │
+   │ (layout_extractor.py)                    │  │ (colpali_service.py)                     │
+   ├──────────────────────────────────────────┤  ├──────────────────────────────────────────┤
+   │ 1. Pdf2Image Render (150 DPI)            │  │ 1. Render Full-Page Images               │
+   │ 2. Surya Layout & OCR Block Extraction   │  │ 2. Spatial Patch Matrix Grid (4x4 = 16)  │
+   │ 3. LayoutLMv3 2D Spatial Positional Enc  │  │ 3. Spatial Patch Vector Bias Engine     │
+   │ 4. Bounding Box Crop Drawer (Red-Border) │  │ 4. Neural Patch Embeddings (384-dim)    │
+   │ 5. all-MiniLM-L6-v2 Embeddings (384-dim) │  │                                          │
+   └────────────────────┬─────────────────────┘  └────────────────────┬─────────────────────┘
+                        │                                             │
+                        ▼                                             ▼
+   ┌──────────────────────────────────────────┐  ┌──────────────────────────────────────────┐
+   │ QDRANT TEXT & BBOX COLLECTION            │  │ QDRANT VISUAL PATCHES COLLECTION         │
+   │ Collection: `denso_document_vectors`     │  │ Collection: `denso_colpali_visual_patches`│
+   └────────────────────┬─────────────────────┘  └────────────────────┬─────────────────────┘
+                        │                                             │
+                        └───────────────────────┬─────────────────────┘
+                                                │
+                                                ▼
+                                    ┌───────────────────────┐
+                                    │  NEO4J KNOWLEDGE DB   │
+                                    │  Graph Nodes & Edges  │
+                                    └───────────┬───────────┘
+                                                │
+══════════════════════════════════════════════════════════════════════════════════════════════════════════
+                                  RETRIEVAL & MULTIMODAL RAG CHATBOT (views.py)
+══════════════════════════════════════════════════════════════════════════════════════════════════════════
+                                                │
+                                                ▼
+                                    ┌───────────────────────┐
+                                    │   USER QUERY INPUT    │
+                                    └───────────┬───────────┘
+                                                │
+           ┌────────────────────────────────────┼────────────────────────────────────┐
+           ▼                                    ▼                                    ▼
+┌──────────────────────────┐       ┌──────────────────────────┐       ┌──────────────────────────┐
+│ ColPali MaxSim Search    │       │ Qdrant Vector Text Search│       │ Neo4j Graph RAG Query    │
+│ (denso_colpali_visual)   │       │ (denso_document_vectors) │       │ (Multi-hop Path Match)   │
+└──────────┬───────────────┘       └────────────┬─────────────┘       └────────────┬─────────────┘
+           │ (Top-5 Visual Matches)             │ (Top-5 Text Chunks)              │ (Graph Paths)
+           └────────────────────────────────────┼──────────────────────────────────┘
+                                                │
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ Candidate Fusion         │
+                                   │ `all_candidates` List    │
+                                   └────────────┬─────────────┘
+                                                │ (Ranked Candidates)
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ RRF & BGE-Reranker-v2-m3 │
+                                   │ Cross-Encoder Rescoring  │
+                                   └────────────┬─────────────┘
+                                                │ (Top-5 Context Chunks + BBox Images)
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ Qwen-2.5 Multimodal RAG  │
+                                   │ (qwen_service.py)        │
+                                   └────────────┬─────────────┘
+                                                │
+                                                ▼
+                                   ┌──────────────────────────┐
+                                   │ OUTPUT UI CHATBOT        │
+                                   │ - Grounded Text Quotes   │
+                                   │ - Qwen Technical Analysis│
+                                   │ - Inline BBox Red Images │
+                                   └──────────────────────────┘
 ```
 
 ## 1.2. Mạng lưới Hạ tầng Air-Gapped Security Topology
@@ -162,13 +184,18 @@ $$v_{\text{quantized}} = \text{round}\left( \frac{v_{\text{float32}} - v_{\min}}
         │
         ├── [:HAS_DOCUMENT] ──► (:Document {doc_id: STRING, title: STRING, file_path: STRING})
         │                            │
-        │                            └── [:HAS_PAGE] ──► (:Page {page_num: INT, bbox_json: STRING})
+        │                            └── [:HAS_PAGE] ──► (:Page {page_num: INT})
         │                                                     │
+        │                                                     └── [:HAS_CHUNK] ──► (:Chunk {chunk_id: INT, bbox: ARRAY})
+        │                                                                               │
+        │                                                                               ├── [:NEXT_CHUNK] ──────────────► (:Chunk)
+        │                                                                               └── [:SPATIALLY_ADJACENT_TO] ──► (:Chunk)
+        │
         └── [:EMITS_ERROR] ──► (:ErrorCode {code: STRING, name_vi: STRING, name_jp: STRING})
                                      │                        │
                                      └── [:CAUSED_BY] ──► (:Component {part_no: STRING, name: STRING})
                                                                 │
-                                                                └── [:LOCATED_ON] ──► (:Page)
+                                                                └── [:LOCATED_ON] ──► (:Chunk)
 ```
 
 ## 3.2. Quy trình Trích xuất Thực thể Tự động (Entity Extraction Pipeline)
@@ -434,17 +461,41 @@ class Neo4jGraphRAGEngine:
     def close(self):
         self.driver.close()
 
+    def create_spatial_chunk_relationships(self, doc_id: str, page_num: int, chunks: List[Dict[str, Any]]):
+        """
+        Đẩy 4 Micro-Chunks của trang vào Graph DB và tạo đường nối Mối quan hệ Không gian 2D (SPATIALLY_ADJACENT_TO & NEXT_CHUNK)
+        """
+        cypher = """
+        UNWIND $chunks AS c
+        MERGE (chk:Chunk {id: c.chunk_id, doc_id: $doc_id, page: $page_num})
+        SET chk.bbox = c.bbox, chk.text = c.text, chk.layout_type = c.layout_type
+        WITH chk, c
+        MATCH (p:Page {page_num: $page_num, doc_id: $doc_id})
+        MERGE (p)-[:HAS_CHUNK]->(chk)
+        """
+        # Tạo đường nối nối tiếp & đường nối Không gian 2D kề nhau giữa các chunks
+        spatial_cypher = """
+        MATCH (c1:Chunk {doc_id: $doc_id, page: $page_num}), (c2:Chunk {doc_id: $doc_id, page: $page_num})
+        WHERE c1.id <> c2.id AND abs(c1.bbox[1] - c2.bbox[1]) < 150
+        MERGE (c1)-[:SPATIALLY_ADJACENT_TO]->(c2)
+        """
+        with self.driver.session() as session:
+            session.run(cypher, doc_id=doc_id, page_num=page_num, chunks=chunks)
+            session.run(spatial_cypher, doc_id=doc_id, page_num=page_num)
+
     def query_error_code_hierarchy(self, error_code: str) -> List[Dict[str, Any]]:
         """
-        Truy vấn Cypher Multi-hop: ErrorCode -> Component -> Page -> Document
+        Truy vấn Cypher Multi-hop: ErrorCode -> Component -> Chunk -> Document
         """
         cypher_query = """
         MATCH (e:ErrorCode {code: $code})-[:CAUSED_BY]->(c:Component)
-        OPTIONAL MATCH (c)-[:LOCATED_ON]->(p:Page)<-[:HAS_PAGE]-(d:Document)
+        OPTIONAL MATCH (c)-[:LOCATED_ON]->(chk:Chunk)-[:SPATIALLY_ADJACENT_TO*1..2]-(adjacent:Chunk)
+        OPTIONAL MATCH (chk)<-[:HAS_CHUNK]-(p:Page)<-[:HAS_PAGE]-(d:Document)
         RETURN 
             e.code AS error_code,
             c.part_no AS component_part_no,
-            c.name AS component_name,
+            chk.text AS primary_chunk_text,
+            adjacent.text AS adjacent_chunk_text,
             d.title AS document_title,
             p.page_num AS page_number
         LIMIT 5;

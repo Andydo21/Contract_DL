@@ -278,6 +278,10 @@ class DocumentPreviewView(View):
                 chunk['vector_sample'] = full_v[:10]
                 chunk['full_vector'] = full_v
 
+        annotated_pages = {}
+        if category == 'pdf':
+            annotated_pages = self._generate_annotated_pdf_pages(doc, raw_chunks)
+
         preview_data = {
             'id': doc.id,
             'original_name': doc.original_name,
@@ -291,6 +295,7 @@ class DocumentPreviewView(View):
             'extracted_chunks_count': doc.extracted_chunks_count,
             'vector_points_count': doc.vector_points_count,
             'extracted_chunks': raw_chunks,
+            'annotated_pages': annotated_pages,
             'preview_type': 'raw',
             'content': None
         }
@@ -320,6 +325,79 @@ class DocumentPreviewView(View):
             preview_data['preview_type'] = 'download'
 
         return JsonResponse({'success': True, 'preview': preview_data})
+
+    def _generate_annotated_pdf_pages(self, doc, raw_chunks):
+        annotated_map = {}
+        try:
+            from django.conf import settings
+            from PIL import Image, ImageDraw, ImageFont
+            from pathlib import Path
+
+            output_dir = Path(settings.MEDIA_ROOT) / 'extracted_images'
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            page_chunks_map = {}
+            for c in raw_chunks:
+                p_num = c.get('page_number', 1)
+                if p_num not in page_chunks_map:
+                    page_chunks_map[p_num] = []
+                page_chunks_map[p_num].append(c)
+
+            for p_num, p_chunks in page_chunks_map.items():
+                annotated_filename = f"annotated_doc_{doc.id}_p{p_num}.png"
+                annotated_path = output_dir / annotated_filename
+                annotated_url = f"{settings.MEDIA_URL}extracted_images/{annotated_filename}"
+
+                if annotated_path.exists():
+                    annotated_map[str(p_num)] = annotated_url
+                    continue
+
+                base_page_filename = f"pdf_page_{doc.id}_p{p_num}.png"
+                base_page_path = output_dir / base_page_filename
+
+                if not base_page_path.exists() and doc.file and os.path.exists(doc.file.path):
+                    import fitz
+                    pdf_doc = fitz.open(doc.file.path)
+                    if p_num - 1 < len(pdf_doc):
+                        page = pdf_doc[p_num - 1]
+                        pix = page.get_pixmap(dpi=150)
+                        pix.save(str(base_page_path))
+                    pdf_doc.close()
+
+                if base_page_path.exists():
+                    with Image.open(base_page_path) as img:
+                        img = img.convert("RGB")
+                        w, h = img.size
+                        draw = ImageDraw.Draw(img)
+
+                        for chunk in p_chunks:
+                            bbox = chunk.get('bbox') or [50, 50, 950, 950]
+                            x0 = int((bbox[0] / 1000.0) * w)
+                            y0 = int((bbox[1] / 1000.0) * h)
+                            x1 = int((bbox[2] / 1000.0) * w)
+                            y1 = int((bbox[3] / 1000.0) * h)
+
+                            l_type = (chunk.get('layout_type') or 'paragraph').lower()
+                            if 'table' in l_type:
+                                color = "#10b981"
+                                label_text = f"TABLE #{chunk.get('chunk_id')}"
+                            elif 'title' in l_type:
+                                color = "#f59e0b"
+                                label_text = f"TITLE #{chunk.get('chunk_id')}"
+                            else:
+                                color = "#ef4444"
+                                label_text = f"BBOX #{chunk.get('chunk_id')}: {l_type.upper()}"
+
+                            draw.rectangle([x0, y0, x1, y1], outline=color, width=4)
+                            draw.rectangle([x0, max(0, y0 - 18), x0 + min(160, len(label_text)*9), y0], fill=color)
+                            draw.text((x0 + 4, max(0, y0 - 15)), label_text, fill="white")
+
+                        img.save(annotated_path, "PNG")
+                        annotated_map[str(p_num)] = annotated_url
+        except Exception as e:
+            print("[Generate Annotated Pages Error]", str(e))
+
+        return annotated_map
 
 
 class ColPaliIndexAPIView(APIView):
