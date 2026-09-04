@@ -19,7 +19,11 @@ class IndexView(View):
     Giao diện chính (Dashboard Web UI Frontend) quản lý & tải lên tài liệu DENSO VisionMind
     """
     def get(self, request):
-        return render(request, 'documents/index.html')
+        response = render(request, 'documents/index.html')
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
 
 
 class DocumentListCreateAPIView(APIView):
