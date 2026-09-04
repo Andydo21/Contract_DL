@@ -198,17 +198,30 @@ class ColPaliVisualIndexer:
 
         return pages
 
-    def colpali_maxsim_search(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def colpali_maxsim_search(self, query_text: str, top_k: int = 5, doc_id_filter=None) -> List[Dict[str, Any]]:
         if not self.client:
             return []
 
         query_vector = self.generate_patch_embedding(query_text, 16, 16)
 
+        search_filter = None
+        if doc_id_filter:
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            search_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="document_id",
+                        match=MatchValue(value=int(doc_id_filter))
+                    )
+                ]
+            )
+
         try:
             response = self.client.query_points(
                 collection_name=self.COLLECTION_NAME,
                 query=query_vector,
-                limit=top_k * 3
+                limit=top_k * 3,
+                query_filter=search_filter
             )
 
             raw_points = getattr(response, 'points', response)

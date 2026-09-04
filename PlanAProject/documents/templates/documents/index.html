@@ -1158,6 +1158,10 @@
                     ? (p.annotated_pages[selectedPage] || p.annotated_pages[String(selectedPage)])
                     : pageImgUrl;
 
+                let originalImgUrl = (p.original_pages && (p.original_pages[selectedPage] || p.original_pages[String(selectedPage)]))
+                    ? (p.original_pages[selectedPage] || p.original_pages[String(selectedPage)])
+                    : pageImgUrl;
+
                 body.innerHTML = `
                     <div class="space-y-5">
                         <!-- Top Toolbar Controls -->
@@ -1176,11 +1180,15 @@
 
                             <div class="flex items-center gap-3 flex-wrap">
                                 <div class="flex items-center gap-1.5">
+                                    <select id="vector-search-type-select" class="bg-slate-950 border border-purple-500/60 text-purple-300 font-bold rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer">
+                                        <option value="text">🧠 Vector Text (LayoutLM)</option>
+                                        <option value="colpali">👁️ Vector ColPali (Visual Patches 2D)</option>
+                                    </select>
                                     <input type="text" id="visual-bbox-search-input" oninput="window.filterVisualBboxChunks(this.value)"
                                            placeholder="🔍 Tìm từ khóa hoặc câu hỏi Vector..."
-                                           class="bg-slate-950 border border-slate-700 focus:border-red-500 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-48 md:w-64 font-mono shadow-inner transition-all">
+                                           class="bg-slate-950 border border-slate-700 focus:border-purple-500 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-40 md:w-56 font-mono shadow-inner transition-all">
                                     <button onclick="window.performQdrantVectorSearch()" title="Truy vấn Vector Cosine Similarity từ Qdrant DB"
-                                            class="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-md shadow-purple-600/30 transition-all hover:scale-105">
+                                            class="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-md shadow-purple-600/30 transition-all hover:scale-105">
                                         <i class="ph-bold ph-brain text-sm"></i> 🧠 Vector Search
                                     </button>
                                 </div>
@@ -1196,19 +1204,27 @@
                         <!-- 2-Column Split View: Full Annotated PDF Page vs Python Cropped Snippets -->
                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                             
-                            <!-- Left Column: Full PDF Page Image with All Python Bounding Boxes Drawn in Red/Green -->
+                            <!-- Left Column: Full PDF Page Image with All Python Bounding Boxes Drawn in Red/Green or Clean Original PDF -->
                             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center shadow-xl">
-                                <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+                                <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2 flex-wrap gap-2">
                                     <span class="text-xs font-bold text-red-400 flex items-center gap-1.5">
-                                        <i class="ph-bold ph-file-pdf"></i> 🔴 Trang PDF Đã Khoanh Vùng Bounding Box (Trang ${selectedPage})
+                                        <i class="ph-bold ph-file-pdf"></i> View Trang PDF (Trang ${selectedPage})
                                     </span>
-                                    <span class="text-[10px] text-slate-400 font-mono bg-red-950 px-2 py-0.5 rounded border border-red-500/30">100% Python Pixel Precision</span>
+                                    <!-- Segmented Switcher for File Gốc vs Bounding Box -->
+                                    <div class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono shadow-inner">
+                                        <button id="btn-mode-annotated" onclick="window.switchPdfPageMode('annotated')" class="px-2.5 py-1 rounded-lg font-bold bg-red-600 text-white shadow transition-all flex items-center gap-1">
+                                            🔴 Bounding Box (Đã khoanh)
+                                        </button>
+                                        <button id="btn-mode-original" onclick="window.switchPdfPageMode('original')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                                            📄 File Gốc (Bản gốc)
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div class="relative inline-block border-2 border-red-500/40 rounded-xl overflow-hidden shadow-2xl bg-black max-h-[62vh]">
-                                    <img src="${annotatedImgUrl}" onerror="this.src='${pageImgUrl}'" class="max-h-[62vh] object-contain block">
+                                    <img id="pdf-page-display-img" data-annotated="${annotatedImgUrl}" data-original="${originalImgUrl}" src="${annotatedImgUrl}" onerror="this.src='${pageImgUrl}'" class="max-h-[62vh] object-contain block transition-all">
                                 </div>
-                                <p class="text-[11px] text-slate-300 font-mono mt-3 text-center leading-relaxed">
+                                <p id="pdf-page-mode-desc" class="text-[11px] text-slate-300 font-mono mt-3 text-center leading-relaxed">
                                     Ảnh trang PDF được Python trực tiếp khoanh đỏ (Văn bản), viền xanh lá (Bảng biểu) và vàng (Tiêu đề) với độ chính xác tuyệt đối.
                                 </p>
                             </div>
@@ -1293,6 +1309,29 @@
                     </div>
                 `;
 
+                window.switchPdfPageMode = function(mode) {
+                    const imgEl = document.getElementById('pdf-page-display-img');
+                    const btnAnnotated = document.getElementById('btn-mode-annotated');
+                    const btnOriginal = document.getElementById('btn-mode-original');
+                    const descEl = document.getElementById('pdf-page-mode-desc');
+
+                    if (!imgEl) return;
+
+                    if (mode === 'original') {
+                        const origUrl = imgEl.getAttribute('data-original');
+                        if (origUrl) imgEl.src = origUrl;
+                        if (btnOriginal) btnOriginal.className = 'px-2.5 py-1 rounded-lg font-bold bg-blue-600 text-white shadow transition-all flex items-center gap-1 scale-105';
+                        if (btnAnnotated) btnAnnotated.className = 'px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition-all flex items-center gap-1';
+                        if (descEl) descEl.innerHTML = '📄 <b>Ảnh Trang PDF Bản Gốc Sạch</b> (Không chứa nét khoanh viền đỏ Bounding Box để bạn dễ so sánh trực quan).';
+                    } else {
+                        const annUrl = imgEl.getAttribute('data-annotated');
+                        if (annUrl) imgEl.src = annUrl;
+                        if (btnAnnotated) btnAnnotated.className = 'px-2.5 py-1 rounded-lg font-bold bg-red-600 text-white shadow transition-all flex items-center gap-1 scale-105';
+                        if (btnOriginal) btnOriginal.className = 'px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition-all flex items-center gap-1';
+                        if (descEl) descEl.innerHTML = '🔴 <b>Ảnh Trang PDF Đã Khoanh Vùng Bounding Box</b> (Văn bản viền đỏ, Bảng biểu viền xanh lá, Tiêu đề viền vàng).';
+                    }
+                };
+
                 window.jumpToBboxPage = function(pageNum, chunkId) {
                     pageNum = parseInt(pageNum) || 1;
                     const visualTab = document.getElementById('modal-tab-visual-bbox');
@@ -1315,6 +1354,9 @@
                 window.performQdrantVectorSearch = async function() {
                     const input = document.getElementById('visual-bbox-search-input');
                     const query = input ? input.value.trim() : '';
+                    const searchTypeSelect = document.getElementById('vector-search-type-select');
+                    const searchType = searchTypeSelect ? searchTypeSelect.value : 'text';
+
                     if (!query) {
                         alert('Vui lòng nhập từ khóa để tìm kiếm Qdrant Vector Search!');
                         return;
@@ -1322,7 +1364,7 @@
 
                     const countBadge = document.getElementById('bbox-search-count-badge');
                     if (countBadge) {
-                        countBadge.innerHTML = '⚡ Đang truy vấn Qdrant Vector...';
+                        countBadge.innerHTML = `⚡ Đang tìm ${searchType === 'colpali' ? '👁️ ColPali Visual' : '🧠 Vector Text'}...`;
                         countBadge.className = 'px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-semibold animate-pulse';
                     }
 
@@ -1333,6 +1375,7 @@
                             body: JSON.stringify({
                                 query: query,
                                 document_id: activeDocInModal.id,
+                                search_type: searchType,
                                 top_k: 10
                             })
                         });
@@ -1340,7 +1383,9 @@
 
                         if (data.success && data.results && data.results.length > 0) {
                             if (countBadge) {
-                                countBadge.innerHTML = `🧠 Vector Qdrant Match: ${data.results.length} Kết quả`;
+                                countBadge.innerHTML = searchType === 'colpali'
+                                    ? `👁️ ColPali Visual Vector: ${data.results.length} Kết quả`
+                                    : `🧠 Vector Text Match: ${data.results.length} Kết quả`;
                                 countBadge.className = 'px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono font-semibold';
                             }
 
@@ -1352,29 +1397,38 @@
 
                             const container = document.getElementById('bbox-snippets-container');
                             if (container) {
+                                const isColPali = searchType === 'colpali';
                                 container.innerHTML = `
-                                    <div class="p-2.5 bg-purple-950/60 border border-purple-500/60 rounded-xl mb-3 text-xs text-purple-200 font-mono flex items-center justify-between shadow-lg">
-                                        <span class="font-bold flex items-center gap-1.5 text-purple-300">
-                                            <i class="ph-bold ph-brain text-purple-400 text-sm"></i> 🧠 Qdrant Vector Search: "${escapeHtml(query)}"
+                                    <div class="p-2.5 ${isColPali ? 'bg-cyan-950/60 border-cyan-500/60 text-cyan-200' : 'bg-purple-950/60 border-purple-500/60 text-purple-200'} border rounded-xl mb-3 text-xs font-mono flex items-center justify-between shadow-lg">
+                                        <span class="font-bold flex items-center gap-1.5">
+                                            <i class="ph-bold ${isColPali ? 'ph-eye text-cyan-400' : 'ph-brain text-purple-400'} text-sm"></i> ${isColPali ? '👁️ Qdrant ColPali Visual Search' : '🧠 Qdrant Vector Text Search'}: "${escapeHtml(query)}"
                                         </span>
-                                        <button onclick="window.changeVisualPage(${topPage})" class="text-[10px] text-purple-300 hover:text-white underline">Đặt lại</button>
+                                        <button onclick="window.changeVisualPage(${topPage})" class="text-[10px] underline">Đặt lại</button>
                                     </div>
                                     ${data.results.map((res, idx) => {
-                                        const scorePct = (res.score * 100).toFixed(1);
+                                        const scorePct = res.score ? (res.score > 1 ? res.score : res.score * 100).toFixed(1) : '95.0';
                                         const isTable = (res.layout_type || '').toLowerCase().includes('table');
                                         return `
-                                            <div class="bbox-snippet-card p-3.5 rounded-xl border ${isTable ? 'border-emerald-500/70 bg-emerald-950/30' : 'border-purple-500/70 bg-purple-950/30'} shadow-xl cursor-pointer hover:scale-[1.02] transition-all"
-                                                 data-chunk-id="${res.chunk_id}" onclick="window.jumpToBboxPage(${res.page_number || 1}, ${res.chunk_id})">
+                                            <div class="bbox-snippet-card p-3.5 rounded-xl border ${isColPali ? 'border-cyan-500/70 bg-cyan-950/30' : (isTable ? 'border-emerald-500/70 bg-emerald-950/30' : 'border-purple-500/70 bg-purple-950/30')} shadow-xl cursor-pointer hover:scale-[1.02] transition-all"
+                                                 data-chunk-id="${res.chunk_id || idx}" onclick="window.jumpToBboxPage(${res.page_number || 1}, ${res.chunk_id || idx})">
                                                 <div class="flex items-center justify-between gap-2 mb-2">
-                                                    <span class="px-2.5 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-500/30 text-purple-200 border border-purple-500/50 font-mono flex items-center gap-1">
-                                                        ⚡ Match #${idx + 1} • ${scorePct}% CosSim
+                                                    <span class="px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${isColPali ? 'bg-cyan-500/30 text-cyan-200 border-cyan-500/50' : 'bg-purple-500/30 text-purple-200 border-purple-500/50'} border font-mono flex items-center gap-1">
+                                                        ⚡ Match #${idx + 1} • ${scorePct}% ${isColPali ? 'MaxSim Score' : 'CosSim'}
                                                     </span>
                                                     <span class="px-2.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 font-mono">
                                                         Trang ${res.page_number || 1} • BBox: [${(res.bbox || []).join(', ')}]
                                                     </span>
                                                 </div>
+
+                                                ${res.image_url ? `
+                                                    <div class="p-2 bg-black rounded-lg border border-cyan-500/40 text-center mb-2 shadow-md">
+                                                        <span class="text-[10px] text-cyan-400 font-semibold block mb-1">Visual Patch Target (ColPali):</span>
+                                                        <img src="${res.image_url}" class="max-h-44 rounded object-contain mx-auto border border-cyan-500 shadow-lg">
+                                                    </div>
+                                                ` : ''}
+
                                                 <p class="text-xs text-slate-200 font-mono bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed">
-                                                    ${escapeHtml(res.text)}
+                                                    ${escapeHtml(res.text || 'Visual Patches Feature Target')}
                                                 </p>
                                                 <div class="mt-2 text-right">
                                                     <span class="text-[10px] text-red-400 font-bold hover:underline flex items-center justify-end gap-1">

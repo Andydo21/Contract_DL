@@ -212,24 +212,32 @@ class VectorizeDocumentAPIView(APIView):
 
 class VectorSearchAPIView(APIView):
     """
-    API Tìm kiếm Tương đồng Vector Similarity Search trên Qdrant Vector DB
+    API Tìm kiếm Tương đồng Vector Similarity Search trên Qdrant Vector DB (Hỗ trợ Text & ColPali Visual Vector)
     """
     def post(self, request):
         query = request.data.get('query', '').strip()
         category = request.data.get('category', 'all')
         doc_id = request.data.get('document_id')
+        search_type = request.data.get('search_type', 'text')
         top_k = int(request.data.get('top_k', 10))
 
         if not query:
             return Response({'success': False, 'message': 'Vui lòng nhập từ khóa truy vấn Vector.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            vector_service = QdrantVectorDBService()
-            results = vector_service.vector_search(query_text=query, top_k=top_k, category_filter=category, doc_id_filter=doc_id)
+            results = []
+            if search_type == 'colpali':
+                from documents.services.colpali_service import ColPaliVisualIndexer
+                colpali = ColPaliVisualIndexer()
+                results = colpali.colpali_maxsim_search(query_text=query, top_k=top_k, doc_id_filter=doc_id)
+            else:
+                vector_service = QdrantVectorDBService()
+                results = vector_service.vector_search(query_text=query, top_k=top_k, category_filter=category, doc_id_filter=doc_id)
 
             return Response({
                 'success': True,
                 'query': query,
+                'search_type': search_type,
                 'results_count': len(results),
                 'results': results
             })
@@ -280,8 +288,9 @@ class DocumentPreviewView(View):
                 chunk['full_vector'] = full_v
 
         annotated_pages = {}
+        original_pages = {}
         if category == 'pdf':
-            annotated_pages = self._generate_annotated_pdf_pages(doc, raw_chunks)
+            original_pages, annotated_pages = self._generate_annotated_pdf_pages(doc, raw_chunks)
 
         preview_data = {
             'id': doc.id,
@@ -297,6 +306,7 @@ class DocumentPreviewView(View):
             'vector_points_count': doc.vector_points_count,
             'extracted_chunks': raw_chunks,
             'annotated_pages': annotated_pages,
+            'original_pages': original_pages,
             'preview_type': 'raw',
             'content': None
         }
@@ -329,6 +339,7 @@ class DocumentPreviewView(View):
 
     def _generate_annotated_pdf_pages(self, doc, raw_chunks):
         annotated_map = {}
+        original_map = {}
         try:
             from django.conf import settings
             from PIL import Image, ImageDraw, ImageFont
@@ -349,12 +360,16 @@ class DocumentPreviewView(View):
                 annotated_path = output_dir / annotated_filename
                 annotated_url = f"{settings.MEDIA_URL}extracted_images/{annotated_filename}"
 
+                base_page_filename = f"pdf_page_{doc.id}_p{p_num}.png"
+                base_page_path = output_dir / base_page_filename
+                base_page_url = f"{settings.MEDIA_URL}extracted_images/{base_page_filename}"
+
+                if base_page_path.exists():
+                    original_map[str(p_num)] = base_page_url
+
                 if annotated_path.exists():
                     annotated_map[str(p_num)] = annotated_url
                     continue
-
-                base_page_filename = f"pdf_page_{doc.id}_p{p_num}.png"
-                base_page_path = output_dir / base_page_filename
 
                 if not base_page_path.exists() and doc.file and os.path.exists(doc.file.path):
                     import fitz
@@ -363,6 +378,7 @@ class DocumentPreviewView(View):
                         page = pdf_doc[p_num - 1]
                         pix = page.get_pixmap(dpi=150)
                         pix.save(str(base_page_path))
+                        original_map[str(p_num)] = base_page_url
                     pdf_doc.close()
 
                 if base_page_path.exists():
@@ -398,7 +414,7 @@ class DocumentPreviewView(View):
         except Exception as e:
             print("[Generate Annotated Pages Error]", str(e))
 
-        return annotated_map
+        return original_map, annotated_map
 
 
 class ColPaliIndexAPIView(APIView):
