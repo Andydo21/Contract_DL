@@ -364,8 +364,8 @@
                     <span id="modal-chunks-badge" class="px-1.5 py-0.2 bg-blue-500/20 text-blue-300 rounded text-[10px]">0</span>
                 </button>
                 <button id="modal-tab-visual-bbox" class="text-slate-400 hover:text-white pb-1 flex items-center gap-1.5 shrink-0">
-                    <i class="ph-bold ph-crop text-red-400"></i> Bounding Box Inspector (Surya/LayoutLM vs ColPali)
-                    <span class="px-1.5 py-0.2 bg-red-500/20 text-red-300 border border-red-500/30 rounded text-[10px] font-bold">Visual Map</span>
+                    <i class="ph-bold ph-columns text-red-400"></i> File Gốc & Extracted Visual Map (Side-by-Side)
+                    <span class="px-1.5 py-0.2 bg-red-500/20 text-red-300 border border-red-500/30 rounded text-[10px] font-bold">Dual View</span>
                 </button>
             </div>
 
@@ -1197,10 +1197,10 @@
                         <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
                             <div class="flex items-center gap-3 flex-wrap">
                                 <span class="font-bold text-white flex items-center gap-1.5 text-sm">
-                                    <i class="ph-bold ph-crop text-red-400 text-base"></i> Full Annotated PDF Page & Bounding Boxes:
+                                    <i class="ph-bold ph-columns text-purple-400 text-base"></i> File Gốc & Dữ liệu Extracted (Dual Inspector):
                                 </span>
                                 <span id="bbox-search-count-badge" class="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 font-mono font-semibold">
-                                    🔴 BBoxes: ${allPageChunks.length}
+                                    🔴 Extracted Blocks: ${allPageChunks.length}
                                 </span>
                                 <span class="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono font-semibold">
                                     🔵 ColPali Visual Patches: 16
@@ -1236,35 +1236,35 @@
                             <!-- Left Column: Full PDF Page Image with All Python Bounding Boxes Drawn in Red/Green or Clean Original PDF -->
                             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center shadow-xl">
                                 <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2 flex-wrap gap-2">
-                                    <span class="text-xs font-bold text-red-400 flex items-center gap-1.5">
-                                        <i class="ph-bold ph-file-pdf"></i> View Trang PDF (Trang ${selectedPage})
+                                    <span class="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                                        <i class="ph-bold ph-file-pdf"></i> 📄 BÊN TRÁI: FILE GỐC (Trang ${selectedPage}/${maxPage})
                                     </span>
                                     <!-- Segmented Switcher for File Gốc vs Bounding Box -->
                                     <div class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono shadow-inner">
                                         <button id="btn-mode-annotated" onclick="window.switchPdfPageMode('annotated')" class="px-2.5 py-1 rounded-lg font-bold bg-red-600 text-white shadow transition-all flex items-center gap-1">
-                                            🔴 Bounding Box (Đã khoanh)
+                                            🔴 Overlay Bounding Box AI
                                         </button>
                                         <button id="btn-mode-original" onclick="window.switchPdfPageMode('original')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition-all flex items-center gap-1">
-                                            📄 File Gốc (Bản gốc)
+                                            📄 File Gốc Clean
                                         </button>
                                     </div>
                                 </div>
 
-                                <div class="relative inline-block border-2 border-red-500/40 rounded-xl overflow-hidden shadow-2xl bg-black max-h-[62vh]">
+                                <div class="relative inline-block border-2 border-blue-500/40 rounded-xl overflow-hidden shadow-2xl bg-black max-h-[62vh]">
                                     <img id="pdf-page-display-img" data-annotated="${annotatedImgUrl}" data-original="${originalImgUrl}" src="${annotatedImgUrl}" onerror="this.src='${pageImgUrl}'" class="max-h-[62vh] object-contain block transition-all">
                                 </div>
                                 <p id="pdf-page-mode-desc" class="text-[11px] text-slate-300 font-mono mt-3 text-center leading-relaxed">
-                                    Ảnh trang PDF được Python trực tiếp khoanh đỏ (Văn bản), viền xanh lá (Bảng biểu) và vàng (Tiêu đề) với độ chính xác tuyệt đối.
+                                    Trang PDF File Gốc được hiển thị kết hợp lớp phủ AI Bounding Box (Đỏ: Văn bản, Xanh lá: Bảng biểu, Vàng: Tiêu đề).
                                 </p>
                             </div>
 
                             <!-- Right Column: Exact Python-Cropped Red Bounding Box Visual Snippets (Surya & LayoutLM) -->
                             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col shadow-xl max-h-[65vh] overflow-y-auto">
                                 <div class="w-full flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
-                                    <span class="text-xs font-bold text-red-400 flex items-center gap-1.5">
-                                        <i class="ph-bold ph-crop"></i> 🔴 Nhánh 1: Viền đỏ Bounding Box Python (Surya / LayoutLM)
+                                    <span class="text-xs font-bold text-purple-400 flex items-center gap-1.5">
+                                        <i class="ph-bold ph-cpu"></i> 🧩 BÊN PHẢI: TẤT CẢ DỮ LIỆU ĐÃ EXTRACTION (Trang ${selectedPage})
                                     </span>
-                                    <span class="text-[10px] text-slate-400 font-mono bg-red-950 px-2 py-0.5 rounded border border-red-500/30">${allPageChunks.length} Extracted Blocks</span>
+                                    <span class="text-[10px] text-slate-400 font-mono bg-purple-950 px-2 py-0.5 rounded border border-purple-500/30">${allPageChunks.length} Extracted Blocks</span>
                                 </div>
 
                                 ${allPageChunks.length === 0 ? `
