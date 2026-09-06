@@ -492,7 +492,7 @@ class RAGChatbotAPIView(APIView):
             # 2. Text & Surya-Table Vector Search
             from documents.services.vector_db_service import QdrantVectorDBService
             vec_service = QdrantVectorDBService()
-            vec_results = vec_service.vector_search(query, top_k=5)
+            vec_results = vec_service.vector_search(query, top_k=25)
 
             # 2.5 Neo4j Knowledge Graph Path Matching (GraphRAG)
             graph_citations = []
@@ -513,27 +513,37 @@ class RAGChatbotAPIView(APIView):
             # Tổng hợp Candidates (Vector + ColPali + Graph)
             all_candidates = colpali_results + vec_results + graph_citations
 
-            # 2.6 Check database for specific document text chunks (Summarization & Deep Lookup)
+            # 2.6 Dynamic Keyword & Token Candidate Retrieval across extracted database chunks
+            import re
             from documents.models import DocumentFile
+            query_tokens = [t.strip().lower() for t in re.split(r'[\s,;:?!\(\)]+', query) if len(t.strip()) >= 3]
             matching_docs = DocumentFile.objects.filter(is_extracted=True)
+
             for doc in matching_docs:
                 doc_name_lower = doc.original_name.lower()
-                doc_stem = doc_name_lower.split('.')[0] # e.g. "industrial_research_paper"
-                doc_stem_space = doc_stem.replace('_', ' ') # e.g. "industrial research paper"
+                doc_stem = doc_name_lower.split('.')[0]
+                doc_stem_space = doc_stem.replace('_', ' ').replace('-', ' ')
                 
                 query_lower = query.lower()
-                if doc_name_lower in query_lower or doc_stem in query_lower or doc_stem_space in query_lower:
-                    extracted_chunks = doc.get_extracted_chunks()
-                    for chunk in extracted_chunks[:15]: # Take top text chunks
+                is_doc_mentioned = doc_name_lower in query_lower or doc_stem in query_lower or doc_stem_space in query_lower
+
+                extracted_chunks = doc.get_extracted_chunks()
+                for chunk in extracted_chunks:
+                    txt = chunk.get("text", "")
+                    txt_lower = txt.lower()
+                    
+                    term_match = any(t in txt_lower for t in query_tokens) if query_tokens else False
+                    
+                    if is_doc_mentioned or term_match:
                         all_candidates.append({
                             "original_name": doc.original_name,
                             "category": doc.category,
                             "chunk_id": chunk.get("chunk_id", 0),
                             "layout_type": chunk.get("layout_type", "text"),
-                            "text": chunk.get("text", ""),
+                            "text": txt,
                             "bbox": chunk.get("bbox", []),
                             "page_number": chunk.get("page_number", 1),
-                            "score": 98.0, # High score for explicit document match
+                            "score": 0.0,
                             "image_url": chunk.get("image_url", ""),
                             "file_url": doc.file.url if doc.file else ""
                         })

@@ -76,6 +76,46 @@ class ColPaliVisualIndexer:
         norm = math.sqrt(sum(v * v for v in vector)) or 1.0
         return [v / norm for v in vector]
 
+    def _draw_visual_patch_crop(self, page_img_path: Path, bbox_norm: list, crop_filename: str) -> str:
+        try:
+            crop_save_path = self.output_img_dir / crop_filename
+            if crop_save_path.exists():
+                return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
+
+            from PIL import Image, ImageDraw
+            with Image.open(page_img_path) as img:
+                img = img.convert("RGB")
+                w, h = img.size
+
+                x_min = int((bbox_norm[0] / 1000.0) * w)
+                y_min = int((bbox_norm[1] / 1000.0) * h)
+                x_max = int((bbox_norm[2] / 1000.0) * w)
+                y_max = int((bbox_norm[3] / 1000.0) * h)
+
+                crop_x0 = max(0, x_min)
+                crop_y0 = max(0, y_min)
+                crop_x1 = min(w, x_max)
+                crop_y1 = min(h, y_max)
+
+                if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
+                    return ""
+
+                cropped = img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
+                draw = ImageDraw.Draw(cropped)
+
+                rel_x0 = x_min - crop_x0
+                rel_y0 = y_min - crop_y0
+                rel_x1 = x_max - crop_x0
+                rel_y1 = y_max - crop_y0
+
+                draw.rectangle([rel_x0, rel_y0, rel_x1 - 1, rel_y1 - 1], outline="red", width=3)
+                cropped.save(crop_save_path, "PNG")
+
+                return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
+        except Exception as e:
+            print("[ColPali Draw Crop Error]", str(e))
+            return ""
+
     def index_document_colpali(self, doc_file) -> Dict[str, Any]:
         """
         Ingestion ColPali: Chuyển đổi PDF/Ảnh thành tập hợp Visual Patch Vectors & đẩy vào Qdrant
@@ -91,10 +131,10 @@ class ColPaliVisualIndexer:
         elif category == 'image':
             pages_data = [{
                 'page_number': 1,
-                'image_url': doc_file.file.url,
+                'image_url': doc_file.file.url if doc_file.file else "",
                 'image_path': file_path,
-                'width': 1024,
-                'height': 1024,
+                'width': 1000,
+                'height': 1000,
                 'label': f"Visual Diagram - {doc_file.original_name}"
             }]
         else:
@@ -110,23 +150,49 @@ class ColPaliVisualIndexer:
         total_patches_indexed = 0
         points = []
 
+        import fitz
+        pdf_doc = None
+        if category == 'pdf':
+            try:
+                pdf_doc = fitz.open(file_path)
+            except Exception:
+                pass
+
         for page in pages_data:
             page_num = page['page_number']
             img_url = page['image_url']
+            img_path = Path(page.get('image_path', ''))
+
+            fitz_page = pdf_doc[page_num - 1] if pdf_doc and page_num <= len(pdf_doc) else None
 
             # Phân rã Visual Patch Grid (4x4 regions)
             for row in range(4):
                 for col in range(4):
                     patch_idx = row * 4 + col
-                    patch_text = f"{doc_file.original_name} DENSO Schematic page {page_num} region {patch_idx} {category}"
-                    
-                    vector = self.generate_patch_embedding(patch_text, col * 8, row * 8)
-                    point_id = doc_id * 100000 + page_num * 100 + patch_idx + 1
-
                     x_min = int((col / 4.0) * 1000)
                     y_min = int((row / 4.0) * 1000)
                     x_max = int(((col + 1) / 4.0) * 1000)
                     y_max = int(((row + 1) / 4.0) * 1000)
+                    norm_bbox = [x_min, y_min, x_max, y_max]
+
+                    # Extract text inside visual patch rect if PDF
+                    patch_text_content = ""
+                    if fitz_page:
+                        pdf_rect = fitz.Rect(
+                            (col / 4.0) * fitz_page.rect.width,
+                            (row / 4.0) * fitz_page.rect.height,
+                            ((col + 1) / 4.0) * fitz_page.rect.width,
+                            ((row + 1) / 4.0) * fitz_page.rect.height
+                        )
+                        patch_text_content = fitz_page.get_text("text", clip=pdf_rect).strip()
+
+                    crop_filename = f"crop_colpali_doc{doc_id}_p{page_num}_patch{patch_idx+1}.png"
+                    patch_crop_url = self._draw_visual_patch_crop(img_path, norm_bbox, crop_filename) if img_path.exists() else img_url
+
+                    full_patch_text = f"[{doc_file.original_name} | Trang {page_num} | ColPali Patch #{patch_idx+1}]\n{patch_text_content}"
+                    
+                    vector = self.generate_patch_embedding(full_patch_text, col * 8, row * 8)
+                    point_id = doc_id * 100000 + page_num * 100 + patch_idx + 1
 
                     payload = {
                         "document_id": doc_id,
@@ -135,9 +201,9 @@ class ColPaliVisualIndexer:
                         "page_number": page_num,
                         "patch_index": patch_idx,
                         "layout_type": "colpali_visual_patch",
-                        "text": f"[ColPali Patch {patch_idx}] Trang {page_num} - {doc_file.original_name}",
-                        "bbox": [x_min, y_min, x_max, y_max],
-                        "image_url": img_url
+                        "text": full_patch_text,
+                        "bbox": norm_bbox,
+                        "image_url": patch_crop_url or img_url
                     }
 
                     points.append(PointStruct(
@@ -252,6 +318,8 @@ class ColPaliVisualIndexer:
                         page_buckets[key]["maxsim_score"] = round(score * 100, 2)
                         page_buckets[key]["score"] = round(score * 100, 2)
                         page_buckets[key]["bbox"] = payload.get("bbox")
+                        page_buckets[key]["image_url"] = payload.get("image_url", "")
+                        page_buckets[key]["text"] = payload.get("text", "")
 
             results = list(page_buckets.values())
             results.sort(key=lambda x: x['score'], reverse=True)

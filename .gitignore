@@ -14,8 +14,12 @@ PlanAProject/db.sqlite3
 # Media & Uploads
 PlanAProject/media/extracted_images/*
 !PlanAProject/media/extracted_images/.gitkeep
+PlanAProject/media/uploaded_documents/2026/09/05/
 
 # Environments & Large Datasets
+.env
+*.env
+PlanAProject/.env
 .venv/
 venv/
 ENV/

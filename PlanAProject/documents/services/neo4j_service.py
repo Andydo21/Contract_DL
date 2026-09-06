@@ -56,8 +56,8 @@ class Neo4jGraphService:
                         })
                     if matched_paths:
                         return matched_paths
-            except Exception as ex:
-                print("[Neo4j Live Cypher Notice]", str(ex))
+            except Exception:
+                pass
 
         # 2. Xây dựng Dynamic Knowledge Graph trực tiếp từ Django Document Database thực tế
         try:
@@ -66,8 +66,8 @@ class Neo4jGraphService:
                 doc_name = doc.original_name
                 category = doc.category
 
-                # Quét nội dung tài liệu xem có trùng khớp từ khóa không
-                if kw in doc_name.lower() or (doc.extracted_markdown and kw in doc.extracted_markdown.lower()):
+                extracted_txt = doc.extracted_json or ""
+                if kw in doc_name.lower() or kw in extracted_txt.lower():
                     rel_type = "REFERENCED_IN"
                     if category == 'table':
                         rel_type = "CONTAINS_TABLE"

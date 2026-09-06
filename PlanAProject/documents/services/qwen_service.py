@@ -1,200 +1,141 @@
 import os
-import json
-import requests
+import re
+from typing import List, Dict, Any, Optional
+from django.conf import settings
+from dotenv import load_dotenv
+
+# Nạp các biến môi trường từ .env nếu có
+load_dotenv()
+
 
 class QwenChatbotService:
     """
-    Qwen-2.5 Multimodal (Text + Image Bounding Box) Industrial RAG Engine:
-    Trích xuất nguyên văn + Phân tích kỹ thuật ngữ cảnh + Hiển thị trực tiếp ảnh cắt Bounding Box 
-    tại từng vị trí trích dẫn từ Qdrant Vector DB & LayoutLM Engine.
+    Qwen LLM Service qua Hugging Face Inference API:
+    - Tổng hợp câu trả lời dựa trên Context thu được từ Vector Search (ColPali, Qdrant, BGE-Reranker, Neo4j)
+    - Nhận ngữ cảnh trích xuất từ các vector embeddings của kho tài liệu nhà máy
+    - Phân tích và giải thích ý nghĩa các thông số kỹ thuật, bản vẽ CAD, tiêu chuẩn ISO, quy trình SOP
+    - 100% chạy qua Hugging Face API (đã loại bỏ hoàn toàn việc nạp model nặng cục bộ)
     """
-    def __init__(self, model_name="qwen2.5"):
-        self.model_name = os.environ.get("QWEN_MODEL_NAME", model_name)
-        self.ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        self.qwen_api_key = os.environ.get("QWEN_API_KEY", "")
 
-    def _is_author_header(self, text):
-        """Lọc bỏ đoạn chứa tên tác giả, email hoặc header hành chính"""
-        text_lower = text.lower()
-        author_keywords = ["andreas gal", "brendan eich", "@mozilla.com", "authors", "university of california"]
-        return any(k in text_lower for k in author_keywords)
+    def __init__(self, model_name: Optional[str] = None):
+        self.model_name = (
+            model_name
+            or os.environ.get("QWEN_VL_MODEL")
+            or getattr(settings, "QWEN_VL_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+        )
+        self.hf_token = (
+            os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+            or getattr(settings, "HF_TOKEN", "")
+        )
 
-    def _analyze_text_chunk(self, text, page_num):
-        """Sinh ra câu phân tích kỹ thuật ngữ cảnh thông minh cho từng đoạn văn"""
-        text_lower = text.lower()
-        if "javascript" in text_lower or "dynamic languages" in text_lower or "compile" in text_lower:
-            return f"Đoạn trích ở Trang {page_num} trình bày về phương pháp biên dịch JIT (Just-In-Time Type Specialization) cho ngôn ngữ động JavaScript, giúp nén và tăng tốc độ thực thi chương trình lên đến 10x."
-        elif "trace" in text_lower or "loop" in text_lower or "exit" in text_lower:
-            return f"Đoạn trích ở Trang {page_num} giải thích cơ chế ghi vết (Trace Recording) đối với các vòng lặp thực thi cao tần (Hot Loops), xử lý các điểm rẽ nhánh (Side Exits) và vá mã máy tự động."
-        elif "bytecode" in text_lower or "interpreter" in text_lower or "blacklist" in text_lower:
-            return f"Đoạn trích ở Trang {page_num} mô tả thuật toán tối ưu Bytecode và cơ chế Blacklisting để tránh lặp lại các đoạn mã không hiệu quả trong Trình thông dịch (Interpreter)."
-        elif "type" in text_lower or "tag" in text_lower or "object" in text_lower:
-            return f"Đoạn trích ở Trang {page_num} làm rõ bảng định nghĩa cấu trúc kiểu dữ liệu (Tag Type Representation) và cơ chế quản lý con trỏ đối tượng trong bộ nhớ động."
-        elif "ecu" in text_lower or "wiring" in text_lower or "stop" in text_lower or "ngắt khẩn cấp" in text_lower:
-            return f"Đoạn trích ở Trang {page_num} mô tả quy trình kỹ thuật kết nối rơ-le ngắt khẩn cấp (Emergency Stop) và sơ đồ chân Wiring ECU nhà máy DENSO."
-        else:
-            return f"Nội dung ở Trang {page_num} phân tích chuyên sâu các thông số vận hành kỹ thuật, kiến trúc xử lý và quy trình nghiệm thu tiêu chuẩn."
+    def _get_hf_client(self):
+        """Khởi tạo Hugging Face InferenceClient"""
+        from huggingface_hub import InferenceClient
+        token = self.hf_token if self.hf_token else None
+        return InferenceClient(model=self.model_name, token=token, timeout=60)
 
-    def generate_answer(self, query, citations):
+    def generate_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
         """
-        Tổng hợp câu trả lời chi tiết: Trích dẫn nguyên văn + Phân tích chuyên sâu + Ảnh cắt Bounding Box từng điểm
+        Tổng hợp câu trả lời từ các trích dẫn vector retrieval:
+        Nhận trực tiếp context dữ liệu từ các vector được trích xuất và rerank từ hệ thống.
         """
         if not citations:
-            return "Hệ thống Qwen RAG chưa tìm thấy tài liệu chứa thông số phù hợp. Vui lòng kiểm tra lại file đã upload."
+            return "Hệ thống RAG chưa tìm thấy thông tin phù hợp với truy vấn trong kho tài liệu. Vui lòng thử lại với từ khóa khác."
 
-        real_text_chunks = []
-        image_patches = []
+        # Chuẩn bị context văn bản từ các trích dẫn vector
+        context_blocks = []
+        for c in citations[:4]:
+            txt = (c.get("text") or c.get("markdown") or "").strip()
+            txt_clean = self._clean_block_text(txt)
+            if txt_clean:
+                doc_name = c.get("original_name", "Tài liệu")
+                page = c.get("page_number") or c.get("page_num", 1)
+                context_blocks.append(f"• [Tài liệu: {doc_name} | Trang {page}]:\n{txt_clean}")
 
-        for cit in citations:
-            doc_name = cit.get("original_name", "DENSO_Manual.pdf")
-            page_num = cit.get("page_number", 1)
-            bbox = cit.get("bbox", [])
-            score = cit.get("rerank_score") or cit.get("score") or 95.0
-            text_snippet = (cit.get("text") or cit.get("markdown") or "").strip()
-            image_url = cit.get("image_url", "")
+        context_text = "\n\n".join(context_blocks)
 
-            # Lưu thông tin ảnh nếu có
-            if image_url:
-                image_patches.append({
-                    "doc_name": doc_name,
-                    "page_num": page_num,
-                    "bbox": bbox,
-                    "score": score,
-                    "image_url": image_url
-                })
+        # 1. Gọi Hugging Face Inference API với mô hình Qwen
+        llm_response = None
+        system_instruction = (
+            "Bạn là Trợ lý AI Chuyên gia Phân tích Bản vẽ Kỹ thuật & Tài liệu Nhà máy DENSO (DENSO VisionMind AI).\n"
+            "Phong cách trả lời:\n"
+            "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp và chính xác câu hỏi của người dùng dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
+            "2. PHÂN TÍCH KỸ THUẬT CHUYÊN SÂU: Giải thích ý nghĩa chức năng cơ khí, dung sai lắp ghép hoặc an toàn của chính thông số được hỏi. Tránh giải thích lan man sang các thông số khác không liên quan đến câu hỏi.\n"
+            "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích, chuyên nghiệp bằng Tiếng Việt."
+        )
 
-            # Lọc lưu đoạn văn bản thực sự (>60 ký tự, không phải email/header tác giả)
-            if text_snippet and not text_snippet.startswith("[ColPali Patch") and len(text_snippet) > 60:
-                if not self._is_author_header(text_snippet):
-                    real_text_chunks.append({
-                        "doc_name": doc_name,
-                        "page_num": page_num,
-                        "bbox": bbox,
-                        "score": score,
-                        "text": text_snippet,
-                        "image_url": image_url
-                    })
+        user_prompt = (
+            f"DỮ LIỆU NGỮ CẢNH TRÍCH XUẤT:\n{context_text}\n\n"
+            f"CÂU HỎI TRUY VẤN CỦA KỸ SƯ:\n{query}\n\n"
+            f"Hãy trả lời chính xác câu hỏi trên và phân tích ý nghĩa kỹ thuật liên quan trực tiếp đến thông số được hỏi:"
+        )
 
-        # Nếu thiếu Text Chunks nội dung kỹ thuật, tự động load các đoạn văn bản dài từ Database
-        if len(real_text_chunks) < 3:
-            from documents.models import DocumentFile
-            for cit in citations:
-                doc_name = cit.get("original_name")
-                if doc_name:
-                    doc = DocumentFile.objects.filter(original_name=doc_name).first()
-                    if doc:
-                        chunks = doc.get_extracted_chunks()
-                        valid_chunks = [
-                            c for c in chunks 
-                            if len(c.get("text", "").strip()) > 80 
-                            and not c.get("text", "").startswith("[ColPali Patch")
-                            and not self._is_author_header(c.get("text", ""))
-                        ]
-                        
-                        step = max(1, len(valid_chunks) // 6)
-                        for c in valid_chunks[::step][:6]:
-                            real_text_chunks.append({
-                                "doc_name": doc.original_name,
-                                "page_num": c.get("page_number", 1),
-                                "bbox": c.get("bbox", []),
-                                "score": 95.0,
-                                "text": c["text"].strip(),
-                                "image_url": c.get("image_url", "")
-                            })
-                        if len(real_text_chunks) >= 5:
-                            break
-
-        best = real_text_chunks[0] if real_text_chunks else citations[0]
-        best_name = best.get("doc_name") or best.get("original_name") or "Tài liệu DENSO"
-        
-        # Mở rộng các từ khóa phát hiện ý định Tóm tắt / Giới thiệu / Hỏi tổng quan
-        summary_keywords = [
-            "tóm tắt", "tom tat", "summary", "tổng quan", "nói về", "noi ve", 
-            "giới thiệu", "gioi thieu", "trình bày", "trinh bay", "bài báo", 
-            "bai bao", "là gì", "la gi", "nội dung", "noi dung", "overview", "explain"
-        ]
-        is_summary = any(k in query.lower() for k in summary_keywords)
-
-        # 1. Thử gọi Ollama Qwen Multimodal LLM nếu có server
         try:
-            ollama_url = f"{self.ollama_host}/api/generate"
-            context_blocks = [f"• Trang {c['page_num']}: {c['text']}" for c in real_text_chunks[:6]]
-            prompt_text = (
-                f"TÀI LIỆU VĂN BẢN (Text):\n" + "\n".join(context_blocks) + "\n\n"
-                f"YÊU CẦU: Hãy trả lời hoặc tóm tắt CHI TIẾT, NẾU NÓI VỀ NỘI DUNG NÀO PHẢI TRÍCH DẪN NGUYÊN VĂN VÀ KÈM ẢNH BBOUNDING BOX:\n{query}"
+            client = self._get_hf_client()
+            messages = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_prompt}
+            ]
+
+            chat_completion = client.chat.completions.create(
+                messages=messages,
+                max_tokens=800,
+                temperature=0.3,
+                top_p=0.9
             )
-            payload = {
-                "model": self.model_name,
-                "prompt": prompt_text,
-                "stream": False
-            }
-            response = requests.post(ollama_url, json=payload, timeout=3)
-            if response.status_code == 200 and response.json().get("response"):
-                return f"🤖 **[Qwen-2.5 Multimodal LLM Active]**:\n\n{response.json()['response'].strip()}"
-        except Exception:
-            pass
+            if chat_completion.choices and len(chat_completion.choices) > 0:
+                llm_response = chat_completion.choices[0].message.content.strip()
+        except Exception as hf_err:
+            error_msg = str(hf_err)
+            print(f"[Qwen HF API Inference Error] {error_msg}")
 
-        # 2. In-Depth Multimodal Synthesis (Trích dẫn nguyên văn + Phân tích + Hiển thị Ảnh cắt Bounding Box từng vị trí)
-        answer_parts = []
-
-        if is_summary:
-            answer_parts.append(f"🤖 **[Qwen-2.5 Multimodal RAG Engine - Deep Executive Summary]**\n")
-            answer_parts.append(f"📌 **PHÂN TÍCH VÀ TÓM TẮT CHUYÊN SÂU TÀI LIỆU `{best_name}`**:\n")
-            
-            if real_text_chunks:
-                for idx, c in enumerate(real_text_chunks[:5], 1):
-                    clean_txt = c['text'].replace('\n', ' ').strip()
-                    analysis = self._analyze_text_chunk(clean_txt, c['page_num'])
-                    img_snippet = f"\n🖼️ **Ảnh trích xuất Bounding Box vị trí này**:\n![Bounding Box Snippet #{idx}]({c['image_url']})\n" if c.get('image_url') else ""
-                    
-                    answer_parts.append(
-                        f"### 🔹 Luận điểm #{idx} [Trang {c['page_num']}]\n"
-                        f"💬 **Trích dẫn nguyên văn từ tài liệu**:\n"
-                        f"```text\n\"{clean_txt}\"\n```\n"
-                        f"🧠 **Phân tích kỹ thuật của Qwen**: {analysis}\n"
-                        f"📍 **Vị trí Bounding Box chính xác**: `Trang {c['page_num']}` • `BBox {c['bbox']}`"
-                        f"{img_snippet}\n"
-                    )
-            else:
-                answer_parts.append("• Đã phân tích visual patch trang tài liệu.")
-
-            # PHẦN HÌNH ẢNH SƠ ĐỒ VISUAL PATCH NỔI BẬT
-            if image_patches:
-                answer_parts.append(f"🖼️ **SƠ ĐỒ / BẢNG BIỂU VISUAL PATCH NỔI BẬT (VISUAL DIAGRAMS)**:\n")
-                for idx, img in enumerate(image_patches[:2], 1):
-                    p_num = img['page_num']
-                    bbox_str = f"{img['bbox']}"
-                    img_url = img['image_url']
-                    score_val = round(img.get('score', 95.0), 1)
-                    
-                    answer_parts.append(
-                        f"#### 🖼️ Visual Patch Sơ đồ #{idx} [Trang {p_num}]\n"
-                        f"![Visual Patch Diagram #{idx}]({img_url})\n\n"
-                        f"👁️ **Phân tích thị giác**: Bức ảnh cắt tại Trang {p_num} (BBox `{bbox_str}`) thể hiện cấu trúc bản vẽ kỹ thuật, sơ đồ khối xử lý hoặc bảng biểu thực nghiệm (Độ khớp: **{score_val}%**).\n"
-                    )
-
-            answer_parts.append(f"\n💡 **TỔNG KẾT KỸ THUẬT**: Toàn bộ luận điểm văn bản và ảnh Bounding Box đã được trích xuất trực tiếp từ CSDL Qdrant Vector DB & LayoutLM Engine.")
-
-        else:
-            # Trả lời thông số kỹ thuật cụ thể + Trích dẫn nguyên văn + Ảnh cắt Bounding Box
-            best_page = best.get("page_num") or best.get("page_number") or 1
-            best_bbox = best.get("bbox", [])
-            best_score = best.get("score") or best.get("rerank_score") or 95.0
-            best_text = (best.get("text") or best.get("markdown") or "").strip()
-            best_img = best.get("image_url") or (image_patches[0]['image_url'] if image_patches else "")
-            analysis = self._analyze_text_chunk(best_text, best_page)
-
-            answer_parts.append(f"🤖 **[Qwen-2.5 Multimodal RAG Engine - Deep Technical Answer]**\n")
-            answer_parts.append(f"📝 **Trích dẫn nguyên văn từ tài liệu {best_name}** (Trang {best_page} | Score: **{best_score}%**):")
-            answer_parts.append(f"```text\n\"{best_text}\"\n```\n")
-            answer_parts.append(f"🧠 **Phân tích chi tiết của Qwen**: {analysis}\n")
-            answer_parts.append(f"📍 **Vị trí Bounding Box trên bản vẽ**: `Trang {best_page}` • `BBox {best_bbox}`\n")
-
-            if best_img:
-                answer_parts.append(
-                    f"🖼️ **Hình ảnh cắt Bounding Box trực tiếp tại vị trí trích dẫn**:\n"
-                    f"![Visual Diagram]({best_img})\n\n"
-                    f"👁️ **Nhận xét thị giác**: Ảnh cắt tại Trang {best_page} (Khung BBox `{best_bbox}`) minh họa thực tế vùng tài liệu giúp kĩ sư trực quan hóa quy trình."
+            if "api_key" in error_msg.lower() or "token" in error_msg.lower() or "401" in error_msg:
+                llm_response = (
+                    "⚠️ **Chưa cấu hình Hugging Face Token (`HF_TOKEN`)**:\n"
+                    "Vui lòng cấu hình token trong file `.env`:\n"
+                    "```bash\nHF_TOKEN=hf_your_token_here\n```"
                 )
+            elif "loading" in error_msg.lower() or "503" in error_msg:
+                llm_response = (
+                    f"⏳ Mô hình **{self.model_name}** trên Hugging Face đang khởi động (Cold boot). "
+                    "Vui lòng gửi lại câu hỏi sau 15-20 giây."
+                )
+            else:
+                llm_response = f"⚠️ Lỗi kết nối Hugging Face Inference API ({self.model_name}): {error_msg}"
 
-        return "\n".join(answer_parts)
+        if llm_response:
+            return llm_response
+        return "Hệ thống AI chưa thể tạo câu trả lời cho truy vấn này. Vui lòng thử lại."
+
+    def _clean_block_text(self, text: str) -> str:
+        """Gộp các dòng văn bản bị ngắt dòng rời rạc thành các cụm thông tin liền mạch, dễ đọc"""
+        lines = [l.strip() for l in text.split("\n") if l.strip() and not l.strip().startswith("[")]
+        if not lines:
+            return ""
+
+        grouped = []
+        buf = ""
+        for line in lines:
+            if line in ["(", ")"]:
+                continue
+            # Nếu dòng hiện tại bắt đầu bằng chữ thường hoặc từ nối, ghép vào dòng trước
+            if buf and (
+                re.match(r"^[a-z0-9\+\-\(]", line)
+                or line.lower().startswith(
+                    (
+                        "for ", "screw", "face", "mounting", "dimensions",
+                        "space", "depth", "type", "from", "of", "with",
+                        "and", "or", "to", "in", "at"
+                    )
+                )
+            ):
+                buf += " " + line
+            else:
+                if buf:
+                    grouped.append(buf)
+                buf = line
+        if buf:
+            grouped.append(buf)
+
+        return "\n".join(grouped)
