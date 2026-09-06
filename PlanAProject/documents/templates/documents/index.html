@@ -199,8 +199,27 @@
                     </div>
                 </div>
 
-                <div class="flex gap-2 mt-3">
-                    <input type="text" id="rag-chat-input" placeholder="Hỏi Qwen-2.5 RAG Bot (Ví dụ: Điện áp định mức Controller là bao nhiêu? Sơ đồ ngắt khẩn cấp...)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none">
+                <!-- Specialized Agent Pipeline Selector -->
+                <div class="flex flex-wrap items-center gap-2 mt-3 px-1">
+                    <span class="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                        <i class="ph-bold ph-sliders-horizontal text-cyan-400"></i> Chế độ Qwen Agent:
+                    </span>
+                    <label class="cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-purple-950/60 border-purple-500/50 text-purple-300 font-semibold shadow-sm" id="mode-badge-hybrid">
+                        <input type="radio" name="rag-mode" value="hybrid" checked class="hidden" onchange="switchRagMode('hybrid')">
+                        <span>⚡ Hybrid Tri-Stage</span>
+                    </label>
+                    <label class="cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-slate-900/80 border-slate-800 text-slate-400 font-semibold hover:border-cyan-500/40 hover:text-cyan-300" id="mode-badge-colpali">
+                        <input type="radio" name="rag-mode" value="colpali" class="hidden" onchange="switchRagMode('colpali')">
+                        <span>👁️ Qwen ColPali (CAD/Visual)</span>
+                    </label>
+                    <label class="cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-slate-900/80 border-slate-800 text-slate-400 font-semibold hover:border-emerald-500/40 hover:text-emerald-300" id="mode-badge-surya">
+                        <input type="radio" name="rag-mode" value="surya_layout" class="hidden" onchange="switchRagMode('surya_layout')">
+                        <span>📄 Qwen Surya-LayoutLM (Spec/SOP)</span>
+                    </label>
+                </div>
+
+                <div class="flex gap-2 mt-2">
+                    <input type="text" id="rag-chat-input" placeholder="Hỏi Qwen-2.5 RAG Bot (Ví dụ: Mặt bích Flange đường kính ngoài là bao nhiêu? Sơ đồ ngắt khẩn cấp...)" class="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none">
                     <button id="rag-chat-send-btn" class="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-purple-900/40">
                         <i class="ph-bold ph-paper-plane-right"></i> Gửi câu hỏi Qwen
                     </button>
@@ -766,14 +785,45 @@
                 });
             }
 
+            // Switch RAG Pipeline Mode
+            window.switchRagMode = function(mode) {
+                const badgeHybrid = document.getElementById('mode-badge-hybrid');
+                const badgeColpali = document.getElementById('mode-badge-colpali');
+                const badgeSurya = document.getElementById('mode-badge-surya');
+
+                // Reset all to default inactive
+                [badgeHybrid, badgeColpali, badgeSurya].forEach(b => {
+                    if (b) {
+                        b.className = "cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-slate-900/80 border-slate-800 text-slate-400 font-semibold hover:border-slate-700";
+                    }
+                });
+
+                if (mode === 'colpali' && badgeColpali) {
+                    badgeColpali.className = "cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-cyan-950/60 border-cyan-500/50 text-cyan-300 font-semibold shadow-sm shadow-cyan-900/40";
+                } else if (mode === 'surya_layout' && badgeSurya) {
+                    badgeSurya.className = "cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-emerald-950/60 border-emerald-500/50 text-emerald-300 font-semibold shadow-sm shadow-emerald-900/40";
+                } else if (badgeHybrid) {
+                    badgeHybrid.className = "cursor-pointer flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-xl border transition-all bg-purple-950/60 border-purple-500/50 text-purple-300 font-semibold shadow-sm shadow-purple-900/40";
+                }
+            };
+
             async function sendRAGChatMessage() {
                 const message = ragChatInput.value.trim();
                 if (!message) return;
 
-                // Render User message
+                const selectedMode = document.querySelector('input[name="rag-mode"]:checked')?.value || 'hybrid';
+                let modeLabel = '⚡ Hybrid';
+                if (selectedMode === 'colpali') modeLabel = '👁️ ColPali Visual';
+                else if (selectedMode === 'surya_layout') modeLabel = '📄 Surya-LayoutLM';
+
+                // Render User message with Mode badge
                 ragChatMessages.innerHTML += `
                     <div class="p-2.5 bg-cyan-950/40 rounded-lg border border-cyan-500/30 text-cyan-200">
-                        <span class="font-bold text-cyan-300">👤 Kĩ sư DENSO:</span> ${message}
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="font-bold text-cyan-300">👤 Kĩ sư DENSO:</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-slate-900/80 border border-slate-700 text-slate-300">${modeLabel}</span>
+                        </div>
+                        <div>${message}</div>
                     </div>
                 `;
                 ragChatInput.value = '';
@@ -781,9 +831,13 @@
 
                 // Render Bot Loading
                 const loadingId = 'loading-' + Date.now();
+                let loadingText = "VisionMind Bot đang truy vấn ColPali & Surya Layout...";
+                if (selectedMode === 'colpali') loadingText = "Qwen ColPali Bot đang quét Mảng Patch Thị giác No-OCR & Bản vẽ CAD...";
+                else if (selectedMode === 'surya_layout') loadingText = "Qwen Surya Bot đang tra cứu Bảng biểu, SOP & Vector all-MiniLM...";
+
                 ragChatMessages.innerHTML += `
                     <div id="${loadingId}" class="p-2.5 bg-slate-900 rounded-lg border border-slate-800 text-slate-400 flex items-center gap-2">
-                        <i class="ph-bold ph-circle-notch animate-spin text-cyan-400"></i> VisionMind Bot đang truy vấn ColPali & Cross-Encoder Reranker...
+                        <i class="ph-bold ph-circle-notch animate-spin text-cyan-400"></i> ${loadingText}
                     </div>
                 `;
                 ragChatMessages.scrollTop = ragChatMessages.scrollHeight;
@@ -792,7 +846,7 @@
                     const res = await fetch('/api/documents/rag-chat/', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: message })
+                        body: JSON.stringify({ message: message, mode: selectedMode })
                     });
                     const data = await res.json();
                     document.getElementById(loadingId)?.remove();
@@ -813,10 +867,11 @@
 
                         // Format Markdown images: ![alt](url) -> <img src="url">
                         let formattedAnswer = data.answer.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="my-2"><img src="$2" class="max-h-56 rounded-lg border border-cyan-400/50 shadow-md object-contain bg-slate-950" alt="$1"></div>');
+                        const botTitle = data.bot_name || '🤖 Qwen-2.5 Multimodal Bot';
 
                         ragChatMessages.innerHTML += `
                             <div class="p-3 bg-slate-900/90 rounded-lg border border-emerald-500/30 text-slate-200">
-                                <span class="font-bold text-emerald-400">🤖 Qwen-2.5 Multimodal Bot (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
+                                <span class="font-bold text-emerald-400">${botTitle} (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
                                 <div class="mt-1 whitespace-pre-wrap">${formattedAnswer}</div>
                                 ${citationHtml}
                             </div>
@@ -833,7 +888,7 @@
                     document.getElementById(loadingId)?.remove();
                     ragChatMessages.innerHTML += `
                         <div class="p-2.5 bg-red-950/40 rounded-lg border border-red-500/30 text-red-300">
-                            ❌ Lỗi kết nối máy chủ RAG.
+                            ❌ Lỗi kết nối máy chủ RAG: ${err.message || err}
                         </div>
                     `;
                     ragChatMessages.scrollTop = ragChatMessages.scrollHeight;

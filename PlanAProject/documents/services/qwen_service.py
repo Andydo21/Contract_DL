@@ -35,10 +35,20 @@ class QwenChatbotService:
         token = self.hf_token if self.hf_token else None
         return InferenceClient(model=self.model_name, token=token, timeout=60)
 
-    def generate_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
+    def generate_colpali_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
+        """Qwen chuyên biệt cho ColPali No-OCR Visual Patches (Bản vẽ CAD, sơ đồ mạch, tọa độ không gian)"""
+        return self.generate_answer(query, citations, mode="colpali")
+
+    def generate_surya_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
+        """Qwen chuyên biệt cho Surya-Layout + LayoutLM + all-MiniLM (Bảng biểu spec, quy trình SOP, văn bản)"""
+        return self.generate_answer(query, citations, mode="surya_layout")
+
+    def generate_answer(self, query: str, citations: List[Dict[str, Any]], mode: str = "hybrid") -> str:
         """
-        Tổng hợp câu trả lời từ các trích dẫn vector retrieval:
-        Nhận trực tiếp context dữ liệu từ các vector được trích xuất và rerank từ hệ thống.
+        Tổng hợp câu trả lời từ các trích dẫn vector retrieval theo từng cơ chế chuyên biệt:
+        - mode='colpali': Chuyên gia thị giác bản vẽ CAD & Bounding Box (No-OCR ColPali Engine)
+        - mode='surya_layout': Chuyên gia văn bản, bảng biểu & SOP (Surya Layout + LayoutLM + all-MiniLM)
+        - mode='hybrid': Kết hợp toàn diện cả 2 nhánh thị giác + văn bản + Neo4j Graph
         """
         if not citations:
             return "Hệ thống RAG chưa tìm thấy thông tin phù hợp với truy vấn trong kho tài liệu. Vui lòng thử lại với từ khóa khác."
@@ -55,18 +65,41 @@ class QwenChatbotService:
 
         context_text = "\n\n".join(context_blocks)
 
-        # 1. Gọi Hugging Face Inference API với mô hình Qwen
-        llm_response = None
-        system_instruction = (
-            "Bạn là Trợ lý AI Chuyên gia Phân tích Bản vẽ Kỹ thuật & Tài liệu Nhà máy DENSO (DENSO VisionMind AI).\n"
-            "Phong cách trả lời:\n"
-            "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp và chính xác câu hỏi của người dùng dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
-            "2. PHÂN TÍCH KỸ THUẬT CHUYÊN SÂU: Giải thích ý nghĩa chức năng cơ khí, dung sai lắp ghép hoặc an toàn của chính thông số được hỏi. Tránh giải thích lan man sang các thông số khác không liên quan đến câu hỏi.\n"
-            "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích, chuyên nghiệp bằng Tiếng Việt."
-        )
+        # Định hình System Instruction theo từng mode chuyên biệt
+        if mode == "colpali":
+            system_instruction = (
+                "Bạn là Trợ lý AI Qwen ColPali VisionMind — Chuyên gia Đọc hiểu Bản vẽ Kỹ thuật 2D CAD, Sơ đồ Cơ khí & Bounding Box Thị giác (No-OCR Visual Engine).\n"
+                "Dữ liệu của bạn được trích xuất hoàn toàn từ Mảng Patch Không gian (SigLIP Visual Patches) của ColPali.\n"
+                "Phong cách trả lời:\n"
+                "1. ĐÚNG TRỌNG TÂM THỊ GIÁC: Trả lời trực tiếp và chính xác thông số hình học trên bản vẽ (kích thước phi, dung sai lắp ghép ISO fit, mặt bích Flange, góc xoay làm việc, bán kính, tâm trục).\n"
+                "2. PHÂN TÍCH HÌNH HỌC & CƠ KHÍ: Giải thích chức năng cơ khí, đặc tính động học hoặc tính chất lắp ghép không khe hở của chi tiết trên bản vẽ CAD.\n"
+                "3. MINH CHỨNG KHÔNG GIAN: Nhắc đến vị trí trang và vùng nhận diện trên bản vẽ kỹ thuật.\n"
+                "4. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, súc tích."
+            )
+            header_prompt = "DỮ LIỆU BẢN VẼ TRỰC QUAN (COLPALI VISUAL PATCHES):\n"
+        elif mode == "surya_layout":
+            system_instruction = (
+                "Bạn là Trợ lý AI Qwen Surya-LayoutLM — Chuyên gia Phân tích Văn bản Kỹ thuật, Bảng biểu Thông số & Quy trình Chuẩn SOP Nhà máy DENSO (Document & Tabular Engine).\n"
+                "Dữ liệu của bạn được trích xuất từ Mô hình Phân tích Bố cục Surya-Layout, LayoutLM 2D Positional Encoding và Vector all-MiniLM-L6-v2.\n"
+                "Phong cách trả lời:\n"
+                "1. ĐÚNG TRỌNG TÂM VĂN BẢN/BẢNG BIỂU: Trả lời trực tiếp và chính xác thông số trong bảng spec (điện áp, dòng điện, chu kỳ bảo trì, mã lỗi E/W, danh mục linh kiện, bước SOP).\n"
+                "2. PHÂN TÍCH QUY TRÌNH & TIÊU CHUẨN: Giải thích ý nghĩa của quy trình thao tác, điều kiện kích hoạt cảnh báo, hoặc các lưu ý an toàn nhà máy theo tài liệu.\n"
+                "3. TRÍCH XUẤT CÓ CẤU TRÚC: Định dạng kết quả dạng bảng hoặc gạch đầu dòng rõ ràng, dễ đối chiếu trên sàn sản xuất.\n"
+                "4. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, rõ ràng."
+            )
+            header_prompt = "DỮ LIỆU VĂN BẢN & BẢNG BIỂU (SURYA-LAYOUT & LAYOUTLM):\n"
+        else:
+            system_instruction = (
+                "Bạn là Trợ lý AI Chuyên gia Phân tích Bản vẽ Kỹ thuật & Tài liệu Nhà máy DENSO (DENSO VisionMind AI).\n"
+                "Phong cách trả lời:\n"
+                "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp và chính xác câu hỏi của người dùng dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
+                "2. PHÂN TÍCH KỸ THUẬT CHUYÊN SÂU: Giải thích ý nghĩa chức năng cơ khí, dung sai lắp ghép hoặc an toàn của chính thông số được hỏi. Tránh giải thích lan man sang các thông số khác không liên quan đến câu hỏi.\n"
+                "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích, chuyên nghiệp bằng Tiếng Việt."
+            )
+            header_prompt = "DỮ LIỆU NGỮ CẢNH TRÍCH XUẤT:\n"
 
         user_prompt = (
-            f"DỮ LIỆU NGỮ CẢNH TRÍCH XUẤT:\n{context_text}\n\n"
+            f"{header_prompt}{context_text}\n\n"
             f"CÂU HỎI TRUY VẤN CỦA KỸ SƯ:\n{query}\n\n"
             f"Hãy trả lời chính xác câu hỏi trên và phân tích ý nghĩa kỹ thuật liên quan trực tiếp đến thông số được hỏi:"
         )

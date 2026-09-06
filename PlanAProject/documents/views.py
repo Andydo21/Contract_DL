@@ -483,70 +483,92 @@ class RAGChatbotAPIView(APIView):
         if not query:
             return Response({'success': False, 'message': 'Vui lòng nhập câu hỏi Chatbot.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        mode = request.data.get('mode', 'hybrid').strip().lower()
+
         try:
-            # 1. ColPali Visual No-OCR Search
-            from documents.services.colpali_service import ColPaliVisualIndexer
-            colpali = ColPaliVisualIndexer()
-            colpali_results = colpali.colpali_maxsim_search(query, top_k=5)
-
-            # 2. Text & Surya-Table Vector Search
-            from documents.services.vector_db_service import QdrantVectorDBService
-            vec_service = QdrantVectorDBService()
-            vec_results = vec_service.vector_search(query, top_k=25)
-
-            # 2.5 Neo4j Knowledge Graph Path Matching (GraphRAG)
+            colpali_results = []
+            vec_results = []
             graph_citations = []
-            try:
-                from documents.services.neo4j_service import Neo4jGraphService
-                graph_service = Neo4jGraphService()
-                graph_paths = graph_service.query_graph_rag(query)
-                for gp in graph_paths:
-                    graph_citations.append({
-                        "original_name": gp.get("file", "Robot_DENSO_Manual.pdf"),
-                        "layout_type": "neo4j_graph_node",
-                        "score": gp.get("graph_score", 95.0),
-                        "text": f"[Neo4j Graph Path]: {gp.get('source')} --({gp.get('relation')})--> {gp.get('target')}"
-                    })
-            except Exception as g_err:
-                print("[Neo4j RAG Error]", str(g_err))
+            keyword_candidates = []
 
-            # Tổng hợp Candidates (Vector + ColPali + Graph)
-            all_candidates = colpali_results + vec_results + graph_citations
+            # 1. Pipeline ColPali (Chạy khi mode là 'colpali' hoặc 'hybrid')
+            if mode in ['colpali', 'hybrid']:
+                from documents.services.colpali_service import ColPaliVisualIndexer
+                colpali = ColPaliVisualIndexer()
+                colpali_results = colpali.colpali_maxsim_search(query, top_k=5)
 
-            # 2.6 Dynamic Keyword & Token Candidate Retrieval across extracted database chunks
-            import re
-            from documents.models import DocumentFile
-            query_tokens = [t.strip().lower() for t in re.split(r'[\s,;:?!\(\)]+', query) if len(t.strip()) >= 3]
-            matching_docs = DocumentFile.objects.filter(is_extracted=True)
+            # 2. Pipeline Surya + LayoutLM + all-MiniLM (Chạy khi mode là 'surya_layout' hoặc 'hybrid')
+            if mode in ['surya_layout', 'hybrid']:
+                from documents.services.vector_db_service import QdrantVectorDBService
+                vec_service = QdrantVectorDBService()
+                vec_results = vec_service.vector_search(query, top_k=25)
 
-            for doc in matching_docs:
-                doc_name_lower = doc.original_name.lower()
-                doc_stem = doc_name_lower.split('.')[0]
-                doc_stem_space = doc_stem.replace('_', ' ').replace('-', ' ')
-                
-                query_lower = query.lower()
-                is_doc_mentioned = doc_name_lower in query_lower or doc_stem in query_lower or doc_stem_space in query_lower
-
-                extracted_chunks = doc.get_extracted_chunks()
-                for chunk in extracted_chunks:
-                    txt = chunk.get("text", "")
-                    txt_lower = txt.lower()
-                    
-                    term_match = any(t in txt_lower for t in query_tokens) if query_tokens else False
-                    
-                    if is_doc_mentioned or term_match:
-                        all_candidates.append({
-                            "original_name": doc.original_name,
-                            "category": doc.category,
-                            "chunk_id": chunk.get("chunk_id", 0),
-                            "layout_type": chunk.get("layout_type", "text"),
-                            "text": txt,
-                            "bbox": chunk.get("bbox", []),
-                            "page_number": chunk.get("page_number", 1),
-                            "score": 0.0,
-                            "image_url": chunk.get("image_url", ""),
-                            "file_url": doc.file.url if doc.file else ""
+                # Neo4j Knowledge Graph Path Matching (GraphRAG)
+                try:
+                    from documents.services.neo4j_service import Neo4jGraphService
+                    graph_service = Neo4jGraphService()
+                    graph_paths = graph_service.query_graph_rag(query)
+                    for gp in graph_paths:
+                        graph_citations.append({
+                            "original_name": gp.get("file", "Robot_DENSO_Manual.pdf"),
+                            "layout_type": "neo4j_graph_node",
+                            "score": gp.get("graph_score", 95.0),
+                            "text": f"[Neo4j Graph Path]: {gp.get('source')} --({gp.get('relation')})--> {gp.get('target')}"
                         })
+                except Exception as g_err:
+                    print("[Neo4j RAG Error]", str(g_err))
+
+                # Dynamic Keyword Candidate Retrieval across extracted database chunks
+                import re
+                from documents.models import DocumentFile
+                stopwords = {'bao', 'nhiêu', 'của', 'các', 'cho', 'với', 'trong', 'được', 'này', 'khi', 'denso', 'kĩ', 'kỹ', 'sư', 'thế', 'nào', 'sao'}
+                query_tokens = [
+                    t.strip().lower() for t in re.split(r'[\s,;:?!\(\)]+', query)
+                    if len(t.strip()) >= 3 and t.strip().lower() not in stopwords
+                ]
+                matching_docs = DocumentFile.objects.filter(is_extracted=True)
+
+                for doc in matching_docs:
+                    doc_name_lower = doc.original_name.lower()
+                    doc_stem = doc_name_lower.split('.')[0]
+                    doc_stem_space = doc_stem.replace('_', ' ').replace('-', ' ')
+                    
+                    query_lower = query.lower()
+                    is_doc_mentioned = doc_name_lower in query_lower or doc_stem in query_lower or doc_stem_space in query_lower
+
+                    extracted_chunks = doc.get_extracted_chunks()
+                    for chunk in extracted_chunks:
+                        if len(keyword_candidates) >= 30:
+                            break
+                        txt = chunk.get("text", "")
+                        txt_lower = txt.lower()
+                        term_match = any(t in txt_lower for t in query_tokens) if query_tokens else False
+                        
+                        if is_doc_mentioned or term_match:
+                            keyword_candidates.append({
+                                "original_name": doc.original_name,
+                                "category": doc.category,
+                                "chunk_id": chunk.get("chunk_id", 0),
+                                "layout_type": chunk.get("layout_type", "text"),
+                                "text": txt,
+                                "bbox": chunk.get("bbox", []),
+                                "page_number": chunk.get("page_number", 1),
+                                "score": 0.0,
+                                "image_url": chunk.get("image_url", ""),
+                                "file_url": doc.file.url if doc.file else ""
+                            })
+
+            # Tổng hợp Candidates theo từng mode được chọn
+            if mode == 'colpali':
+                all_candidates = colpali_results
+                bot_name = "Qwen-2.5 ColPali Visual Bot"
+            elif mode == 'surya_layout':
+                all_candidates = vec_results + graph_citations + keyword_candidates
+                bot_name = "Qwen-2.5 Surya-LayoutLM Bot"
+            else:
+                mode = 'hybrid'
+                all_candidates = colpali_results + vec_results + graph_citations + keyword_candidates
+                bot_name = "Qwen-2.5 Multimodal Hybrid Bot"
 
             # 3. BGE-Reranker Cross-Encoder Reranking
             from documents.services.reranker_service import BGERerankerService
@@ -555,19 +577,21 @@ class RAGChatbotAPIView(APIView):
 
             latency_ms = round((time.time() - start_time) * 1000, 2)
 
-            # 4. Synthesize Answer using Qwen-2.5 LLM Service
+            # 4. Synthesize Answer using Specialized Qwen-2.5 Engine
             from documents.services.qwen_service import QwenChatbotService
             qwen_engine = QwenChatbotService()
-            generated_answer = qwen_engine.generate_answer(query, top_citations)
+            generated_answer = qwen_engine.generate_answer(query, top_citations, mode=mode)
 
             return Response({
                 'success': True,
                 'query': query,
+                'mode': mode,
+                'bot_name': bot_name,
                 'answer': generated_answer,
                 'latency_ms': latency_ms,
                 'precision_score': round(top_citations[0]['rerank_score'], 1) if top_citations else 0.0,
                 'citations': top_citations
             })
         except Exception as e:
-            return Response({'success': False, 'message': f'Lỗi RAG Chatbot: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success': False, 'message': f'Lỗi RAG Chatbot ({mode}): {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
