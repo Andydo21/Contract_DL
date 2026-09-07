@@ -193,7 +193,7 @@
                     </div>
                 </div>
 
-                <div id="rag-chat-messages" class="h-48 overflow-y-auto bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-3 font-mono text-slate-300">
+                <div id="rag-chat-messages" class="min-h-[220px] max-h-[560px] overflow-y-auto bg-slate-950/80 rounded-xl p-4 border border-slate-800 text-xs space-y-3 font-mono text-slate-300">
                     <div class="p-3 bg-slate-900/90 rounded-lg border border-cyan-500/20">
                         <span class="text-cyan-400 font-bold">🤖 Qwen-2.5 RAG Bot:</span> Xin chào Kĩ sư DENSO! Tôi là Qwen-2.5 RAG Assistant. Hãy nhập câu hỏi về sơ đồ mạch điện, thông số Controller, mã lỗi E-404 hay quy trình bảo trì. Tôi sẽ đọc hiểu từ Qdrant Vector DB và trích xuất vị trí Bounding Box chính xác!
                     </div>
@@ -491,6 +491,40 @@
                 <div id="vec-matrix-container" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-12 gap-2 font-mono text-[10px]">
                     <!-- Populated dynamically via JS -->
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dedicated Fullscreen Lightbox Image Viewer Modal -->
+    <div id="image-viewer-modal" class="fixed inset-0 z-[70] bg-black/90 backdrop-blur-md hidden flex items-center justify-center p-4 transition-all">
+        <div class="relative max-w-4xl w-full max-h-[92vh] bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center">
+                        <i class="ph-bold ph-image text-lg"></i>
+                    </div>
+                    <div>
+                        <span id="image-modal-title" class="text-xs font-bold text-white block truncate max-w-md">Bản vẽ kỹ thuật</span>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            <span id="image-modal-badge" class="px-2 py-0.2 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono"></span>
+                            <span id="image-modal-bbox" class="text-[10px] text-slate-400 font-mono"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="image-modal-toggle-btn" onclick="window.toggleImageModalView()" class="hidden px-2.5 py-1.5 text-xs bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 rounded-lg border border-purple-500/40 font-semibold flex items-center gap-1.5 transition-all shadow-sm">
+                        <i class="ph-bold ph-arrows-split"></i> <span id="image-modal-toggle-text">Xem cả trang</span>
+                    </button>
+                    <a id="image-modal-download" href="#" target="_blank" download class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-lg border border-slate-700 flex items-center gap-1.5 transition-all">
+                        <i class="ph-bold ph-arrow-square-out"></i> Mở ảnh gốc
+                    </a>
+                    <button onclick="window.closeImageModal()" class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-red-500/20 hover:text-red-400 text-slate-400 transition-all">
+                        <i class="ph-bold ph-x text-lg"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 overflow-auto flex items-center justify-center bg-slate-950/90 min-h-[360px]">
+                <img id="image-modal-src" src="" alt="Full view" class="max-h-[75vh] max-w-full rounded-xl object-contain shadow-2xl border border-slate-800">
             </div>
         </div>
     </div>
@@ -852,28 +886,110 @@
                     document.getElementById(loadingId)?.remove();
 
                     if (data.success) {
-                        let citationHtml = '';
-                        if (data.citations && data.citations.length > 0) {
-                            const c = data.citations[0];
-                            const imgHtml = c.image_url ? `<div class="mt-2"><img src="${c.image_url}" class="max-h-48 rounded-lg border border-cyan-500/40 shadow-lg object-contain bg-slate-900" alt="Visual Patch Diagram"></div>` : '';
-                            citationHtml = `
-                                <div class="mt-2 p-2 bg-slate-950 rounded-lg border border-emerald-500/30 text-[11px] text-emerald-300">
-                                    📍 <b>Trích dẫn Bounding Box:</b> ${c.original_name} (Trang ${c.page_number || 1}) | Score: <b>${c.rerank_score}%</b>
-                                    ${c.bbox ? `<br><code>BBox [x_min, y_min, x_max, y_max]: [${c.bbox.join(', ')}]</code>` : ''}
-                                    ${imgHtml}
+                        // 1. Trích xuất tất cả các ảnh / bản vẽ có độ tương đồng cao (ColPali Visual Patches + LayoutLM Crops)
+                        const imageSources = (data.relevant_images && data.relevant_images.length > 0)
+                            ? data.relevant_images
+                            : (data.citations || []).filter(c => c.image_url && c.image_url.trim() !== '');
+
+                        const uniqueImages = [];
+                        const seenImgUrls = new Set();
+                        for (const img of imageSources) {
+                            if (img.image_url && !seenImgUrls.has(img.image_url)) {
+                                seenImgUrls.add(img.image_url);
+                                uniqueImages.push(img);
+                            }
+                        }
+
+                        let imagesSectionHtml = '';
+                        if (uniqueImages.length > 0) {
+                            const cardsHtml = uniqueImages.map((img, idx) => {
+                                const scoreVal = parseFloat(img.score || img.rerank_score || 0);
+                                const scoreText = scoreVal.toFixed(1);
+                                const scoreColor = scoreVal >= 80 
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                                    : (scoreVal >= 60 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40');
+                                const docName = escapeHtml(img.original_name || 'Bản vẽ kỹ thuật');
+                                const pageNum = img.page_number || 1;
+                                const bboxStr = (img.bbox && img.bbox.length >= 4) ? `[${img.bbox.join(', ')}]` : '';
+                                const safeUrl = img.image_url;
+
+                                return `
+                                    <div class="bg-slate-950/90 rounded-xl border border-cyan-500/30 hover:border-cyan-400 p-2.5 flex flex-col justify-between transition-all duration-200 shadow-md group">
+                                        <div>
+                                            <div class="flex items-center justify-between gap-1 mb-1.5">
+                                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${scoreColor} font-mono">
+                                                    ⭐ ${scoreText}% Match
+                                                </span>
+                                                <span class="text-[10px] text-slate-400 font-mono">Trang ${pageNum}</span>
+                                            </div>
+                                            <div class="text-[11px] font-semibold text-slate-200 truncate mb-1.5 flex items-center gap-1" title="${docName}">
+                                                <i class="ph-bold ph-file-text text-cyan-400"></i> ${docName}
+                                            </div>
+                                            <div class="relative overflow-hidden rounded-lg border border-slate-800 bg-slate-900 flex items-center justify-center cursor-pointer group-hover:border-cyan-500/60" onclick="window.openImageModal('${safeUrl}', '${docName} - Trang ${pageNum}', '${scoreText}% Match', '${bboxStr}', '${img.full_page_url || safeUrl}')">
+                                                <img src="${safeUrl}" class="max-h-40 w-full object-contain p-1 rounded transition-transform duration-300 group-hover:scale-105" alt="Visual Patch" loading="lazy">
+                                                <div class="absolute inset-0 bg-cyan-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                                    <span class="px-2.5 py-1 bg-slate-900/90 border border-cyan-400/70 rounded-lg text-[10px] font-semibold text-cyan-300 flex items-center gap-1.5 shadow-lg">
+                                                        <i class="ph-bold ph-magnifying-glass-plus text-sm"></i> Phóng to
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        ${bboxStr ? `<div class="mt-2 text-[9px] text-slate-400 font-mono bg-slate-900/80 rounded px-1.5 py-0.5 border border-slate-800/80 truncate" title="BBox: ${bboxStr}"><code>BBox: ${bboxStr}</code></div>` : ''}
+                                    </div>
+                                `;
+                            }).join('');
+
+                            imagesSectionHtml = `
+                                <div class="mt-3 pt-3 border-t border-cyan-500/20">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                                            <i class="ph-bold ph-images text-sm text-cyan-400"></i>
+                                            Bản vẽ & vùng thị giác tương đồng cao (${uniqueImages.length} ảnh):
+                                        </span>
+                                        <span class="text-[10px] text-slate-400 font-mono">Nhấn vào ảnh để xem kích thước lớn</span>
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                                        ${cardsHtml}
+                                    </div>
                                 </div>
                             `;
                         }
 
-                        // Format Markdown images: ![alt](url) -> <img src="url">
-                        let formattedAnswer = data.answer.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="my-2"><img src="$2" class="max-h-56 rounded-lg border border-cyan-400/50 shadow-md object-contain bg-slate-950" alt="$1"></div>');
+                        // 2. Trích xuất các trích dẫn văn bản / SOP / GraphRAG bổ sung
+                        const textCitations = (data.citations || []).filter(c => !c.image_url || c.image_url.trim() === '');
+                        let textCitationsHtml = '';
+                        if (textCitations.length > 0) {
+                            const items = textCitations.slice(0, 3).map(c => `
+                                <li class="flex items-start gap-1.5 text-[11px] text-slate-300">
+                                    <span class="text-emerald-400 font-bold">•</span>
+                                    <span><b>${escapeHtml(c.original_name)}</b> (Trang ${c.page_number || 1}) | Score: <b>${c.rerank_score}%</b>: ${escapeHtml((c.text || '').substring(0, 140))}...</span>
+                                </li>
+                            `).join('');
+                            textCitationsHtml = `
+                                <div class="mt-2.5 p-2 bg-slate-950/70 rounded-lg border border-slate-800 text-[11px]">
+                                    <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Trích dẫn dữ liệu & SOP tham chiếu:</span>
+                                    <ul class="space-y-1">${items}</ul>
+                                </div>
+                            `;
+                        }
+
+                        // 3. Format Markdown images
+                        let formattedAnswer = data.answer.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="my-2"><img src="$2" class="max-h-56 rounded-lg border border-cyan-400/50 shadow-md object-contain bg-slate-950 cursor-pointer" onclick="window.openImageModal(\'$2\', \'$1\', \'Direct Ref\')" alt="$1"></div>');
                         const botTitle = data.bot_name || '🤖 Qwen-2.5 Multimodal Bot';
 
                         ragChatMessages.innerHTML += `
                             <div class="p-3 bg-slate-900/90 rounded-lg border border-emerald-500/30 text-slate-200">
-                                <span class="font-bold text-emerald-400">${botTitle} (${data.latency_ms}ms | Precision: ${data.precision_score}%):</span>
-                                <div class="mt-1 whitespace-pre-wrap">${formattedAnswer}</div>
-                                ${citationHtml}
+                                <div class="flex items-center justify-between gap-2 mb-1.5">
+                                    <span class="font-bold text-emerald-400 flex items-center gap-1.5">
+                                        ${botTitle}
+                                    </span>
+                                    <span class="text-[10px] text-slate-400 font-mono">
+                                        ${data.latency_ms}ms • Match: ${data.precision_score}%
+                                    </span>
+                                </div>
+                                <div class="mt-1 whitespace-pre-wrap leading-relaxed">${formattedAnswer}</div>
+                                ${imagesSectionHtml}
+                                ${textCitationsHtml}
                             </div>
                         `;
                     } else {
@@ -2110,6 +2226,84 @@
                 navigator.clipboard.writeText(JSON.stringify(currentActiveVectorArray));
                 alert('📋 Đã copy toàn bộ 384 giá trị Vector Float Array vào bộ nhớ tạm!');
             };
+
+            // Image Lightbox Modal Handlers with Crop vs Full Page toggle
+            let modalActiveCropUrl = '';
+            let modalActiveFullPageUrl = '';
+            let modalCurrentState = 'crop';
+
+            window.openImageModal = function(imgUrl, title, badge, bbox, fullPageUrl) {
+                const modal = document.getElementById('image-viewer-modal');
+                const modalImg = document.getElementById('image-modal-src');
+                const modalTitle = document.getElementById('image-modal-title');
+                const modalBadge = document.getElementById('image-modal-badge');
+                const modalBBox = document.getElementById('image-modal-bbox');
+                const modalDownload = document.getElementById('image-modal-download');
+                const toggleBtn = document.getElementById('image-modal-toggle-btn');
+                const toggleText = document.getElementById('image-modal-toggle-text');
+                
+                modalActiveCropUrl = imgUrl;
+                modalActiveFullPageUrl = fullPageUrl || imgUrl;
+                modalCurrentState = 'crop';
+
+                if (modal && modalImg) {
+                    modalImg.src = imgUrl;
+                    if (modalTitle) modalTitle.textContent = title || 'Bản vẽ kỹ thuật';
+                    if (modalBadge) modalBadge.textContent = badge || '';
+                    if (modalBBox) modalBBox.textContent = bbox ? `BBox: ${bbox}` : '';
+                    if (modalDownload) modalDownload.href = imgUrl;
+
+                    // Hiển thị nút chuyển đổi nếu có ảnh nguyên trang khác với ảnh crop
+                    if (toggleBtn && modalActiveFullPageUrl && modalActiveFullPageUrl !== modalActiveCropUrl) {
+                        toggleBtn.classList.remove('hidden');
+                        if (toggleText) toggleText.textContent = 'Xem cả trang';
+                    } else if (toggleBtn) {
+                        toggleBtn.classList.add('hidden');
+                    }
+
+                    modal.classList.remove('hidden');
+                }
+            };
+
+            window.toggleImageModalView = function() {
+                const modalImg = document.getElementById('image-modal-src');
+                const toggleText = document.getElementById('image-modal-toggle-text');
+                const modalDownload = document.getElementById('image-modal-download');
+
+                if (!modalImg || !modalActiveFullPageUrl) return;
+
+                if (modalCurrentState === 'crop') {
+                    modalCurrentState = 'full';
+                    modalImg.src = modalActiveFullPageUrl;
+                    if (toggleText) toggleText.textContent = 'Xem vùng robot cắt';
+                    if (modalDownload) modalDownload.href = modalActiveFullPageUrl;
+                } else {
+                    modalCurrentState = 'crop';
+                    modalImg.src = modalActiveCropUrl;
+                    if (toggleText) toggleText.textContent = 'Xem cả trang';
+                    if (modalDownload) modalDownload.href = modalActiveCropUrl;
+                }
+            };
+
+            window.closeImageModal = function() {
+                const modal = document.getElementById('image-viewer-modal');
+                if (modal) modal.classList.add('hidden');
+            };
+
+            // Close on ESC key or click outside backdrop
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    window.closeImageModal();
+                }
+            });
+            const imageModal = document.getElementById('image-viewer-modal');
+            if (imageModal) {
+                imageModal.addEventListener('click', (e) => {
+                    if (e.target === imageModal) {
+                        window.closeImageModal();
+                    }
+                });
+            }
 
             // Initial Fetch
             fetchDocuments();

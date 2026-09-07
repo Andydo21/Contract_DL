@@ -1,6 +1,7 @@
 import os
 import json
 import mimetypes
+from django.conf import settings
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, FileResponse, Http404, HttpResponse
 from django.views import View
@@ -495,7 +496,24 @@ class RAGChatbotAPIView(APIView):
             if mode in ['colpali', 'hybrid']:
                 from documents.services.colpali_service import ColPaliVisualIndexer
                 colpali = ColPaliVisualIndexer()
-                colpali_results = colpali.colpali_maxsim_search(query, top_k=5)
+                colpali_results = colpali.colpali_maxsim_search(query, top_k=8)
+
+                # Bổ sung nội dung text ngữ cảnh từ các chunk của trang tương ứng để Qwen có đầy đủ thông số trả lời
+                from documents.models import DocumentFile
+                for res in colpali_results:
+                    doc_id = res.get('document_id')
+                    page_num = res.get('page_number', 1)
+                    txt = (res.get('text') or '').strip()
+                    if doc_id and len(txt.split('\n')) <= 2:
+                        try:
+                            df = DocumentFile.objects.filter(id=doc_id).first()
+                            if df:
+                                chunks = df.get_extracted_chunks()
+                                page_texts = [c.get('text', '') for c in chunks if c.get('page_number') == page_num and c.get('text')]
+                                if page_texts:
+                                    res['text'] = (txt + "\n" + "\n".join(page_texts[:5])).strip()
+                        except Exception:
+                            pass
 
             # 2. Pipeline Surya + LayoutLM + all-MiniLM (Chạy khi mode là 'surya_layout' hoặc 'hybrid')
             if mode in ['surya_layout', 'hybrid']:
@@ -546,6 +564,7 @@ class RAGChatbotAPIView(APIView):
                         
                         if is_doc_mentioned or term_match:
                             keyword_candidates.append({
+                                "document_id": doc.id,
                                 "original_name": doc.original_name,
                                 "category": doc.category,
                                 "chunk_id": chunk.get("chunk_id", 0),
@@ -573,11 +592,172 @@ class RAGChatbotAPIView(APIView):
             # 3. BGE-Reranker Cross-Encoder Reranking
             from documents.services.reranker_service import BGERerankerService
             reranker = BGERerankerService()
-            top_citations = reranker.rerank(query, all_candidates, top_k=5)
+            top_citations = reranker.rerank(query, all_candidates, top_k=8)
+
+            # 4. Trích xuất danh sách các ảnh / bản vẽ / vùng thị giác thực sự (Ưu tiên Figures, Tables, CAD Diagrams)
+            seen_img_urls = set()
+            relevant_images = []
+            doc_chunks_cache = {}
+
+            # Thu thập từ top_citations sau khi rerank
+            for c in top_citations:
+                doc_id = c.get("document_id")
+                page_num = c.get("page_number", 1)
+                ltype = (c.get("layout_type") or "").lower()
+                c_score = round(float(c.get("rerank_score") or c.get("score", 0.0)), 1)
+                
+                # Xác định full_page_url chuẩn xác
+                full_page = c.get("full_page_url") or ""
+                if not full_page and doc_id and page_num:
+                    from pathlib import Path
+                    p_img = Path(settings.MEDIA_ROOT) / "extracted_images" / f"pdf_page_{doc_id}_p{page_num}.png"
+                    if not p_img.exists():
+                        p_img = Path(settings.MEDIA_ROOT) / "extracted_images" / f"colpali_pdf_{doc_id}_p{page_num}.png"
+                    if p_img.exists():
+                        full_page = f"{settings.MEDIA_URL}extracted_images/{p_img.name}"
+                if not full_page:
+                    full_page = c.get("image_url") or ""
+
+                # TH1: Citation vốn đã là Hình vẽ / Sơ đồ / Bản vẽ (FIGURE, TABLE, VISUAL PATCH)
+                if ltype in ['figure', 'picture', 'image', 'table', 'colpali_visual_patch', 'colpali_maxsim_visual']:
+                    img_url = c.get("image_url")
+                    if img_url and str(img_url).strip() and img_url not in seen_img_urls:
+                        seen_img_urls.add(img_url)
+                        relevant_images.append({
+                            "image_url": img_url,
+                            "full_page_url": full_page,
+                            "original_name": c.get("original_name", "Bản vẽ kỹ thuật"),
+                            "page_number": page_num,
+                            "bbox": c.get("bbox", []),
+                            "score": c_score,
+                            "layout_type": ltype,
+                            "text": (c.get("text") or "")[:200]
+                        })
+                else:
+                    # TH2: Citation là đoạn văn bản (PARAGRAPH, TITLE) -> Tìm HÌNH VẼ / BẢN VẼ THỰC SỰ trên cùng trang này!
+                    found_page_fig = False
+                    if doc_id:
+                        if doc_id not in doc_chunks_cache:
+                            try:
+                                df_obj = DocumentFile.objects.filter(id=doc_id).first()
+                                doc_chunks_cache[doc_id] = df_obj.get_extracted_chunks() if df_obj else []
+                            except Exception:
+                                doc_chunks_cache[doc_id] = []
+
+                        page_chunks = doc_chunks_cache.get(doc_id, [])
+                        page_figures = [
+                            ck for ck in page_chunks
+                            if ck.get('page_number') == page_num and ck.get('layout_type') in ['figure', 'picture', 'image', 'table'] and ck.get('image_url')
+                        ]
+
+                        if page_figures:
+                            found_page_fig = True
+                            c_bbox = c.get("bbox") or [500, 500, 500, 500]
+                            c_y_mid = (c_bbox[1] + c_bbox[3]) / 2.0 if len(c_bbox) >= 4 else 500
+
+                            def fig_dist(f):
+                                fb = f.get('bbox') or [0, 0, 0, 0]
+                                fy_mid = (fb[1] + fb[3]) / 2.0 if len(fb) >= 4 else 0
+                                return abs(fy_mid - c_y_mid)
+
+                            sorted_figs = sorted(page_figures, key=fig_dist)
+                            for best_fig in sorted_figs[:2]:
+                                # Tạo ảnh cắt thông minh kết hợp cả Hình vẽ Bugi + Nhãn Iridium/Part Number bên dưới
+                                fig_url = None
+                                try:
+                                    from PIL import Image
+                                    page_img_path = Path(settings.MEDIA_ROOT) / "extracted_images" / f"pdf_page_{doc_id}_p{page_num}.png"
+                                    if not page_img_path.exists():
+                                        page_img_path = Path(settings.MEDIA_ROOT) / "extracted_images" / f"colpali_pdf_{doc_id}_p{page_num}.png"
+                                    
+                                    if page_img_path.exists():
+                                        with Image.open(page_img_path) as p_img:
+                                            pw, ph = p_img.size
+                                            fb = best_fig.get("bbox") or [400, 300, 600, 450]
+                                            tb = c.get("bbox") or fb
+                                            
+                                            x_min = min(fb[0], tb[0])
+                                            y_min = min(fb[1], tb[1])
+                                            x_max = max(fb[2], tb[2])
+                                            y_max = max(fb[3], tb[3])
+
+                                            pad_x = int(pw * 0.08)
+                                            pad_y = int(ph * 0.03)
+                                            crop_x0 = max(0, int(x_min / 1000.0 * pw) - pad_x)
+                                            crop_y0 = max(0, int(y_min / 1000.0 * ph) - pad_y)
+                                            crop_x1 = min(pw, int(x_max / 1000.0 * pw) + pad_x)
+                                            crop_y1 = min(ph, int(y_max / 1000.0 * ph) + pad_y)
+
+                                            if crop_x1 > crop_x0 and crop_y1 > crop_y0:
+                                                cid = best_fig.get("chunk_id", "fig")
+                                                save_filename = f"smart_comp_doc{doc_id}_p{page_num}_c{cid}.png"
+                                                save_filepath = Path(settings.MEDIA_ROOT) / "extracted_images" / save_filename
+                                                cropped = p_img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
+                                                cropped.save(save_filepath, "PNG")
+                                                fig_url = f"{settings.MEDIA_URL}extracted_images/{save_filename}"
+                                except Exception as crop_err:
+                                    print("[Smart Component Crop Error]", str(crop_err))
+
+                                if not fig_url:
+                                    fig_url = best_fig.get("image_url")
+
+                                if fig_url and fig_url not in seen_img_urls and len(relevant_images) < 8:
+                                    seen_img_urls.add(fig_url)
+                                    relevant_images.append({
+                                        "image_url": fig_url,
+                                        "full_page_url": full_page,
+                                        "original_name": c.get("original_name", "Sơ đồ kỹ thuật"),
+                                        "page_number": page_num,
+                                        "bbox": best_fig.get("bbox", []),
+                                        "score": c_score,
+                                        "layout_type": best_fig.get("layout_type", "figure"),
+                                        "text": f"[Hình ảnh minh họa trang {page_num}]: {c.get('text', '')[:120]}"
+                                    })
+
+                    # Nếu trang hoàn toàn không có hình ảnh/bản vẽ nào (trang thuần SOP chữ), mới giữ ảnh crop text
+                    if not found_page_fig:
+                        img_url = c.get("image_url")
+                        if img_url and str(img_url).strip() and img_url not in seen_img_urls and len(relevant_images) < 8:
+                            seen_img_urls.add(img_url)
+                            relevant_images.append({
+                                "image_url": img_url,
+                                "full_page_url": full_page,
+                                "original_name": c.get("original_name", "Tài liệu kỹ thuật"),
+                                "page_number": page_num,
+                                "bbox": c.get("bbox", []),
+                                "score": c_score,
+                                "layout_type": ltype,
+                                "text": (c.get("text") or "")[:200]
+                            })
+
+            # Bổ sung thêm các ảnh từ colpali_results (ColPali Visual MaxSim) nếu chưa có trong danh sách
+            for c in colpali_results:
+                img_url = c.get("image_url")
+                if img_url and str(img_url).strip() and img_url not in seen_img_urls and len(relevant_images) < 8:
+                    score = round(float(c.get("score") or c.get("maxsim_score", 0.0)), 1)
+                    if score >= 35.0:
+                        seen_img_urls.add(img_url)
+                        relevant_images.append({
+                            "image_url": img_url,
+                            "full_page_url": c.get("full_page_url", img_url),
+                            "original_name": c.get("original_name", "Bản vẽ kỹ thuật"),
+                            "page_number": c.get("page_number", 1),
+                            "bbox": c.get("bbox", []),
+                            "score": score,
+                            "layout_type": "colpali_maxsim_visual",
+                            "text": (c.get("text") or "")[:200]
+                        })
+
+            # Sắp xếp các ảnh ưu tiên Hình ảnh/Bản vẽ thực sự (figure/table) lên trước ảnh text
+            def img_priority(x):
+                is_visual = 1 if x.get("layout_type") in ['figure', 'picture', 'image', 'table', 'colpali_maxsim_visual'] else 0
+                return (is_visual, x.get("score", 0.0))
+
+            relevant_images.sort(key=img_priority, reverse=True)
 
             latency_ms = round((time.time() - start_time) * 1000, 2)
 
-            # 4. Synthesize Answer using Specialized Qwen-2.5 Engine
+            # 5. Synthesize Answer using Specialized Qwen-2.5 Engine
             from documents.services.qwen_service import QwenChatbotService
             qwen_engine = QwenChatbotService()
             generated_answer = qwen_engine.generate_answer(query, top_citations, mode=mode)
@@ -589,8 +769,9 @@ class RAGChatbotAPIView(APIView):
                 'bot_name': bot_name,
                 'answer': generated_answer,
                 'latency_ms': latency_ms,
-                'precision_score': round(top_citations[0]['rerank_score'], 1) if top_citations else 0.0,
-                'citations': top_citations
+                'precision_score': round(top_citations[0]['rerank_score'], 1) if top_citations else (relevant_images[0]['score'] if relevant_images else 0.0),
+                'citations': top_citations,
+                'relevant_images': relevant_images
             })
         except Exception as e:
             return Response({'success': False, 'message': f'Lỗi RAG Chatbot ({mode}): {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

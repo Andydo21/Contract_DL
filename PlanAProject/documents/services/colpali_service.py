@@ -92,10 +92,13 @@ class ColPaliVisualIndexer:
                 x_max = int((bbox_norm[2] / 1000.0) * w)
                 y_max = int((bbox_norm[3] / 1000.0) * h)
 
-                crop_x0 = max(0, x_min)
-                crop_y0 = max(0, y_min)
-                crop_x1 = min(w, x_max)
-                crop_y1 = min(h, y_max)
+                # Thêm padding để hiển thị rõ tên robot, thông số và ngữ cảnh xung quanh
+                pad_x = int(w * 0.04)
+                pad_y = int(h * 0.04)
+                crop_x0 = max(0, x_min - pad_x)
+                crop_y0 = max(0, y_min - pad_y)
+                crop_x1 = min(w, x_max + pad_x)
+                crop_y1 = min(h, y_max + pad_y)
 
                 if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
                     return ""
@@ -108,7 +111,7 @@ class ColPaliVisualIndexer:
                 rel_x1 = x_max - crop_x0
                 rel_y1 = y_max - crop_y0
 
-                draw.rectangle([rel_x0, rel_y0, rel_x1 - 1, rel_y1 - 1], outline="red", width=3)
+                draw.rectangle([rel_x0, rel_y0, rel_x1 - 1, rel_y1 - 1], outline="red", width=4)
                 cropped.save(crop_save_path, "PNG")
 
                 return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
@@ -189,7 +192,7 @@ class ColPaliVisualIndexer:
                     crop_filename = f"crop_colpali_doc{doc_id}_p{page_num}_patch{patch_idx+1}.png"
                     patch_crop_url = self._draw_visual_patch_crop(img_path, norm_bbox, crop_filename) if img_path.exists() else img_url
 
-                    full_patch_text = f"[{doc_file.original_name} | Trang {page_num} | ColPali Patch #{patch_idx+1}]\n{patch_text_content}"
+                    full_patch_text = f"[Trang {page_num} | Visual Patch #{patch_idx+1}]\n{patch_text_content}"
                     
                     vector = self.generate_patch_embedding(full_patch_text, col * 8, row * 8)
                     point_id = doc_id * 100000 + page_num * 100 + patch_idx + 1
@@ -286,7 +289,7 @@ class ColPaliVisualIndexer:
             response = self.client.query_points(
                 collection_name=self.COLLECTION_NAME,
                 query=query_vector,
-                limit=top_k * 3,
+                limit=max(top_k * 4, 25),
                 query_filter=search_filter
             )
 
@@ -298,18 +301,40 @@ class ColPaliVisualIndexer:
                 score = getattr(hit, 'score', 0.0)
                 doc_id = payload.get('document_id')
                 page_num = payload.get('page_number', 1)
+                patch_idx = payload.get('patch_index', 0)
 
-                key = f"{doc_id}_p{page_num}"
+                bbox = payload.get('bbox', [100, 100, 400, 400])
+                img_url = payload.get('image_url', '')
+                full_page_url = img_url
+
+                # Tự động cắt crop riêng vùng robot / visual patch nếu đang là ảnh toàn trang
+                if doc_id and page_num and bbox:
+                    page_img_path = self.output_img_dir / f"colpali_pdf_{doc_id}_p{page_num}.png"
+                    if not page_img_path.exists():
+                        page_img_path = self.output_img_dir / f"pdf_page_{doc_id}_p{page_num}.png"
+
+                    if page_img_path.exists():
+                        full_page_url = f"{settings.MEDIA_URL}extracted_images/{page_img_path.name}"
+                        # Nếu bbox là vùng patch cụ thể (không phải bao trọn cả trang)
+                        if (bbox[2] - bbox[0] < 950) or (bbox[3] - bbox[1] < 950):
+                            crop_filename = f"crop_colpali_doc{doc_id}_p{page_num}_patch{patch_idx+1}.png"
+                            crop_url = self._draw_visual_patch_crop(page_img_path, bbox, crop_filename)
+                            if crop_url:
+                                img_url = crop_url
+
+                key = f"{doc_id}_p{page_num}_patch{patch_idx}"
                 if key not in page_buckets:
                     page_buckets[key] = {
                         "document_id": doc_id,
                         "original_name": payload.get("original_name"),
                         "category": payload.get("category"),
                         "page_number": page_num,
+                        "patch_index": patch_idx,
                         "maxsim_score": round(score * 100, 2),
                         "score": round(score * 100, 2),
-                        "bbox": payload.get("bbox", [100, 100, 400, 400]),
-                        "image_url": payload.get("image_url", ""),
+                        "bbox": bbox,
+                        "image_url": img_url,
+                        "full_page_url": full_page_url,
                         "text": payload.get("text", ""),
                         "layout_type": "colpali_maxsim_visual"
                     }
@@ -317,8 +342,9 @@ class ColPaliVisualIndexer:
                     if score * 100 > page_buckets[key]["maxsim_score"]:
                         page_buckets[key]["maxsim_score"] = round(score * 100, 2)
                         page_buckets[key]["score"] = round(score * 100, 2)
-                        page_buckets[key]["bbox"] = payload.get("bbox")
-                        page_buckets[key]["image_url"] = payload.get("image_url", "")
+                        page_buckets[key]["bbox"] = bbox
+                        page_buckets[key]["image_url"] = img_url
+                        page_buckets[key]["full_page_url"] = full_page_url
                         page_buckets[key]["text"] = payload.get("text", "")
 
             results = list(page_buckets.values())

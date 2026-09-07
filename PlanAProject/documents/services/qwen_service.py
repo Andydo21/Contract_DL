@@ -35,14 +35,6 @@ class QwenChatbotService:
         token = self.hf_token if self.hf_token else None
         return InferenceClient(model=self.model_name, token=token, timeout=60)
 
-    def generate_colpali_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
-        """Qwen chuyên biệt cho ColPali No-OCR Visual Patches (Bản vẽ CAD, sơ đồ mạch, tọa độ không gian)"""
-        return self.generate_answer(query, citations, mode="colpali")
-
-    def generate_surya_answer(self, query: str, citations: List[Dict[str, Any]]) -> str:
-        """Qwen chuyên biệt cho Surya-Layout + LayoutLM + all-MiniLM (Bảng biểu spec, quy trình SOP, văn bản)"""
-        return self.generate_answer(query, citations, mode="surya_layout")
-
     def generate_answer(self, query: str, citations: List[Dict[str, Any]], mode: str = "hybrid") -> str:
         """
         Tổng hợp câu trả lời từ các trích dẫn vector retrieval theo từng cơ chế chuyên biệt:
@@ -55,46 +47,54 @@ class QwenChatbotService:
 
         # Chuẩn bị context văn bản từ các trích dẫn vector
         context_blocks = []
-        for c in citations[:4]:
+        for c in citations[:6]:
             txt = (c.get("text") or c.get("markdown") or "").strip()
             txt_clean = self._clean_block_text(txt)
             if txt_clean:
                 doc_name = c.get("original_name", "Tài liệu")
                 page = c.get("page_number") or c.get("page_num", 1)
-                context_blocks.append(f"• [Tài liệu: {doc_name} | Trang {page}]:\n{txt_clean}")
+                bbox_info = f" | BBox: {c.get('bbox')}" if c.get('bbox') else ""
+                context_blocks.append(f"• [Tài liệu: {doc_name} | Trang {page}{bbox_info}]:\n{txt_clean}")
 
         context_text = "\n\n".join(context_blocks)
+
+        anti_hallucination_rule = (
+            "QUY TẮC CỐT LÕI (CHỐNG BỊA ĐẶT / ANTI-HALLUCINATION):\n"
+            "- CHỈ trả lời dựa trên thông tin, thông số và số liệu CÓ THẬT trong Dữ liệu Ngữ cảnh được cấp bên dưới.\n"
+            "- TUYỆT ĐỐI KHÔNG tự nghĩ ra hoặc bịa đặt thông số (kích thước phi, dung sai ISO, mặt bích, tải trọng...) nếu ngữ cảnh không ghi rõ.\n"
+            "- Nếu dữ liệu chỉ là vùng hình ảnh/bản vẽ chưa có đầy đủ số đo chi tiết, hãy trả lời trung thực: chỉ ra tên model, vị trí trang/vùng Bounding Box tìm thấy và hướng dẫn kỹ sư đối chiếu trực tiếp trên ảnh trích dẫn bên dưới, KHÔNG tự chế số liệu.\n"
+        )
 
         # Định hình System Instruction theo từng mode chuyên biệt
         if mode == "colpali":
             system_instruction = (
                 "Bạn là Trợ lý AI Qwen ColPali VisionMind — Chuyên gia Đọc hiểu Bản vẽ Kỹ thuật 2D CAD, Sơ đồ Cơ khí & Bounding Box Thị giác (No-OCR Visual Engine).\n"
-                "Dữ liệu của bạn được trích xuất hoàn toàn từ Mảng Patch Không gian (SigLIP Visual Patches) của ColPali.\n"
+                f"{anti_hallucination_rule}\n"
                 "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM THỊ GIÁC: Trả lời trực tiếp và chính xác thông số hình học trên bản vẽ (kích thước phi, dung sai lắp ghép ISO fit, mặt bích Flange, góc xoay làm việc, bán kính, tâm trục).\n"
-                "2. PHÂN TÍCH HÌNH HỌC & CƠ KHÍ: Giải thích chức năng cơ khí, đặc tính động học hoặc tính chất lắp ghép không khe hở của chi tiết trên bản vẽ CAD.\n"
-                "3. MINH CHỨNG KHÔNG GIAN: Nhắc đến vị trí trang và vùng nhận diện trên bản vẽ kỹ thuật.\n"
+                "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp câu hỏi dựa trên các vùng thị giác, tên bản vẽ và trang tài liệu.\n"
+                "2. TRUNG THỰC VỀ THÔNG SỐ: Chỉ trích dẫn thông số có trong ngữ cảnh. Không suy diễn thông số phi, dung sai, mặt bích nếu không có trong dữ liệu.\n"
+                "3. MINH CHỨNG KHÔNG GIAN: Nhắc đến vị trí trang và vùng nhận diện trên bản vẽ/catalog để kỹ sư theo dõi trên ảnh đính kèm.\n"
                 "4. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, súc tích."
             )
             header_prompt = "DỮ LIỆU BẢN VẼ TRỰC QUAN (COLPALI VISUAL PATCHES):\n"
         elif mode == "surya_layout":
             system_instruction = (
                 "Bạn là Trợ lý AI Qwen Surya-LayoutLM — Chuyên gia Phân tích Văn bản Kỹ thuật, Bảng biểu Thông số & Quy trình Chuẩn SOP Nhà máy DENSO (Document & Tabular Engine).\n"
-                "Dữ liệu của bạn được trích xuất từ Mô hình Phân tích Bố cục Surya-Layout, LayoutLM 2D Positional Encoding và Vector all-MiniLM-L6-v2.\n"
+                f"{anti_hallucination_rule}\n"
                 "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM VĂN BẢN/BẢNG BIỂU: Trả lời trực tiếp và chính xác thông số trong bảng spec (điện áp, dòng điện, chu kỳ bảo trì, mã lỗi E/W, danh mục linh kiện, bước SOP).\n"
-                "2. PHÂN TÍCH QUY TRÌNH & TIÊU CHUẨN: Giải thích ý nghĩa của quy trình thao tác, điều kiện kích hoạt cảnh báo, hoặc các lưu ý an toàn nhà máy theo tài liệu.\n"
-                "3. TRÍCH XUẤT CÓ CẤU TRÚC: Định dạng kết quả dạng bảng hoặc gạch đầu dòng rõ ràng, dễ đối chiếu trên sàn sản xuất.\n"
-                "4. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, rõ ràng."
+                "1. ĐÚNG TRỌNG TÂM BẢNG BIỂU: Trích xuất chính xác thông số kỹ thuật (payload, arm reach, repeatability, mã lỗi, chu kỳ bảo trì...).\n"
+                "2. TRÍCH XUẤT CÓ CẤU TRÚC: Trình bày dạng bảng hoặc gạch đầu dòng rõ ràng, dễ đối chiếu trên sàn sản xuất.\n"
+                "3. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, rõ ràng."
             )
             header_prompt = "DỮ LIỆU VĂN BẢN & BẢNG BIỂU (SURYA-LAYOUT & LAYOUTLM):\n"
         else:
             system_instruction = (
                 "Bạn là Trợ lý AI Chuyên gia Phân tích Bản vẽ Kỹ thuật & Tài liệu Nhà máy DENSO (DENSO VisionMind AI).\n"
+                f"{anti_hallucination_rule}\n"
                 "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp và chính xác câu hỏi của người dùng dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
-                "2. PHÂN TÍCH KỸ THUẬT CHUYÊN SÂU: Giải thích ý nghĩa chức năng cơ khí, dung sai lắp ghép hoặc an toàn của chính thông số được hỏi. Tránh giải thích lan man sang các thông số khác không liên quan đến câu hỏi.\n"
-                "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích, chuyên nghiệp bằng Tiếng Việt."
+                "1. ĐÚNG TRỌNG TÂM: Trả lời chính xác câu hỏi dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
+                "2. CHÍNH XÁC & KHÔNG BỊA ĐẶT: Trích xuất đúng số liệu thật từ tài liệu. Nêu rõ tài liệu, số trang và vùng Bounding Box.\n"
+                "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích bằng Tiếng Việt."
             )
             header_prompt = "DỮ LIỆU NGỮ CẢNH TRÍCH XUẤT:\n"
 
