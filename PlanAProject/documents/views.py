@@ -760,7 +760,7 @@ class RAGChatbotAPIView(APIView):
             # 5. Synthesize Answer using Specialized Qwen-2.5 Engine
             from documents.services.qwen_service import QwenChatbotService
             qwen_engine = QwenChatbotService()
-            generated_answer = qwen_engine.generate_answer(query, top_citations, mode=mode)
+            generated_answer = qwen_engine.generate_answer(query, top_citations, images=relevant_images, mode=mode)
 
             return Response({
                 'success': True,

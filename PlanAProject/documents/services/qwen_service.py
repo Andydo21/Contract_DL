@@ -1,27 +1,37 @@
 import os
 import re
+import base64
+import io
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from PIL import Image
 from django.conf import settings
 from dotenv import load_dotenv
 
 # Nạp các biến môi trường từ .env nếu có
-load_dotenv()
+# Nạp các biến môi trường từ PlanAProject/.env
+base_dir = Path(__file__).resolve().parent.parent.parent
+env_file = base_dir / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
+else:
+    load_dotenv()
 
 
 class QwenChatbotService:
     """
-    Qwen LLM Service qua Hugging Face Inference API:
-    - Tổng hợp câu trả lời dựa trên Context thu được từ Vector Search (ColPali, Qdrant, BGE-Reranker, Neo4j)
-    - Nhận ngữ cảnh trích xuất từ các vector embeddings của kho tài liệu nhà máy
-    - Phân tích và giải thích ý nghĩa các thông số kỹ thuật, bản vẽ CAD, tiêu chuẩn ISO, quy trình SOP
-    - 100% chạy qua Hugging Face API (đã loại bỏ hoàn toàn việc nạp model nặng cục bộ)
+    Qwen Multimodal Vision-Language Service (Qwen2.5-VL) qua Hugging Face Inference API:
+    - Tổng hợp câu trả lời đa phương thức dựa trên Context văn bản & HÌNH ẢNH THỰC TẾ trích xuất từ tài liệu
+    - Trực tiếp soi ảnh bản vẽ 2D CAD, sơ đồ phân rã linh kiện, bảng thông số kỹ thuật
+    - Đọc chi tiết từng đường gióng, số đo phi (Ø), dung sai, bán kính R, mã phụ tùng (Part Numbers)
+    - 100% chạy qua Hugging Face API tốc độ cao, không tốn RAM/VRAM máy chủ cục bộ
     """
 
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = (
             model_name
             or os.environ.get("QWEN_VL_MODEL")
-            or getattr(settings, "QWEN_VL_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+            or getattr(settings, "QWEN_VL_MODEL", "Qwen/Qwen2.5-VL-72B-Instruct")
         )
         self.hf_token = (
             os.environ.get("HF_TOKEN")
@@ -33,21 +43,89 @@ class QwenChatbotService:
         """Khởi tạo Hugging Face InferenceClient"""
         from huggingface_hub import InferenceClient
         token = self.hf_token if self.hf_token else None
-        return InferenceClient(model=self.model_name, token=token, timeout=60)
+        return InferenceClient(model=self.model_name, token=token, timeout=75)
 
-    def generate_answer(self, query: str, citations: List[Dict[str, Any]], mode: str = "hybrid") -> str:
+    def _prepare_image_payloads(self, images: Optional[List[Dict[str, Any]]], max_images: int = 3) -> List[str]:
         """
-        Tổng hợp câu trả lời từ các trích dẫn vector retrieval theo từng cơ chế chuyên biệt:
-        - mode='colpali': Chuyên gia thị giác bản vẽ CAD & Bounding Box (No-OCR ColPali Engine)
-        - mode='surya_layout': Chuyên gia văn bản, bảng biểu & SOP (Surya Layout + LayoutLM + all-MiniLM)
-        - mode='hybrid': Kết hợp toàn diện cả 2 nhánh thị giác + văn bản + Neo4j Graph
+        Nạp các ảnh bản vẽ / biểu đồ thực tế từ đĩa, resize tối ưu và mã hóa Base64
+        để gửi trực tiếp vào thị giác của Qwen2.5-VL.
         """
-        if not citations:
+        if not images:
+            return []
+
+        media_root = getattr(settings, "MEDIA_ROOT", "")
+        base64_images = []
+
+        for item in images:
+            if len(base64_images) >= max_images:
+                break
+
+            img_path = None
+            url = item.get("image_url") or item.get("full_page_url") or ""
+
+            if not url or not isinstance(url, str):
+                continue
+
+            # 1. Nếu là đường dẫn tuyệt đối
+            if os.path.isabs(url) and os.path.exists(url):
+                img_path = url
+            else:
+                # 2. Chuẩn hóa đường dẫn tương đối từ media/
+                clean_rel = url.replace("\\", "/").lstrip("/")
+                if clean_rel.startswith("media/"):
+                    clean_rel = clean_rel[len("media/"):]
+
+                cand_path = os.path.join(media_root, clean_rel)
+                if os.path.exists(cand_path):
+                    img_path = cand_path
+                else:
+                    # Thử tìm với full_page_url nếu có
+                    full_page = item.get("full_page_url", "")
+                    if full_page and full_page != url:
+                        clean_full = full_page.replace("\\", "/").lstrip("/")
+                        if clean_full.startswith("media/"):
+                            clean_full = clean_full[len("media/"):]
+                        cand_full = os.path.join(media_root, clean_full)
+                        if os.path.exists(cand_full):
+                            img_path = cand_full
+
+            if img_path and os.path.isfile(img_path):
+                try:
+                    with Image.open(img_path) as pil_img:
+                        pil_img = pil_img.convert("RGB")
+                        # Giới hạn kích thước tối đa 1024 để tiết kiệm token và đảm bảo tốc độ phản hồi nhanh
+                        max_dim = 1024
+                        if max(pil_img.width, pil_img.height) > max_dim:
+                            pil_img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+                        buf = io.BytesIO()
+                        pil_img.save(buf, format="JPEG", quality=85)
+                        b64_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        base64_images.append(b64_str)
+                except Exception as e:
+                    print(f"[QwenService] Không thể xử lý ảnh {img_path}: {e}")
+                    continue
+
+        return base64_images
+
+    def generate_answer(
+        self,
+        query: str,
+        citations: List[Dict[str, Any]],
+        images: Optional[List[Dict[str, Any]]] = None,
+        mode: str = "hybrid"
+    ) -> str:
+        """
+        Tổng hợp câu trả lời Đa phương thức (Multimodal) từ Text Citations và Hình ảnh thực tế:
+        - Qwen2.5-VL trực tiếp quan sát ảnh bản vẽ CAD, sơ đồ phân rã, đọc số đo và chi tiết linh kiện
+        - Phân tích sâu sắc về cơ cấu cơ khí, vị trí lắp ráp và nguyên lý vận hành
+        """
+        if not citations and not images:
             return "Hệ thống RAG chưa tìm thấy thông tin phù hợp với truy vấn trong kho tài liệu. Vui lòng thử lại với từ khóa khác."
 
         # Chuẩn bị context văn bản từ các trích dẫn vector
         context_blocks = []
-        for c in citations[:6]:
+        for c in (citations or [])[:6]:
             txt = (c.get("text") or c.get("markdown") or "").strip()
             txt_clean = self._clean_block_text(txt)
             if txt_clean:
@@ -56,72 +134,105 @@ class QwenChatbotService:
                 bbox_info = f" | BBox: {c.get('bbox')}" if c.get('bbox') else ""
                 context_blocks.append(f"• [Tài liệu: {doc_name} | Trang {page}{bbox_info}]:\n{txt_clean}")
 
-        context_text = "\n\n".join(context_blocks)
+        context_text = "\n\n".join(context_blocks) if context_blocks else "Không có đoạn văn bản trích dẫn rời rạc."
 
-        anti_hallucination_rule = (
-            "QUY TẮC CỐT LÕI (CHỐNG BỊA ĐẶT / ANTI-HALLUCINATION):\n"
-            "- CHỈ trả lời dựa trên thông tin, thông số và số liệu CÓ THẬT trong Dữ liệu Ngữ cảnh được cấp bên dưới.\n"
-            "- TUYỆT ĐỐI KHÔNG tự nghĩ ra hoặc bịa đặt thông số (kích thước phi, dung sai ISO, mặt bích, tải trọng...) nếu ngữ cảnh không ghi rõ.\n"
-            "- Nếu dữ liệu chỉ là vùng hình ảnh/bản vẽ chưa có đầy đủ số đo chi tiết, hãy trả lời trung thực: chỉ ra tên model, vị trí trang/vùng Bounding Box tìm thấy và hướng dẫn kỹ sư đối chiếu trực tiếp trên ảnh trích dẫn bên dưới, KHÔNG tự chế số liệu.\n"
+        # Chuẩn bị hình ảnh cho mắt nhìn của Qwen-VL
+        image_payloads = self._prepare_image_payloads(images, max_images=3)
+        has_images = len(image_payloads) > 0
+
+        # Định hình System Instruction chuyên gia thị giác cơ khí
+        system_instruction = (
+            "Bạn là Trợ lý AI Qwen-2.5-VL Đa Phương Thức (DENSO Multimodal VisionMind) — "
+            "Chuyên gia Cao cấp về Đọc hiểu Bản vẽ Kỹ thuật Cơ khí 2D/3D, Sơ đồ Lắp ráp Phân rã, "
+            "Bảng Thông số & Quy trình Bảo trì của Nhà máy DENSO.\n\n"
+            "QUY TẮC PHÂN TÍCH KỸ SƯ CƠ KHÍ:\n"
+            "1. QUAN SÁT TRỰC QUAN TOÀN DIỆN: Nếu có hình ảnh đính kèm, hãy soi kỹ vào từng chi tiết trong ảnh: "
+            "đọc rõ các đường gióng kích thước, số đo đường kính phi (Ø), bán kính (R), khoảng cách tâm lỗ bu-lông, "
+            "dung sai (±), góc vát (chamfer), độ nhám bề mặt và mã phụ tùng (Part Numbers).\n"
+            "2. MÔ TẢ HÌNH HỌC VÀ CẤU TẠO: Mô tả rõ chi tiết cơ khí này có cấu tạo như thế nào (dạng trục bậc, mặt bích, "
+            "thân vỏ hộp, gân tăng cứng, mộng ren, rãnh then trượt...).\n"
+            "3. NGUYÊN LÝ VÀ CHỨC NĂNG LẮP RÁP: Giải thích chi tiết máy này lắp ghép vào vị trí nào trong cụm máy/robot, "
+            "vai trò chịu lực, định vị hay truyền động trong dây chuyền sản xuất DENSO.\n"
+            "4. TRẢ LỜI CỰC KỲ CHI TIẾT & CHÍNH XÁC: Tuyệt đối không trả lời chung chung hoặc né tránh. "
+            "Hãy trình bày mạch lạc, sử dụng các đầu mục, gạch đầu dòng và số liệu cụ thể tìm thấy trong tài liệu và bản vẽ.\n"
+            "5. ĐỊNH VỊ CHÍNH XÁC NGUỒN VÀ TỌA ĐỘ ẢNH: Luôn chỉ rõ tên tài liệu, số trang và vùng Bounding Box [ymin, xmin, ymax, xmax] "
+            "của hình ảnh/bản vẽ được trích dẫn để kỹ sư dễ dàng đối chiếu trực tiếp trên trang PDF gốc."
         )
 
-        # Định hình System Instruction theo từng mode chuyên biệt
-        if mode == "colpali":
-            system_instruction = (
-                "Bạn là Trợ lý AI Qwen ColPali VisionMind — Chuyên gia Đọc hiểu Bản vẽ Kỹ thuật 2D CAD, Sơ đồ Cơ khí & Bounding Box Thị giác (No-OCR Visual Engine).\n"
-                f"{anti_hallucination_rule}\n"
-                "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM: Trả lời trực tiếp câu hỏi dựa trên các vùng thị giác, tên bản vẽ và trang tài liệu.\n"
-                "2. TRUNG THỰC VỀ THÔNG SỐ: Chỉ trích dẫn thông số có trong ngữ cảnh. Không suy diễn thông số phi, dung sai, mặt bích nếu không có trong dữ liệu.\n"
-                "3. MINH CHỨNG KHÔNG GIAN: Nhắc đến vị trí trang và vùng nhận diện trên bản vẽ/catalog để kỹ sư theo dõi trên ảnh đính kèm.\n"
-                "4. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, súc tích."
-            )
-            header_prompt = "DỮ LIỆU BẢN VẼ TRỰC QUAN (COLPALI VISUAL PATCHES):\n"
-        elif mode == "surya_layout":
-            system_instruction = (
-                "Bạn là Trợ lý AI Qwen Surya-LayoutLM — Chuyên gia Phân tích Văn bản Kỹ thuật, Bảng biểu Thông số & Quy trình Chuẩn SOP Nhà máy DENSO (Document & Tabular Engine).\n"
-                f"{anti_hallucination_rule}\n"
-                "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM BẢNG BIỂU: Trích xuất chính xác thông số kỹ thuật (payload, arm reach, repeatability, mã lỗi, chu kỳ bảo trì...).\n"
-                "2. TRÍCH XUẤT CÓ CẤU TRÚC: Trình bày dạng bảng hoặc gạch đầu dòng rõ ràng, dễ đối chiếu trên sàn sản xuất.\n"
-                "3. NGÔN NGỮ TỰ NHIÊN: Tiếng Việt kỹ thuật chuyên nghiệp, rõ ràng."
-            )
-            header_prompt = "DỮ LIỆU VĂN BẢN & BẢNG BIỂU (SURYA-LAYOUT & LAYOUTLM):\n"
-        else:
-            system_instruction = (
-                "Bạn là Trợ lý AI Chuyên gia Phân tích Bản vẽ Kỹ thuật & Tài liệu Nhà máy DENSO (DENSO VisionMind AI).\n"
-                f"{anti_hallucination_rule}\n"
-                "Phong cách trả lời:\n"
-                "1. ĐÚNG TRỌNG TÂM: Trả lời chính xác câu hỏi dựa trên Dữ liệu Ngữ cảnh trích xuất.\n"
-                "2. CHÍNH XÁC & KHÔNG BỊA ĐẶT: Trích xuất đúng số liệu thật từ tài liệu. Nêu rõ tài liệu, số trang và vùng Bounding Box.\n"
-                "3. NGÔN NGỮ TỰ NHIÊN: Trình bày mạch lạc, súc tích bằng Tiếng Việt."
-            )
-            header_prompt = "DỮ LIỆU NGỮ CẢNH TRÍCH XUẤT:\n"
+        visual_note = f" (Kèm {len(image_payloads)} hình ảnh/bản vẽ thực tế được đính kèm bên dưới)" if has_images else ""
+        header_prompt = f"DỮ LIỆU NGỮ CẢNH KỸ THUẬT{visual_note}:\n"
 
-        user_prompt = (
-            f"{header_prompt}{context_text}\n\n"
+        image_metadata_text = ""
+        if has_images:
+            img_lines = []
+            for idx, img in enumerate((images or [])[:len(image_payloads)]):
+                doc = img.get("original_name", "Tài liệu")
+                pg = img.get("page_number", 1)
+                bb = img.get("bbox", [])
+                ltype = img.get("layout_type", "hình ảnh")
+                img_lines.append(f"• [Hình ảnh #{idx+1}]: Thuộc tài liệu '{doc}', Trang {pg}, Vùng BBox: {bb} (Loại: {ltype})")
+            image_metadata_text = "\nVỊ TRÍ HÌNH ẢNH TRÍCH XUẤT TRÊN TÀI LIỆU:\n" + "\n".join(img_lines) + "\n"
+
+        user_prompt_text = (
+            f"{header_prompt}{context_text}\n"
+            f"{image_metadata_text}\n"
             f"CÂU HỎI TRUY VẤN CỦA KỸ SƯ:\n{query}\n\n"
-            f"Hãy trả lời chính xác câu hỏi trên và phân tích ý nghĩa kỹ thuật liên quan trực tiếp đến thông số được hỏi:"
+            f"Dựa trên hình ảnh bản vẽ/sơ đồ đính kèm và ngữ cảnh kỹ thuật trên, hãy trả lời chi tiết, "
+            f"phân tích cụ thể các thông số, kích thước, cấu tạo hình học, nêu rõ số trang và tọa độ BBox tìm thấy:"
         )
 
+        llm_response = ""
         try:
             client = self._get_hf_client()
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ]
+
+            # Xây dựng message đa phương thức nếu có hình ảnh
+            if has_images:
+                user_content = [{"type": "text", "text": user_prompt_text}]
+                for b64_str in image_payloads:
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
+                    })
+                messages = [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_content}
+                ]
+            else:
+                messages = [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt_text}
+                ]
 
             chat_completion = client.chat.completions.create(
                 messages=messages,
-                max_tokens=800,
-                temperature=0.3,
+                max_tokens=1500,        # Nâng lên 1500 tokens để Qwen phân tích sâu sắc, đầy đủ
+                temperature=0.2,        # Nhiệt độ thấp đảm bảo thông số cơ khí chuẩn xác, không bị ảo giác
                 top_p=0.9
             )
             if chat_completion.choices and len(chat_completion.choices) > 0:
                 llm_response = chat_completion.choices[0].message.content.strip()
+
         except Exception as hf_err:
             error_msg = str(hf_err)
-            print(f"[Qwen HF API Inference Error] {error_msg}")
+            print(f"[Qwen Multimodal HF API Inference Error] {error_msg}")
+
+            # Cơ chế Fallback an toàn: nếu gửi ảnh bị lỗi mạng, tự động thử lại bằng text-only
+            if has_images:
+                try:
+                    print("[Qwen Multimodal] Đang thử lại với chế độ Text-Only Fallback...")
+                    fallback_client = self._get_hf_client()
+                    fb_res = fallback_client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_instruction},
+                            {"role": "user", "content": user_prompt_text}
+                        ],
+                        max_tokens=1000,
+                        temperature=0.2
+                    )
+                    if fb_res.choices and len(fb_res.choices) > 0:
+                        return fb_res.choices[0].message.content.strip()
+                except Exception as fb_err:
+                    error_msg += f" | Fallback Error: {fb_err}"
 
             if "api_key" in error_msg.lower() or "token" in error_msg.lower() or "401" in error_msg:
                 llm_response = (
@@ -131,11 +242,11 @@ class QwenChatbotService:
                 )
             elif "loading" in error_msg.lower() or "503" in error_msg:
                 llm_response = (
-                    f"⏳ Mô hình **{self.model_name}** trên Hugging Face đang khởi động (Cold boot). "
-                    "Vui lòng gửi lại câu hỏi sau 15-20 giây."
+                    f"⏳ Mô hình thị giác **{self.model_name}** trên Hugging Face đang khởi động. "
+                    "Vui lòng gửi lại câu hỏi sau 10-15 giây."
                 )
             else:
-                llm_response = f"⚠️ Lỗi kết nối Hugging Face Inference API ({self.model_name}): {error_msg}"
+                llm_response = f"⚠️ Lỗi kết nối Hugging Face Vision API ({self.model_name}): {error_msg}"
 
         if llm_response:
             return llm_response
@@ -152,7 +263,6 @@ class QwenChatbotService:
         for line in lines:
             if line in ["(", ")"]:
                 continue
-            # Nếu dòng hiện tại bắt đầu bằng chữ thường hoặc từ nối, ghép vào dòng trước
             if buf and (
                 re.match(r"^[a-z0-9\+\-\(]", line)
                 or line.lower().startswith(

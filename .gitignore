@@ -25,6 +25,9 @@ venv/
 ENV/
 env/
 data/
+ZeroToCAD_sample/
+PlanAProject/media/uploaded_documents/*
+!PlanAProject/media/uploaded_documents/.gitkeep
 *.tar.gz
 *.zip
 *.7z
