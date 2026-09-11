@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}Phỏng vấn Chuyên gia — DENSO Factory Memory{% endblock %}
+
+{% block content %}
+<div class="view-container" style="max-width: 1000px; margin: 0 auto; width: 100%;">
+  <!-- Interview Header Banner -->
+  <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+        <span class="badge badge-approved">SOCRATIC INTERVIEW ACTIVE</span>
+        <span style="font-family: var(--font-mono); color: #60a5fa; font-weight: 600;">{{ interview.interview_code }}</span>
+      </div>
+      <h2 style="font-size: 18px; font-weight: 700; color: #fff;">{{ interview.topic }}</h2>
+      <p style="font-size: 12px; color: var(--text-dim); margin-top: 4px;">AI chủ động phỏng vấn gợi mở kinh nghiệm ngầm (Tacit Knowledge) chưa từng được ghi nhận trong văn bản.</p>
+    </div>
+
+    <!-- Expert Card -->
+    <div style="background: rgba(17, 24, 39, 0.8); border: 1px solid var(--border-color); padding: 12px 18px; border-radius: 10px; display: flex; align-items: center; gap: 12px;">
+      <div style="width: 44px; height: 44px; border-radius: 50%; background: #3b82f6; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700;">
+        A
+      </div>
+      <div>
+        <div style="font-weight: 700; font-size: 14px;">{{ interview.expert.name }}</div>
+        <div style="font-size: 12px; color: #60a5fa;">{{ interview.expert.position }}</div>
+        <div style="font-size: 11px; color: var(--text-dim);">14 ca đã xử lý trên Machine M12</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Messages Dialogue -->
+  <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+    <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">
+      📝 Biên bản Đối thoại Gợi mở Tri thức (Socratic Dialogue)
+    </h3>
+    
+    <div style="display: flex; flex-direction: column; gap: 14px;" id="interview-messages">
+      {% for msg in messages %}
+      <div style="display: flex; gap: 12px; align-items: flex-start;">
+        <div style="width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; {% if msg.sender == 'ai' %}background: var(--accent-red); color: #fff;{% else %}background: #2563eb; color: #fff;{% endif %}">
+          {% if msg.sender == 'ai' %}AI{% else %}EXP{% endif %}
+        </div>
+        <div style="flex: 1; background: var(--bg-card); border: 1px solid var(--border-subtle); padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.6;">
+          <strong>{% if msg.sender == 'ai' %}Trợ lý AI Interviewer:{% else %}{{ interview.expert.name }}:{% endif %}</strong>
+          <div style="margin-top: 4px; white-space: pre-wrap;">{{ msg.message }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Live Interactive Expert Reply Input Box -->
+    <div style="margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--border-color);">
+      <label style="display: block; font-size: 13px; font-weight: 700; color: #60a5fa; margin-bottom: 8px;">
+        💬 Nhập câu trả lời chuyên môn của {{ interview.expert.name }}:
+      </label>
+      <div style="display: flex; gap: 10px;">
+        <textarea id="expert-reply-text" rows="3" style="flex: 1; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 13px; resize: vertical;" placeholder="Ví dụ: Theo kinh nghiệm thực tế của tôi, với máy M12 khi nhiệt độ phòng vượt 40°C, dầu thủy lực bị loãng khiến cụm van tỷ lệ mất áp. Tuyệt đối không tháo trục mà cần bổ sung dung dịch làm mát chiller và chuyển sang chế độ làm mát tăng cường..."></textarea>
+        <button id="btn-expert-reply" class="btn-action" style="padding: 10px 20px; align-self: flex-end; background: #2563eb;" onclick="submitExpertReply({{ interview.id }}, '{{ interview.expert.name }}')">
+          Gửi phản hồi ➔
+        </button>
+      </div>
+      <div id="ai-reply-status" style="display: none; margin-top: 10px; font-size: 12px; color: #f59e0b; align-items: center; gap: 6px;">
+        <span class="spinner" style="display: inline-block; width: 14px; height: 14px; border: 2px solid #f59e0b; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
+        <span>AI đang phân tích câu trả lời và chuẩn bị câu hỏi phản biện Socratic tiếp theo...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Knowledge Extraction & Approval Box -->
+  <div style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(16, 185, 129, 0.1)); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px; padding: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div>
+        <h3 style="font-size: 15px; font-weight: 700; color: #fff;">⚙️ Chuyển đổi Đối thoại thành Quy tắc Chính thức (Rule Synthesis)</h3>
+        <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Sau khi phỏng vấn, bấm để tự động chuẩn hóa thành Knowledge Unit và yêu cầu chuyên gia ký duyệt.</p>
+      </div>
+
+      <button id="btn-gen-rule" class="btn-send" style="padding: 10px 18px;" onclick="generateRule({{ interview.id }})">
+        ✨ Tạo Tri thức Mới (Generate Rule)
+      </button>
+    </div>
+
+    <!-- Generated Rule Box (Hidden initially until generated) -->
+    <div id="rule-result-box" style="display: none; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="badge badge-pending" id="rule-status-badge">PENDING REVIEW</span>
+          <span style="font-family: var(--font-mono); font-weight: 700; color: #60a5fa;" id="rule-code-display">K-102</span>
+        </div>
+        <span style="font-size: 12px; color: #34d399; font-weight: 600;" id="rule-confidence-display">Độ tin cậy: 98%</span>
+      </div>
+
+      <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 8px;" id="rule-title-display">Tiêu đề quy tắc</h4>
+      <div style="font-size: 13px; color: var(--text-muted); line-height: 1.6; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; font-family: var(--font-mono); margin-bottom: 14px;" id="rule-content-display">
+        Nội dung quy tắc...
+      </div>
+
+      <!-- Action: Approve Button -->
+      <div style="display: flex; gap: 12px; align-items: center;" id="approve-action-row">
+        <button id="btn-approve" class="btn-action" style="background: var(--denso-green); padding: 10px 20px; font-size: 13px;" onclick="approveRule()">
+          ✓ {{ interview.expert.name }} Phê duyệt (Approve)
+        </button>
+        <span style="font-size: 12px; color: var(--text-dim);">Quy tắc sẽ ngay lập tức có hiệu lực trong bộ nhớ RAG của Chatbot.</span>
+      </div>
+
+      <!-- Success Banner after approved -->
+      <div id="approve-success-banner" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 8px; padding: 12px 16px; margin-top: 12px;">
+        <div style="color: #34d399; font-weight: 700; font-size: 14px; margin-bottom: 4px;">🎉 ĐÃ PHÊ DUYỆT & ĐỒNG BỘ VÀO KNOWLEDGE BASE THÀNH CÔNG!</div>
+        <p style="font-size: 12px; color: #e5e7eb;">Quy tắc tri thức mới hiện đã chính thức có hiệu lực trong Knowledge Base. Bất kỳ kỹ sư nào đặt câu hỏi liên quan, hệ thống sẽ tự động đối chiếu và áp dụng ngay quy tắc này!</p>
+        <div style="margin-top: 10px;">
+          <a href="{% url 'chat' %}" class="btn-action" style="background: #2563eb; text-decoration: none;">
+            💬 Quay lại Chat để Thử Nghiệm Ngay ➔
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

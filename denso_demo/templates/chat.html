@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Trò chuyện Kỹ thuật — DENSO Factory Memory{% endblock %}
+
+{% block content %}
+<!-- Sidebar -->
+<aside class="app-sidebar">
+  <div class="sidebar-section">
+    <div class="section-label">TỔNG QUAN TRI THỨC</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-value" id="stat-docs">{{ total_documents|default:0 }}</div>
+        <div class="stat-name">SOP Kỹ thuật</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="stat-cases" style="color: #f59e0b;">{{ total_cases|default:0 }}</div>
+        <div class="stat-name">Ca Sự cố CBR</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar-section" style="flex: 1; overflow-y: auto;">
+    <div class="section-label">KỊCH BẢN DEMO 4 BƯỚC (GRAND SLAM)</div>
+
+    <div class="quick-card" onclick="setDemoQuery(1)">
+      <div class="quick-card-title">1️⃣ Bước 1: Câu hỏi Tiêu chuẩn</div>
+      <div class="quick-card-desc">"Quy chuẩn độ rung máy M12 là bao nhiêu?" (AI trả lời theo SOP-023)</div>
+    </div>
+
+    <div class="quick-card" onclick="setDemoQuery(2)">
+      <div class="quick-card-title" style="color: #f87171;">2️⃣ Bước 2: Ngoại lệ Chưa có SOP</div>
+      <div class="quick-card-desc">"Máy M12 rung giật khi nhiệt độ xưởng lên 45°C, có nên thay bearing ngay không?" (Kích hoạt Knowledge Gap)</div>
+    </div>
+
+    <div class="quick-card" onclick="setDemoQuery(3)">
+      <div class="quick-card-title" style="color: #34d399;">4️⃣ Bước 4: Hỏi lại sau khi Duyệt</div>
+      <div class="quick-card-desc">"Nhiệt độ 45°C máy M12 rung thì xử lý thế nào?" (AI trả lời ngay theo Rule K-102 mới duyệt!)</div>
+    </div>
+  </div>
+
+  <div style="background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.3); padding: 12px; border-radius: 8px;">
+    <div style="font-size: 11px; font-weight: 700; color: #60a5fa; margin-bottom: 4px;">QWEN2.5-VL-72B & NEO4J</div>
+    <div style="font-size: 11px; color: var(--text-dim);">Tự động phát hiện điểm mù dữ liệu và điều phối phỏng vấn chuyên gia hiện trường.</div>
+  </div>
+</aside>
+
+<!-- Chat Area -->
+<main class="app-main">
+  <div class="chat-workspace">
+    <!-- Messages Scroll Area -->
+    <div class="chat-history" id="chat-history">
+      <div class="message-row assistant">
+        <div class="message-avatar">D</div>
+        <div class="message-bubble">
+          <strong>Xin chào Kỹ sư DENSO!</strong> Tôi là Trợ lý Tri thức Nhà máy DENSO (Factory Memory Mind).<br>
+          Tôi có thể tra cứu toàn bộ hồ sơ tiêu chuẩn <strong>SOP-023</strong>, bản vẽ kỹ thuật, và <strong>14 ca sự cố thực tế</strong> của máy M12.<br>
+          Hãy bấm vào các câu hỏi mẫu bên trái hoặc nhập tình huống hiện trường cần hỗ trợ!
+        </div>
+      </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="chat-input-area">
+      <input type="text" id="chat-input" class="chat-input" placeholder="Nhập câu hỏi kỹ thuật, tình trạng máy M12, nhiệt độ, độ rung..." onkeydown="if(event.key==='Enter') sendMessage()">
+      <button class="btn-send" id="btn-send" onclick="sendMessage()">
+        <span>Gửi</span> ➔
+      </button>
+    </div>
+  </div>
+</main>
+{% endblock %}

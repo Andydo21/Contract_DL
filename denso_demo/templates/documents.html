@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Kho Tài liệu & SOP — DENSO Factory Memory{% endblock %}
+
+{% block content %}
+<div class="view-container">
+  <div class="page-title">📚 Kho Tài liệu Kỹ thuật & SOP (Document Intelligence - A3)</div>
+  <div class="page-subtitle">Quản lý hồ sơ quy chuẩn, cẩm nang bảo trì và sơ đồ kỹ thuật đã được số hóa kèm Bounding Box.</div>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 16px;">
+    {% for doc in documents %}
+    <div class="quick-card" style="padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-family: var(--font-mono); font-weight: 700; color: #60a5fa;">{{ doc.doc_code }}</span>
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">{{ doc.doc_type }}</span>
+        </div>
+        <h3 style="font-size: 15px; font-weight: 600; margin-bottom: 6px; color: #fff;">{{ doc.title }}</h3>
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">{{ doc.description }}</p>
+      </div>
+
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11px; color: var(--text-dim);">📄 {{ doc.total_pages }} trang số hóa</span>
+        <a href="{% url 'document_detail' doc.id %}" class="badge badge-approved" style="text-decoration: none; padding: 6px 12px;">
+          Xem Chi tiết Bóc tách ➔
+        </a>
+      </div>
+    </div>
+    {% empty %}
+    <div style="color: var(--text-dim);">Chưa có tài liệu nào trong hệ thống.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "all-MiniLM-L6-v2 (Baseline)",
+    "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+    "dim": 384,
+    "avg_pos": 0.7417,
+    "avg_neg": 0.4284,
+    "margin": 0.3133,
+    "latency_ms": 42.3
+  },
+  {
+    "name": "paraphrase-multilingual-MiniLM-L12-v2",
+    "model_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "dim": 384,
+    "avg_pos": 0.7988,
+    "avg_neg": 0.2527,
+    "margin": 0.5461,
+    "latency_ms": 43.1
+  },
+  {
+    "name": "multilingual-e5-small",
+    "model_id": "intfloat/multilingual-e5-small",
+    "dim": 384,
+    "avg_pos": 0.9154,
+    "avg_neg": 0.8214,
+    "margin": 0.0941,
+    "latency_ms": 38.2
+  }
+]

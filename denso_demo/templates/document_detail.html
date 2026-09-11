@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ document.title }} — DENSO Factory Memory{% endblock %}
+
+{% block content %}
+<div class="view-container" style="display: flex; flex-direction: column; height: 100%;">
+  <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <a href="{% url 'documents' %}" style="color: #60a5fa; text-decoration: none; font-size: 12px; margin-bottom: 4px; display: inline-block;">← Quay lại danh mục tài liệu</a>
+      <div class="page-title" style="margin-bottom: 0;">{{ document.title }}</div>
+      <div style="font-family: var(--font-mono); color: var(--text-dim); font-size: 12px;">Mã: {{ document.doc_code }} | Ngôn ngữ: {{ document.language }}</div>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      {% for p in all_pages %}
+      <a href="?page={{ p.page_number }}" class="nav-tab {% if p.page_number == selected_page.page_number %}active{% endif %}" style="padding: 6px 12px;">
+        Trang {{ p.page_number }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; overflow: hidden;">
+    <!-- Left Column: Rendered Page / OCR Text -->
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; overflow-y: auto;">
+      <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #60a5fa;">📄 Nội dung Văn bản Trang {{ selected_page.page_number }}</h3>
+      <div style="background: var(--bg-card); padding: 16px; border-radius: 8px; border: 1px solid var(--border-subtle); line-height: 1.8; font-size: 13px; white-space: pre-line;">
+        {{ selected_page.ocr_text }}
+      </div>
+    </div>
+
+    <!-- Right Column: Extracted Chunks & Bounding Boxes -->
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; overflow-y: auto;">
+      <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #34d399;">🧩 Các Khối Bóc Tách (Multimodal Chunks)</h3>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        {% for c in chunks %}
+        <div class="quick-card" style="margin-bottom: 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span class="badge" style="background: rgba(37, 99, 235, 0.2); color: #60a5fa;">Loại: {{ c.chunk_type }}</span>
+            <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);">BBox: {{ c.bbox_json }}</span>
+          </div>
+          <div style="font-size: 13px; color: var(--text-main); line-height: 1.5;">
+            {{ c.content }}
+          </div>
+        </div>
+        {% empty %}
+        <div style="color: var(--text-dim);">Không có chunks trên trang này.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

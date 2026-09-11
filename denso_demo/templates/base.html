@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}DENSO Factory Memory — Multimodal Intelligence & Expert Capture{% endblock %}</title>
+  <!-- Google Fonts: Outfit & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <!-- Markdown parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+  <!-- Header Bar -->
+  <header class="app-header">
+    <div class="brand-badge">
+      <div class="brand-logo">DENSO</div>
+      <div class="brand-title">FACTORY MEMORY <span>AI INTELLIGENCE</span></div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="header-nav">
+      <a href="{% url 'dashboard' %}"
+        class="nav-tab {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+        📊 Dashboard
+      </a>
+      <a href="{% url 'chat' %}" class="nav-tab {% if request.resolver_match.url_name == 'chat' %}active{% endif %}">
+        💬 Trò chuyện Kỹ thuật (A3)
+      </a>
+      <a href="{% url 'knowledge' %}"
+        class="nav-tab {% if request.resolver_match.url_name == 'knowledge' %}active{% endif %}">
+        🧠 Tri thức Đã duyệt (A2)
+      </a>
+      <a href="{% url 'documents' %}"
+        class="nav-tab {% if request.resolver_match.url_name == 'documents' or request.resolver_match.url_name == 'document_detail' %}active{% endif %}">
+        📚 Kho Tài liệu & SOP
+      </a>
+      <a href="{% url 'experts' %}"
+        class="nav-tab {% if request.resolver_match.url_name == 'experts' or request.resolver_match.url_name == 'interview_detail' %}active{% endif %}">
+        👨‍🔧 Chuyên gia Hiện trường
+      </a>
+      <a href="{% url 'search' %}"
+        class="nav-tab {% if request.resolver_match.url_name == 'search' %}active{% endif %}">
+        🔍 Tìm kiếm Đa phương thức
+      </a>
+    </nav>
+
+    <!-- Operational Status -->
+    <div class="header-status">
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span>Qwen2.5-VL & Neo4j Ready</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="app-container">
+    {% block content %}
+    {% endblock %}
+  </div>
+
+  <script src="/static/js/app.js?v=2.3"></script>
+  {% block scripts %}{% endblock %}
+</body>
+
+</html>
