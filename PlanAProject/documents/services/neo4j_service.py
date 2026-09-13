@@ -39,8 +39,20 @@ class Neo4jGraphService:
                 with self.driver.session() as session:
                     cypher = """
                     MATCH (n)-[r]->(m)
-                    WHERE toLower(n.name) CONTAINS $kw OR toLower(m.name) CONTAINS $kw OR toLower(n.text) CONTAINS $kw
-                    RETURN n.name AS source, labels(n)[0] AS source_type, type(r) AS relation, m.name AS target, labels(m)[0] AS target_type, m.file AS file
+                    WHERE (n.name IS NOT NULL AND toLower(n.name) CONTAINS $kw)
+                       OR (m.name IS NOT NULL AND toLower(m.name) CONTAINS $kw)
+                       OR (n.title IS NOT NULL AND toLower(n.title) CONTAINS $kw)
+                       OR (m.title IS NOT NULL AND toLower(m.title) CONTAINS $kw)
+                       OR (n.code IS NOT NULL AND toLower(n.code) CONTAINS $kw)
+                       OR (m.code IS NOT NULL AND toLower(m.code) CONTAINS $kw)
+                       OR (n.content IS NOT NULL AND toLower(n.content) CONTAINS $kw)
+                    RETURN 
+                        coalesce(n.name, n.title, n.code, 'Node') AS source, 
+                        labels(n)[0] AS source_type, 
+                        type(r) AS relation, 
+                        coalesce(m.name, m.title, m.code, 'Node') AS target, 
+                        labels(m)[0] AS target_type, 
+                        coalesce(m.code, n.code, 'Document') AS file
                     LIMIT 5
                     """
                     result = session.run(cypher, kw=kw)
