@@ -39,6 +39,26 @@ class QwenChatbotService:
             or getattr(settings, "HF_TOKEN", "")
         )
 
+        self.vllm_base_url = (
+            os.environ.get("VLLM_BASE_URL")
+            or getattr(settings, "VLLM_BASE_URL", "")
+        )
+        self.vllm_api_key = (
+            os.environ.get("VLLM_API_KEY")
+            or getattr(settings, "VLLM_API_KEY", "EMPTY")
+        )
+        self.vllm_model = (
+            os.environ.get("VLLM_MODEL")
+            or self.model_name
+        )
+
+    def _get_vllm_client(self):
+        """Khởi tạo OpenAI client kết nối tới vLLM Engine"""
+        if not self.vllm_base_url:
+            return None
+        from openai import OpenAI
+        return OpenAI(base_url=self.vllm_base_url, api_key=self.vllm_api_key, timeout=75)
+
     def _get_hf_client(self):
         """Khởi tạo Hugging Face InferenceClient"""
         from huggingface_hub import InferenceClient
@@ -183,6 +203,39 @@ class QwenChatbotService:
 
         llm_response = ""
         try:
+            # 1. Ưu tiên sử dụng vLLM Engine nếu được cấu hình VLLM_BASE_URL
+            vllm_client = self._get_vllm_client()
+            if vllm_client:
+                print(f"[QwenService] Gửi truy vấn tới vLLM Engine tại: {self.vllm_base_url} (Model: {self.vllm_model})...")
+                # Xây dựng message đa phương thức nếu có hình ảnh
+                if has_images:
+                    user_content = [{"type": "text", "text": user_prompt_text}]
+                    for b64_str in image_payloads:
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
+                        })
+                    messages = [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": user_content}
+                    ]
+                else:
+                    messages = [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": user_prompt_text}
+                    ]
+
+                vllm_comp = vllm_client.chat.completions.create(
+                    model=self.vllm_model,
+                    messages=messages,
+                    max_tokens=1500,
+                    temperature=0.2,
+                    top_p=0.9
+                )
+                if vllm_comp.choices and len(vllm_comp.choices) > 0:
+                    return vllm_comp.choices[0].message.content.strip()
+
+            # 2. Sử dụng Hugging Face InferenceClient
             client = self._get_hf_client()
 
             # Xây dựng message đa phương thức nếu có hình ảnh
