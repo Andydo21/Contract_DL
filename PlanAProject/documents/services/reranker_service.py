@@ -1,6 +1,6 @@
 import os
 import torch
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class BGERerankerService:
     """
@@ -29,6 +29,46 @@ class BGERerankerService:
                     cls._encoder_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
             except Exception as e:
                 print("[CrossEncoder Init Warning]", str(e))
+
+    @staticmethod
+    def reciprocal_rank_fusion(
+        ranked_lists: Dict[str, List[Dict[str, Any]]],
+        k: int = 60,
+        weights: Optional[Dict[str, float]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Reciprocal Rank Fusion (RRF):
+        Kết hợp các luồng tìm kiếm dị thể (ColPali MaxSim, Multilingual Dense Vector, Keyword Match)
+        mà KHÔNG cộng gộp thô các điểm số không đồng nhất về độ đo (raw similarity scores).
+        Công thức chuẩn: RRF_Score(d) = sum_{m in M} ( w_m / (k + rank_m(d)) )
+        """
+        if weights is None:
+            weights = {"colpali": 1.5, "dense": 1.2, "graph": 1.0, "keyword": 0.8}
+
+        fused_items = {}
+        rrf_scores = {}
+
+        for stream_name, items in ranked_lists.items():
+            w = weights.get(stream_name, 1.0)
+            for rank, item in enumerate(items, start=1):
+                doc_id = item.get("document_id")
+                page_num = item.get("page_number", 1)
+                chunk_id = item.get("chunk_id") or item.get("patch_index") or 0
+                dedup_key = f"{doc_id}_{page_num}_{chunk_id}"
+
+                if dedup_key not in fused_items:
+                    fused_items[dedup_key] = dict(item)
+                    rrf_scores[dedup_key] = 0.0
+
+                rrf_scores[dedup_key] += w / (k + rank)
+
+        fused_list = []
+        for key, item in fused_items.items():
+            item["rrf_score"] = round(rrf_scores[key], 6)
+            fused_list.append(item)
+
+        fused_list.sort(key=lambda x: x["rrf_score"], reverse=True)
+        return fused_list
 
     def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
         """
@@ -73,6 +113,10 @@ class BGERerankerService:
 
                     # Điểm kết hợp Hybrid (Cross-Encoder + Lexical Keyword Precision)
                     final_score = (neural_prob * 0.35 + kw_ratio * 0.65) * 100
+                    visual_score = float(cand.get('maxsim_score') or cand.get('score', 0.0))
+                    if visual_score > 0 and cand.get('layout_type') in ['colpali_vlm_maxsim', 'colpali_maxsim_visual']:
+                        final_score = max(final_score, visual_score)
+
                     cand_copy['rerank_score'] = round(final_score, 2)
                     scored_candidates.append(cand_copy)
 
@@ -95,6 +139,9 @@ class BGERerankerService:
                 dot = sum(a * b for a, b in zip(q_vec, d_vec))
                 # Normalized Cosine Similarity
                 sim_score = round(max(0.0, min(100.0, ((dot + 1.0) / 2.0) * 100)), 2)
+            visual_score = float(cand.get('maxsim_score') or cand.get('score', 0.0))
+            if visual_score > 0 and cand.get('layout_type') in ['colpali_vlm_maxsim', 'colpali_maxsim_visual']:
+                sim_score = max(sim_score, visual_score)
 
             cand_copy = dict(cand)
             cand_copy['rerank_score'] = sim_score

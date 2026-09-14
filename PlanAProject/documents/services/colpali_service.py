@@ -1,27 +1,38 @@
-import math
-import hashlib
+import os
+import io
+import base64
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import requests
 from django.conf import settings
-from qdrant_client.models import Distance, VectorParams, PointStruct
-from documents.services.vector_db_service import QdrantVectorDBService, NeuralEmbeddingEngine
+from qdrant_client.models import Distance, VectorParams, PointStruct, MultiVectorConfig, MultiVectorComparator
+from documents.services.vector_db_service import QdrantVectorDBService
+
 
 class ColPaliVisualIndexer:
     """
-    ColPali No-OCR Visual Indexing & Late Interaction MaxSim Search Engine:
-    - Nạp trực tiếp ảnh trang PDF/Sơ đồ kỹ thuật (No-OCR)
-    - Phân rã thành Lưới Patch Tokens 32x32 (Spatial Patch Matrix)
-    - Sử dụng Transformer Neural Embeddings (384-dim) để tính toán MaxSim Score chính xác theo ngữ nghĩa
-    - Tối ưu hóa: Dùng chung Singleton Qdrant Client với VectorDBService
+    ColPali Engine Remote Client (Kaggle GPU T4 x 2):
+    - 100% sử dụng mô hình ColPali gốc (vidore/colpali-v1.2 trên nền PaliGemma-3B)
+    - Nhận diện trực tiếp từ ma trận điểm ảnh (Pixels) nguyên bản của tài liệu PDF/Bản vẽ CAD (No-OCR)
+    - Sinh ra ma trận 1024 Visual Multi-Vectors (128 chiều) cho mỗi trang tài liệu
+    - Lưu trữ và tính toán Late Interaction MaxSim Score trực tiếp trên Qdrant Multi-Vector Engine
+    - Tuyệt đối KHÔNG sử dụng all-MiniLM hay CLIP!
     """
     COLLECTION_NAME = "denso_colpali_visual_patches"
-    VECTOR_DIM = 384
-    GRID_SIZE = (32, 32)
+    VECTOR_DIM = 128
 
     def __init__(self):
         self.output_img_dir = Path(settings.MEDIA_ROOT) / 'extracted_images'
         self.output_img_dir.mkdir(parents=True, exist_ok=True)
         self.client = QdrantVectorDBService.get_client()
+
+        # URL ColPali Server trên Kaggle (ngrok)
+        self.colpali_base_url = (
+            os.environ.get("COLPALI_BASE_URL")
+            or getattr(settings, "COLPALI_BASE_URL", "")
+            or os.environ.get("VLLM_BASE_URL", "").replace("/v1", "/colpali")
+        ).rstrip("/")
+
         self._ensure_collection_exists()
 
     def _ensure_collection_exists(self):
@@ -33,10 +44,12 @@ class ColPaliVisualIndexer:
             exists = any(c.name == self.COLLECTION_NAME for c in collections)
 
             if exists:
-                # Kiểm tra dimension, nếu cũ 128 thì recreate thành 384
                 coll_info = self.client.get_collection(self.COLLECTION_NAME)
                 vec_size = coll_info.config.params.vectors.size
-                if vec_size != self.VECTOR_DIM:
+                is_multivec = bool(getattr(coll_info.config.params.vectors, 'multivector_config', None))
+                # Nếu collection cũ chưa phải là Multi-Vector 128 chiều của ColPali -> Tái tạo
+                if vec_size != self.VECTOR_DIM or not is_multivec:
+                    print(f"[ColPali] Recreating Collection to ColPali Multi-Vector 128-dim (MaxSim)...")
                     self.client.delete_collection(self.COLLECTION_NAME)
                     exists = False
 
@@ -45,175 +58,89 @@ class ColPaliVisualIndexer:
                     collection_name=self.COLLECTION_NAME,
                     vectors_config=VectorParams(
                         size=self.VECTOR_DIM,
-                        distance=Distance.COSINE
+                        distance=Distance.COSINE,
+                        multivector_config=MultiVectorConfig(
+                            comparator=MultiVectorComparator.MAX_SIM
+                        )
                     )
                 )
-                print(f"[ColPali] Collection initialized with 384-dim: {self.COLLECTION_NAME}")
+                print(f"[ColPali] Initialized Qdrant Collection ColPali Multi-Vector 128-dim (MaxSim): {self.COLLECTION_NAME}")
         except Exception as e:
             print("[ColPali Collection Error]", str(e))
 
-    def generate_patch_embedding(self, patch_text: str, grid_x: int, grid_y: int) -> List[float]:
-        """
-        Sinh 384-dim Patch Vector với Neural Transformer Model & Spatial Patch Bias
-        """
-        neural_vec = NeuralEmbeddingEngine.get_neural_embedding(patch_text)
-        if neural_vec and len(neural_vec) == self.VECTOR_DIM:
-            return neural_vec
-
-        # Fallback Hashing Vector
-        vector = [0.0] * self.VECTOR_DIM
-        cleaned = (patch_text or "").lower().strip()
-
-        words = cleaned.split()
-        for idx, word in enumerate(words):
-            word_hash = int(hashlib.md5(word.encode('utf-8')).hexdigest(), 16)
-            dim_idx = word_hash % self.VECTOR_DIM
-            vector[dim_idx] += 1.0 / (idx + 1.0)
-
-        vector[0] += (grid_x / 32.0)
-        vector[1] += (grid_y / 32.0)
-
-        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
-        return [v / norm for v in vector]
-
-    def _draw_visual_patch_crop(self, page_img_path: Path, bbox_norm: list, crop_filename: str) -> str:
-        try:
-            crop_save_path = self.output_img_dir / crop_filename
-            if crop_save_path.exists():
-                return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
-
-            from PIL import Image, ImageDraw
-            with Image.open(page_img_path) as img:
-                img = img.convert("RGB")
-                w, h = img.size
-
-                x_min = int((bbox_norm[0] / 1000.0) * w)
-                y_min = int((bbox_norm[1] / 1000.0) * h)
-                x_max = int((bbox_norm[2] / 1000.0) * w)
-                y_max = int((bbox_norm[3] / 1000.0) * h)
-
-                # Thêm padding để hiển thị rõ tên robot, thông số và ngữ cảnh xung quanh
-                pad_x = int(w * 0.04)
-                pad_y = int(h * 0.04)
-                crop_x0 = max(0, x_min - pad_x)
-                crop_y0 = max(0, y_min - pad_y)
-                crop_x1 = min(w, x_max + pad_x)
-                crop_y1 = min(h, y_max + pad_y)
-
-                if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
-                    return ""
-
-                cropped = img.crop((crop_x0, crop_y0, crop_x1, crop_y1))
-                draw = ImageDraw.Draw(cropped)
-
-                rel_x0 = x_min - crop_x0
-                rel_y0 = y_min - crop_y0
-                rel_x1 = x_max - crop_x0
-                rel_y1 = y_max - crop_y0
-
-                draw.rectangle([rel_x0, rel_y0, rel_x1 - 1, rel_y1 - 1], outline="red", width=4)
-                cropped.save(crop_save_path, "PNG")
-
-                return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
-        except Exception as e:
-            print("[ColPali Draw Crop Error]", str(e))
-            return ""
-
     def index_document_colpali(self, doc_file) -> Dict[str, Any]:
         """
-        Ingestion ColPali: Chuyển đổi PDF/Ảnh thành tập hợp Visual Patch Vectors & đẩy vào Qdrant
+        Nạp ảnh trang tài liệu lên ColPali Engine (Kaggle) -> Nhận về 1024 Multi-Vectors -> Lưu vào Qdrant
         """
+        if not self.colpali_base_url:
+            raise ConnectionError("Chưa cấu hình COLPALI_BASE_URL trong file .env! Hãy khởi động ColPali trên Kaggle.")
+
         file_path = doc_file.file.path
         doc_id = doc_file.id
         category = doc_file.category
 
         pages_data = []
-
         if category == 'pdf':
             pages_data = self._render_pdf_pages(file_path, doc_id)
         elif category == 'image':
             pages_data = [{
                 'page_number': 1,
                 'image_url': doc_file.file.url if doc_file.file else "",
-                'image_path': file_path,
-                'width': 1000,
-                'height': 1000,
-                'label': f"Visual Diagram - {doc_file.original_name}"
+                'image_path': file_path
             }]
         else:
             pages_data = [{
                 'page_number': 1,
                 'image_url': doc_file.file.url if doc_file.file else "",
-                'image_path': file_path,
-                'width': 1000,
-                'height': 1000,
-                'label': f"Document Text - {doc_file.original_name}"
+                'image_path': file_path
             }]
 
-        total_patches_indexed = 0
         points = []
-
-        import fitz
-        pdf_doc = None
-        if category == 'pdf':
-            try:
-                pdf_doc = fitz.open(file_path)
-            except Exception:
-                pass
+        headers = {"ngrok-skip-browser-warning": "true"}
 
         for page in pages_data:
             page_num = page['page_number']
-            img_url = page['image_url']
             img_path = Path(page.get('image_path', ''))
 
-            fitz_page = pdf_doc[page_num - 1] if pdf_doc and page_num <= len(pdf_doc) else None
+            if not img_path.exists():
+                continue
 
-            # Phân rã Visual Patch Grid (4x4 regions)
-            for row in range(4):
-                for col in range(4):
-                    patch_idx = row * 4 + col
-                    x_min = int((col / 4.0) * 1000)
-                    y_min = int((row / 4.0) * 1000)
-                    x_max = int(((col + 1) / 4.0) * 1000)
-                    y_max = int(((row + 1) / 4.0) * 1000)
-                    norm_bbox = [x_min, y_min, x_max, y_max]
+            with open(img_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-                    # Extract text inside visual patch rect if PDF
-                    patch_text_content = ""
-                    if fitz_page:
-                        pdf_rect = fitz.Rect(
-                            (col / 4.0) * fitz_page.rect.width,
-                            (row / 4.0) * fitz_page.rect.height,
-                            ((col + 1) / 4.0) * fitz_page.rect.width,
-                            ((row + 1) / 4.0) * fitz_page.rect.height
-                        )
-                        patch_text_content = fitz_page.get_text("text", clip=pdf_rect).strip()
-
-                    crop_filename = f"crop_colpali_doc{doc_id}_p{page_num}_patch{patch_idx+1}.png"
-                    patch_crop_url = self._draw_visual_patch_crop(img_path, norm_bbox, crop_filename) if img_path.exists() else img_url
-
-                    full_patch_text = f"[Trang {page_num} | Visual Patch #{patch_idx+1}]\n{patch_text_content}"
-                    
-                    vector = self.generate_patch_embedding(full_patch_text, col * 8, row * 8)
-                    point_id = doc_id * 100000 + page_num * 100 + patch_idx + 1
+            # Gửi ảnh nguyên bản sang ColPali VLM Engine trên Kaggle để sinh Multi-Vectors
+            try:
+                res = requests.post(
+                    f"{self.colpali_base_url}/embed_page",
+                    json={"image_base64": img_b64},
+                    headers=headers,
+                    timeout=90
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    multi_vectors = data.get("embeddings", []) # 1024 vectors x 128 dim
+                    point_id = doc_id * 10000 + page_num
 
                     payload = {
                         "document_id": doc_id,
                         "original_name": doc_file.original_name,
                         "category": category,
                         "page_number": page_num,
-                        "patch_index": patch_idx,
-                        "layout_type": "colpali_visual_patch",
-                        "text": full_patch_text,
-                        "bbox": norm_bbox,
-                        "image_url": patch_crop_url or img_url
+                        "layout_type": "colpali_full_page_vlm",
+                        "image_url": page.get('image_url', ''),
+                        "full_page_url": page.get('image_url', ''),
+                        "text": f"[ColPali VLM] Trang {page_num} của tài liệu '{doc_file.original_name}'"
                     }
 
                     points.append(PointStruct(
                         id=point_id,
-                        vector=vector,
+                        vector=multi_vectors,
                         payload=payload
                     ))
+                else:
+                    print(f"[ColPali Index Error] Page {page_num} HTTP {res.status_code}: {res.text}")
+            except Exception as req_err:
+                print(f"[ColPali Index Request Error] Page {page_num}: {req_err}")
 
         if points and self.client:
             try:
@@ -221,14 +148,13 @@ class ColPaliVisualIndexer:
                     collection_name=self.COLLECTION_NAME,
                     points=points
                 )
-                total_patches_indexed = len(points)
             except Exception as e:
                 print("[ColPali Upsert Error]", str(e))
 
         return {
             "doc_id": doc_id,
             "total_pages": len(pages_data),
-            "indexed_patches": total_patches_indexed
+            "indexed_pages": len(points)
         }
 
     def _render_pdf_pages(self, file_path: str, doc_id: int) -> List[Dict[str, Any]]:
@@ -239,117 +165,118 @@ class ColPaliVisualIndexer:
 
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc[page_num]
-                img_filename = f"colpali_pdf_{doc_id}_p{page_num+1}.png"
-                img_save_path = self.output_img_dir / img_filename
 
-                if not img_save_path.exists():
-                    pix = page.get_pixmap(dpi=150)
-                    pix.save(str(img_save_path))
+                # Ưu tiên tái sử dụng ảnh trang đã render từ Shared Ingestion Router / Layout Extractor
+                shared_filename = f"pdf_page_{doc_id}_p{page_num+1}.png"
+                shared_path = self.output_img_dir / shared_filename
+
+                if shared_path.exists():
+                    img_filename = shared_filename
+                    img_save_path = shared_path
+                else:
+                    img_filename = f"colpali_pdf_{doc_id}_p{page_num+1}.png"
+                    img_save_path = self.output_img_dir / img_filename
+                    if not img_save_path.exists():
+                        pix = page.get_pixmap(dpi=150)
+                        pix.save(str(img_save_path))
 
                 img_url = f"{settings.MEDIA_URL}extracted_images/{img_filename}"
                 pages.append({
                     'page_number': page_num + 1,
                     'image_url': img_url,
-                    'image_path': str(img_save_path),
-                    'width': int(page.rect.width),
-                    'height': int(page.rect.height)
+                    'image_path': str(img_save_path)
                 })
 
             pdf_doc.close()
-        except Exception:
-            pages.append({
-                'page_number': 1,
-                'image_url': "",
-                'image_path': file_path,
-                'width': 1000,
-                'height': 1000
-            })
+        except Exception as e:
+            print(f"[ColPali Render Error] {e}")
 
         return pages
 
     def colpali_maxsim_search(self, query_text: str, top_k: int = 5, doc_id_filter=None) -> List[Dict[str, Any]]:
+        """
+        Tìm kiếm Late Interaction MaxSim trực tiếp với ColPali Engine (Kaggle):
+        - Chiếu câu hỏi văn bản qua ColPali thành Multi-Vector (seq_len x 128)
+        - Qdrant tính toán hàm MaxSim: sum_i(max_j(q_i . d_j))
+        - Trả về danh sách trang bản vẽ/sơ đồ có điểm tương đồng thị giác cao nhất
+        """
         if not self.client:
             return []
 
-        query_vector = self.generate_patch_embedding(query_text, 16, 16)
+        if not self.colpali_base_url:
+            print("[ColPali] Chưa cấu hình COLPALI_BASE_URL trong .env")
+            return []
 
-        search_filter = None
-        if doc_id_filter:
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
-            search_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="document_id",
-                        match=MatchValue(value=int(doc_id_filter))
-                    )
-                ]
-            )
+        headers = {"ngrok-skip-browser-warning": "true"}
 
         try:
+            # 1. Gửi câu hỏi lên ColPali Kaggle để lấy Multi-Vector (seq_len x 128)
+            res = requests.post(
+                f"{self.colpali_base_url}/embed_query",
+                json={"query": query_text},
+                headers=headers,
+                timeout=30
+            )
+
+            if res.status_code != 200:
+                print(f"[ColPali Query Embed Error] HTTP {res.status_code}: {res.text}")
+                return []
+
+            query_multi_vector = res.json().get("embeddings", [])
+            if not query_multi_vector:
+                return []
+
+            # 2. Truy vấn trực tiếp trên Qdrant với thuật toán MaxSim
+            search_filter = None
+            if doc_id_filter:
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                search_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="document_id",
+                            match=MatchValue(value=int(doc_id_filter))
+                        )
+                    ]
+                )
+
             response = self.client.query_points(
                 collection_name=self.COLLECTION_NAME,
-                query=query_vector,
-                limit=max(top_k * 4, 25),
+                query=query_multi_vector,
+                limit=top_k,
                 query_filter=search_filter
             )
 
             raw_points = getattr(response, 'points', response)
-            page_buckets = {}
+            results = []
 
             for hit in raw_points:
                 payload = getattr(hit, 'payload', {}) or {}
                 score = getattr(hit, 'score', 0.0)
+
                 doc_id = payload.get('document_id')
                 page_num = payload.get('page_number', 1)
-                patch_idx = payload.get('patch_index', 0)
-
-                bbox = payload.get('bbox', [100, 100, 400, 400])
                 img_url = payload.get('image_url', '')
-                full_page_url = img_url
 
-                # Tự động cắt crop riêng vùng robot / visual patch nếu đang là ảnh toàn trang
-                if doc_id and page_num and bbox:
-                    page_img_path = self.output_img_dir / f"colpali_pdf_{doc_id}_p{page_num}.png"
-                    if not page_img_path.exists():
-                        page_img_path = self.output_img_dir / f"pdf_page_{doc_id}_p{page_num}.png"
+                # Chuẩn hóa điểm MaxSim sang thang phần trăm 0 - 100%
+                match_pct = round(float(score) * 10.0, 2) if score < 10 else round(float(score), 2)
+                match_pct = min(100.0, max(0.0, match_pct))
 
-                    if page_img_path.exists():
-                        full_page_url = f"{settings.MEDIA_URL}extracted_images/{page_img_path.name}"
-                        # Nếu bbox là vùng patch cụ thể (không phải bao trọn cả trang)
-                        if (bbox[2] - bbox[0] < 950) or (bbox[3] - bbox[1] < 950):
-                            crop_filename = f"crop_colpali_doc{doc_id}_p{page_num}_patch{patch_idx+1}.png"
-                            crop_url = self._draw_visual_patch_crop(page_img_path, bbox, crop_filename)
-                            if crop_url:
-                                img_url = crop_url
+                results.append({
+                    "document_id": doc_id,
+                    "original_name": payload.get("original_name"),
+                    "category": payload.get("category"),
+                    "page_number": page_num,
+                    "maxsim_score": match_pct,
+                    "score": match_pct,
+                    "bbox": [0, 0, 1000, 1000],
+                    "image_url": img_url,
+                    "full_page_url": img_url,
+                    "text": payload.get("text", ""),
+                    "layout_type": "colpali_vlm_maxsim"
+                })
 
-                key = f"{doc_id}_p{page_num}_patch{patch_idx}"
-                if key not in page_buckets:
-                    page_buckets[key] = {
-                        "document_id": doc_id,
-                        "original_name": payload.get("original_name"),
-                        "category": payload.get("category"),
-                        "page_number": page_num,
-                        "patch_index": patch_idx,
-                        "maxsim_score": round(score * 100, 2),
-                        "score": round(score * 100, 2),
-                        "bbox": bbox,
-                        "image_url": img_url,
-                        "full_page_url": full_page_url,
-                        "text": payload.get("text", ""),
-                        "layout_type": "colpali_maxsim_visual"
-                    }
-                else:
-                    if score * 100 > page_buckets[key]["maxsim_score"]:
-                        page_buckets[key]["maxsim_score"] = round(score * 100, 2)
-                        page_buckets[key]["score"] = round(score * 100, 2)
-                        page_buckets[key]["bbox"] = bbox
-                        page_buckets[key]["image_url"] = img_url
-                        page_buckets[key]["full_page_url"] = full_page_url
-                        page_buckets[key]["text"] = payload.get("text", "")
-
-            results = list(page_buckets.values())
             results.sort(key=lambda x: x['score'], reverse=True)
-            return results[:top_k]
+            return results
 
         except Exception as e:
             print("[ColPali MaxSim Search Error]", str(e))

@@ -13,9 +13,10 @@ class NeuralEmbeddingEngine:
     """
     _tokenizer = None
     _model = None
+    _is_e5 = False
 
     @classmethod
-    def get_neural_embedding(cls, text):
+    def get_neural_embedding(cls, text, is_query=False):
         cleaned_text = (text or "").strip()
         if not cleaned_text:
             cleaned_text = "empty chunk"
@@ -27,22 +28,46 @@ class NeuralEmbeddingEngine:
 
             if cls._tokenizer is None or cls._model is None:
                 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
-                model_name = "sentence-transformers/all-MiniLM-L6-v2"
-                cls._tokenizer = AutoTokenizer.from_pretrained(model_name)
-                cls._model = AutoModel.from_pretrained(model_name)
+                token = os.environ.get('HF_TOKEN') or None
+
+                # Ưu tiên mô hình Multilingual E5 Small (384-dim, chuyên trị Tiếng Việt + Nhật + Anh)
+                e5_model_name = "intfloat/multilingual-e5-small"
+                try:
+                    cls._tokenizer = AutoTokenizer.from_pretrained(e5_model_name, token=token)
+                    cls._model = AutoModel.from_pretrained(e5_model_name, token=token)
+                    cls._is_e5 = True
+                    print(f"[NeuralEmbeddingEngine] Loaded Multilingual Embedding Model: {e5_model_name}")
+                except Exception as e5_err:
+                    print(f"[NeuralEmbeddingEngine] E5 load fallback: {e5_err}, using all-MiniLM-L6-v2")
+                    model_name = "sentence-transformers/all-MiniLM-L6-v2"
+                    cls._tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
+                    cls._model = AutoModel.from_pretrained(model_name, token=token)
+                    cls._is_e5 = False
+
                 cls._model.eval()
+
+            # Đối với họ E5, thêm tiền tố quy chuẩn để tăng độ chính xác tìm kiếm
+            if cls._is_e5:
+                prefix = "query: " if is_query else "passage: "
+                if not cleaned_text.startswith("query: ") and not cleaned_text.startswith("passage: "):
+                    cleaned_text = prefix + cleaned_text
 
             inputs = cls._tokenizer(cleaned_text, padding=True, truncation=True, max_length=256, return_tensors='pt')
             with torch.no_grad():
                 outputs = cls._model(**inputs)
-                # Mean Pooling qua các hidden states (đã trải qua LayerNorm bên trong Transformer)
-                embeddings = outputs.last_hidden_state.mean(dim=1)
-                # L2 Normalization đưa vector về độ dài = 1.0 cho Cosine Similarity
-                embeddings = F.normalize(embeddings, p=2, dim=1)
+                if cls._is_e5:
+                    # Attention-mask weighted mean pooling cho Multilingual-E5
+                    mask = inputs['attention_mask'].unsqueeze(-1).expand(outputs.last_hidden_state.size()).float()
+                    sum_emb = torch.sum(outputs.last_hidden_state * mask, 1)
+                    sum_mask = torch.clamp(mask.sum(1), min=1e-9)
+                    embeddings = F.normalize(sum_emb / sum_mask, p=2, dim=1)
+                else:
+                    embeddings = outputs.last_hidden_state.mean(dim=1)
+                    embeddings = F.normalize(embeddings, p=2, dim=1)
 
             return embeddings[0].tolist()
         except Exception as e:
-            # Fallback sang Hashing Vectorizer khi offline
+            print("[NeuralEmbedding Error]", str(e))
             return None
 
 
@@ -98,11 +123,11 @@ class QdrantVectorDBService:
         except Exception as e:
             print("[Qdrant Collection Error]", str(e))
 
-    def generate_embedding(self, text, layout_type="paragraph", bbox=None):
+    def generate_embedding(self, text, layout_type="paragraph", bbox=None, is_query=False):
         """
         Sinh Neural Vector Embedding từ Mạng Nơ-ron Transformer (LayerNorm + L2 Normalized)
         """
-        neural_vector = NeuralEmbeddingEngine.get_neural_embedding(text)
+        neural_vector = NeuralEmbeddingEngine.get_neural_embedding(text, is_query=is_query)
         if neural_vector and len(neural_vector) == self.VECTOR_DIM:
             return neural_vector
 
@@ -209,7 +234,7 @@ class QdrantVectorDBService:
         if not self.client:
             return []
 
-        query_vector = self.generate_embedding(query_text)
+        query_vector = self.generate_embedding(query_text, is_query=True)
 
         must_conditions = []
         if category_filter and category_filter != 'all':

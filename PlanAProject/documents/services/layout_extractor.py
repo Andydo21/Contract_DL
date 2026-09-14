@@ -90,8 +90,6 @@ class LayoutLMExtractor:
     def _draw_visual_bbox_crop(self, page_img_path: Path, bbox_norm: list, crop_filename: str) -> str:
         try:
             crop_save_path = self.output_img_dir / crop_filename
-            if crop_save_path.exists():
-                return f"{settings.MEDIA_URL}extracted_images/{crop_filename}"
 
             with Image.open(page_img_path) as img:
                 img = img.convert("RGB")
@@ -150,14 +148,20 @@ class LayoutLMExtractor:
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc[page_num]
 
-                # 1. RENDER PDF PAGE TO PIL IMAGE (100% PURE IMAGE CONVERSION)
+                # 1. RENDER PDF PAGE TO PIL IMAGE (SHARED CACHE - ZERO DUPLICATE RENDER)
                 page_img_filename = f"pdf_page_{doc_id}_p{page_num+1}.png"
                 page_img_path = self.output_img_dir / page_img_filename
-                pix = page.get_pixmap(dpi=150)
-                pix.save(str(page_img_path))
-                page_img_url = f"{settings.MEDIA_URL}extracted_images/{page_img_filename}"
 
-                page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                if not page_img_path.exists():
+                    pix = page.get_pixmap(dpi=150)
+                    pix.save(str(page_img_path))
+                    page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    pix_w, pix_h = pix.width, pix.height
+                else:
+                    page_img = Image.open(page_img_path).convert("RGB")
+                    pix_w, pix_h = page_img.size
+
+                page_img_url = f"{settings.MEDIA_URL}extracted_images/{page_img_filename}"
 
                 # 2. RUN PURE SURYA LAYOUT PREDICTOR ON PIL IMAGE
                 surya_blocks = []
@@ -168,18 +172,18 @@ class LayoutLMExtractor:
                     except Exception as s_err:
                         print(f"[Surya Layout Error Page {page_num+1}] {s_err}")
 
-                scale_x = page.rect.width / pix.width if pix.width else 1.0
-                scale_y = page.rect.height / pix.height if pix.height else 1.0
+                scale_x = page.rect.width / pix_w if pix_w else 1.0
+                scale_y = page.rect.height / pix_h if pix_h else 1.0
 
                 if surya_blocks:
                     for b_idx, bbox_item in enumerate(surya_blocks):
                         bbox = getattr(bbox_item, 'bbox', bbox_item)
                         label = getattr(bbox_item, 'label', 'paragraph').lower()
                         norm_bbox = [
-                            int((bbox[0] / pix.width) * 1000),
-                            int((bbox[1] / pix.height) * 1000),
-                            int((bbox[2] / pix.width) * 1000),
-                            int((bbox[3] / pix.height) * 1000),
+                            int((bbox[0] / pix_w) * 1000),
+                            int((bbox[1] / pix_h) * 1000),
+                            int((bbox[2] / pix_w) * 1000),
+                            int((bbox[3] / pix_h) * 1000),
                         ]
                         crop_filename = f"crop_doc{doc_id}_p{page_num+1}_b{b_idx+1}.png"
                         crop_url = self._draw_visual_bbox_crop(page_img_path, norm_bbox, crop_filename)

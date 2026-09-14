@@ -37,5 +37,5 @@ PlanAProject/media/uploaded_documents/*
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
 .gemini/
+PlanAProject/scratch_*.py

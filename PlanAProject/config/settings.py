@@ -18,6 +18,9 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+# Set Hugging Face cache to D drive to protect C drive storage
+os.environ.setdefault('HF_HOME', 'D:\\hf_cache')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/

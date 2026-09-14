@@ -57,7 +57,12 @@ class QwenChatbotService:
         if not self.vllm_base_url:
             return None
         from openai import OpenAI
-        return OpenAI(base_url=self.vllm_base_url, api_key=self.vllm_api_key, timeout=75)
+        return OpenAI(
+            base_url=self.vllm_base_url,
+            api_key=self.vllm_api_key,
+            timeout=75,
+            default_headers={"ngrok-skip-browser-warning": "true"}
+        )
 
     def _get_hf_client(self):
         """Khởi tạo Hugging Face InferenceClient"""
@@ -65,7 +70,7 @@ class QwenChatbotService:
         token = self.hf_token if self.hf_token else None
         return InferenceClient(model=self.model_name, token=token, timeout=75)
 
-    def _prepare_image_payloads(self, images: Optional[List[Dict[str, Any]]], max_images: int = 3) -> List[str]:
+    def _prepare_image_payloads(self, images: Optional[List[Dict[str, Any]]], max_images: int = 2) -> List[str]:
         """
         Nạp các ảnh bản vẽ / biểu đồ thực tế từ đĩa, resize tối ưu và mã hóa Base64
         để gửi trực tiếp vào thị giác của Qwen2.5-VL.
@@ -85,6 +90,9 @@ class QwenChatbotService:
 
             if not url or not isinstance(url, str):
                 continue
+
+            # Bỏ query param (?v=...) nếu có
+            url = url.split("?")[0]
 
             # 1. Nếu là đường dẫn tuyệt đối
             if os.path.isabs(url) and os.path.exists(url):
@@ -113,8 +121,8 @@ class QwenChatbotService:
                 try:
                     with Image.open(img_path) as pil_img:
                         pil_img = pil_img.convert("RGB")
-                        # Giới hạn kích thước tối đa 1024 để tiết kiệm token và đảm bảo tốc độ phản hồi nhanh
-                        max_dim = 1024
+                        # Giới hạn kích thước tối đa 800 để đảm bảo tốc độ phản hồi nhanh qua ngrok
+                        max_dim = 800
                         if max(pil_img.width, pil_img.height) > max_dim:
                             pil_img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
 
@@ -206,7 +214,7 @@ class QwenChatbotService:
             # 1. Ưu tiên sử dụng vLLM Engine nếu được cấu hình VLLM_BASE_URL
             vllm_client = self._get_vllm_client()
             if vllm_client:
-                print(f"[QwenService] Gửi truy vấn tới vLLM Engine tại: {self.vllm_base_url} (Model: {self.vllm_model})...")
+                print(f"[QwenService] Routing query to vLLM Engine at {self.vllm_base_url} (Model: {self.vllm_model})...")
                 # Xây dựng message đa phương thức nếu có hình ảnh
                 if has_images:
                     user_content = [{"type": "text", "text": user_prompt_text}]
