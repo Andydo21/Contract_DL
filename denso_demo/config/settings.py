@@ -85,6 +85,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Hugging Face & AI Model Settings
 HF_TOKEN = os.getenv('HF_TOKEN', '')
 QWEN_VL_MODEL = os.getenv('QWEN_VL_MODEL', 'Qwen/Qwen2.5-VL-72B-Instruct')
+VLLM_BASE_URL = os.getenv('VLLM_BASE_URL', '')
+VLLM_API_KEY = os.getenv('VLLM_API_KEY', 'EMPTY')
+VLLM_MODEL = os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ')
 
 # Neo4j Settings
 NEO4J_URI = os.getenv('NEO4J_URI', 'bolt://localhost:7687')

@@ -337,6 +337,48 @@ class QwenAIService:
     def __init__(self):
         self.model_name = getattr(settings, 'QWEN_VL_MODEL', 'Qwen/Qwen2.5-VL-72B-Instruct')
         self.hf_token = getattr(settings, 'HF_TOKEN', '')
+        self.vllm_base_url = getattr(settings, 'VLLM_BASE_URL', '') or os.getenv('VLLM_BASE_URL', '')
+        self.vllm_api_key = getattr(settings, 'VLLM_API_KEY', 'EMPTY') or os.getenv('VLLM_API_KEY', 'EMPTY')
+        self.vllm_model = getattr(settings, 'VLLM_MODEL', 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ') or os.getenv('VLLM_MODEL', 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ')
+
+    def _call_llm(self, messages: list, max_tokens: int = 800, temperature: float = 0.2) -> Optional[str]:
+        """Thử gọi qua vLLM OpenAI-compatible trước, sau đó fallback sang HF InferenceClient"""
+        # 1. Thử gọi vLLM (Local GPU / Kaggle ngrok / OpenAI-compatible API)
+        if self.vllm_base_url:
+            try:
+                from openai import OpenAI
+                client = OpenAI(
+                    base_url=self.vllm_base_url,
+                    api_key=self.vllm_api_key,
+                    timeout=75.0,
+                    default_headers={"ngrok-skip-browser-warning": "true"}
+                )
+                completion = client.chat.completions.create(
+                    model=self.vllm_model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                if completion.choices:
+                    return completion.choices[0].message.content.strip()
+            except Exception as v_err:
+                print("[QwenAIService vLLM Notice - Fallback to HF]", str(v_err)[:80])
+
+        # 2. Thử gọi Hugging Face InferenceClient
+        try:
+            from huggingface_hub import InferenceClient
+            client = InferenceClient(model=self.model_name, token=self.hf_token if self.hf_token else None, timeout=10)
+            completion = client.chat.completions.create(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            if completion.choices:
+                return completion.choices[0].message.content.strip()
+        except Exception as hf_err:
+            print("[QwenAIService HF Notice]", str(hf_err)[:80])
+
+        return None
 
     def generate_response(self, query: str, context_text: str) -> str:
         """Sinh câu trả lời từ dữ liệu ngữ cảnh trích xuất được từ Knowledge Base"""
@@ -356,21 +398,14 @@ class QwenAIService:
             f"Hãy đưa ra câu trả lời chi tiết và nêu rõ nguồn trích dẫn từ ngữ cảnh trên:"
         )
 
-        try:
-            from huggingface_hub import InferenceClient
-            client = InferenceClient(model=self.model_name, token=self.hf_token if self.hf_token else None, timeout=6)
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_content}
-                ],
-                max_tokens=800,
-                temperature=0.1
-            )
-            if completion.choices:
-                return completion.choices[0].message.content.strip()
-        except Exception as err:
-            print("[Qwen API Notice - Using Dynamic Context Formatter]", str(err)[:80])
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_content}
+        ]
+
+        response = self._call_llm(messages, max_tokens=800, temperature=0.1)
+        if response:
+            return response
 
         # Dynamic fallback: Trình bày trực tiếp toàn bộ dữ liệu trích xuất được từ DB
         return self._format_dynamic_context(context_text)
@@ -389,21 +424,14 @@ class QwenAIService:
         history_text = "\n".join([f"{m.get('sender', 'user').upper()}: {m.get('message', '')}" for m in conversation_history])
         user_prompt = f"LỊCH SỬ PHỎNG VẤN:\n{history_text}\n\nHãy đặt câu hỏi Socratic phản biện tiếp theo:"
 
-        try:
-            from huggingface_hub import InferenceClient
-            client = InferenceClient(model=self.model_name, token=self.hf_token if self.hf_token else None, timeout=6)
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=250,
-                temperature=0.3
-            )
-            if completion.choices:
-                return completion.choices[0].message.content.strip()
-        except Exception as err:
-            print("[Qwen Socratic API Notice - Dynamic heuristic]", str(err)[:80])
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        response = self._call_llm(messages, max_tokens=250, temperature=0.3)
+        if response:
+            return response
 
         # Dynamic fallback phân tích từ câu trả lời cuối cùng của chuyên gia
         last_reply = conversation_history[-1].get('message', '') if conversation_history else ''
@@ -428,24 +456,16 @@ class QwenAIService:
             f"Lưu ý dung sai/an toàn (Safety Precaution): ..."
         )
 
-        try:
-            from huggingface_hub import InferenceClient
-            client = InferenceClient(model=self.model_name, token=self.hf_token if self.hf_token else None, timeout=8)
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": f"KINH NGHIỆM THỰC TẾ CHUYÊN GIA CHIA SẺ:\n{replies_text}\n\nHãy chuẩn hóa thành Quy tắc Tri thức:"}
-                ],
-                max_tokens=500,
-                temperature=0.2
-            )
-            if completion.choices:
-                res = completion.choices[0].message.content.strip()
-                title_line = [l for l in res.split('\n') if 'tiêu đề' in l.lower() or 'quy tắc' in l.lower()]
-                title = title_line[0].replace('**', '').replace('Tiêu đề:', '').strip() if title_line else f"Quy tắc chuẩn hóa: {topic} ({expert_name})"
-                return {"title": title, "content": res}
-        except Exception as err:
-            print("[Qwen Synthesis API Notice - Dynamic format]", str(err)[:80])
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": f"KINH NGHIỆM THỰC TẾ CHUYÊN GIA CHIA SẺ:\n{replies_text}\n\nHãy chuẩn hóa thành Quy tắc Tri thức:"}
+        ]
+
+        response = self._call_llm(messages, max_tokens=500, temperature=0.2)
+        if response:
+            title_line = [l for l in response.split('\n') if 'tiêu đề' in l.lower() or 'quy tắc' in l.lower()]
+            title = title_line[0].replace('**', '').replace('Tiêu đề:', '').strip() if title_line else f"Quy tắc chuẩn hóa: {topic} ({expert_name})"
+            return {"title": title, "content": response}
 
         return {
             "title": f"Quy tắc chuyên gia: Xử lý {topic} ({expert_name})",
