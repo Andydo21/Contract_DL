@@ -4,11 +4,10 @@ DocumentService — Orchestrator kết nối toàn bộ pipeline.
 Thứ tự thực hiện:
   1. FileLoader.load()          → kiểm tra file, xác định loại
   2. Extractor.extract()        → trích xuất text
-  3. OCREngine (nếu cần)        → OCR trang scan / ảnh
-  4. TextNormalizer.normalize() → chuẩn hoá text
-  5. ClauseSplitter.split()     → tách điều khoản
-  6. Validator.validate()       → kiểm tra, sinh warnings
-  7. Build DocumentOutput       → đóng gói kết quả
+  3. TextNormalizer.normalize() → chuẩn hoá text
+  4. ClauseSplitter.split()     → tách điều khoản
+  5. Validator.validate()       → kiểm tra, sinh warnings
+  6. Build DocumentOutput       → đóng gói kết quả
 
 DocumentService KHÔNG biết chi tiết từng bước — chỉ điều phối.
 Mỗi bước được inject từ ngoài (DIP) để dễ test / thay thế.
@@ -18,7 +17,7 @@ from __future__ import annotations
 import statistics
 from typing import List, Optional
 
-from ..exceptions.errors import DocumentProcessorError, OCRError
+from ..exceptions.errors import DocumentProcessorError
 from ..extractors.docx_extractor import DocxExtractor
 from ..extractors.pdf_extractor import PdfExtractor
 from ..loaders.file_loader import FileLoader, LoadResult
@@ -30,15 +29,11 @@ from ..models.document import (
     PageModel,
 )
 from ..models.page import PageData
-from ..ocr.paddle_ocr import OCREngine
 from ..preprocess.text_normalizer import TextNormalizer
 from ..splitter.clause_splitter import ClauseSplitter
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Ngưỡng confidence OCR thấp → sinh warning
-_LOW_CONFIDENCE_THRESHOLD = 0.6
 
 # Ngưỡng trang rỗng sau normalize → sinh warning
 _EMPTY_PAGE_WARNING_THRESHOLD = 0
@@ -68,9 +63,7 @@ class DocumentService:
         self._loader = loader or FileLoader()
         self._normalizer = normalizer or TextNormalizer()
         self._splitter = splitter or ClauseSplitter()
-        self._ocr_lang = ocr_lang
-        # OCREngine khởi tạo lazy — chỉ khi cần OCR
-        self._ocr_engine: Optional[OCREngine] = None
+        self._ocr_lang = ocr_lang  # kept for backward-compatible callers
 
     # ------------------------------------------------------------------
     # Public API
@@ -168,108 +161,38 @@ class DocumentService:
         return pages, False  # DOCX không cần OCR
 
     def _extract_pdf(self, file_path: str):
-        """Extract PDF — tự động OCR trang scan."""
+        """Extract an existing PDF text layer; image-only pages stay visual."""
         logger.info("Extract text from PDF")
         extractor = PdfExtractor()
         result = extractor.extract_pdf(file_path)
 
         all_pages: List[PageData] = list(result.pages)  # trang có text native
-        ocr_used = False
-
-        import os
-        skip_ocr = os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
-
         if result.scan_page_numbers:
-            if skip_ocr:
-                logger.info("PDF has scan pages but SKIP_OCR is enabled. Skipping OCR.")
-            else:
-                logger.info(
-                    "PDF has %d scan pages — running OCR: %s",
-                    len(result.scan_page_numbers),
-                    result.scan_page_numbers,
-                )
-                ocr_pages = self._ocr_pdf_pages(
-                    extractor, file_path, result.scan_page_numbers
-                )
-                all_pages.extend(ocr_pages)
-                ocr_used = True
+            logger.info("Image-only PDF pages are preserved without OCR: %s", result.scan_page_numbers)
+            existing = {page.page_number for page in all_pages}
+            for page_number in result.scan_page_numbers:
+                if page_number not in existing:
+                    all_pages.append(
+                        PageData(
+                            page_number=page_number,
+                            text="[Visual page — no embedded text layer]",
+                            source="pdf",
+                            confidence=0.0,
+                        )
+                    )
 
         # Sắp xếp lại theo page_number sau khi merge
         all_pages.sort(key=lambda p: p.page_number)
 
-        # Nếu không có trang nào (PDF scan hoàn toàn và skip_ocr hoặc OCR thất bại)
         if not all_pages:
-            logger.warning("No pages extracted from PDF — returning empty or placeholder")
-            if skip_ocr:
-                all_pages.append(
-                    PageData(
-                        page_number=1,
-                        text="[Hệ thống: Đây là tài liệu dạng ảnh quét (scanned PDF) và tính năng trích xuất hình ảnh/OCR đã được tắt theo yêu cầu. Không có văn bản thuần để trích xuất.]",
-                        source="pdf",
-                        confidence=1.0,
-                    )
-                )
+            all_pages.append(PageData(1, "[Visual document — no embedded text layer]", "pdf", 0.0))
 
-        return all_pages, ocr_used
+        return all_pages, False
 
     def _extract_image(self, file_path: str):
-        """OCR trực tiếp file ảnh."""
-        import os
-        skip_ocr = os.environ.get("SKIP_OCR", "False").lower() in ("true", "1", "yes")
-        if skip_ocr:
-            logger.info("Image file uploaded but SKIP_OCR is enabled. Skipping OCR.")
-            return [
-                PageData(
-                    page_number=1,
-                    text="[Hệ thống: Đây là file hình ảnh và tính năng trích xuất hình ảnh/OCR đã được tắt theo yêu cầu.]",
-                    source="ocr",
-                    confidence=1.0,
-                )
-            ], True
-        logger.info("Extract text from image file via OCR")
-        engine = self._get_ocr_engine()
-        page = engine.ocr_image_file(file_path, page_number=1)
-        return [page], True
-
-    def _ocr_pdf_pages(
-        self,
-        extractor: PdfExtractor,
-        file_path: str,
-        page_numbers: List[int],
-    ) -> List[PageData]:
-        """OCR từng trang scan của PDF.
-
-        Dùng PdfExtractor.render_page_to_image() (PyMuPDF, không cần Poppler)
-        rồi truyền bytes vào OCREngine.
-
-        Args:
-            extractor: PdfExtractor đã khởi tạo.
-            file_path: Đường dẫn PDF.
-            page_numbers: Danh sách trang cần OCR (1-indexed).
-
-        Returns:
-            Danh sách PageData với source="ocr".
-        """
-        engine = self._get_ocr_engine()
-        ocr_pages: List[PageData] = []
-
-        for page_num in page_numbers:
-            try:
-                logger.info("OCR PDF scan page %d", page_num)
-                image_bytes = extractor.render_page_to_image(file_path, page_num)
-                page_data = engine.ocr_image_bytes(image_bytes, page_num)
-                ocr_pages.append(page_data)
-            except OCRError as exc:
-                # Log và bỏ qua trang lỗi — không dừng toàn bộ pipeline
-                logger.warning("OCR failed for page %d: %s", page_num, exc)
-
-        return ocr_pages
-
-    def _get_ocr_engine(self) -> OCREngine:
-        """Lazy load OCREngine (singleton)."""
-        if self._ocr_engine is None:
-            self._ocr_engine = OCREngine(lang=self._ocr_lang)
-        return self._ocr_engine
+        """Keep an image as a visual page without character recognition."""
+        logger.info("Keep image as a PlanA visual page without OCR")
+        return [PageData(1, "[Visual page — no embedded text layer]", "pdf", 0.0)], False
 
     # ------------------------------------------------------------------
     # Private — validation
@@ -305,17 +228,6 @@ class DocumentService:
         empty_pages = [p.page_number for p in pages if p.is_empty]
         if empty_pages:
             warnings.append(f"Trang rỗng sau normalize: {empty_pages}")
-
-        # Kiểm tra confidence OCR thấp
-        low_conf_pages = [
-            p.page_number
-            for p in pages
-            if p.source == "ocr" and p.confidence < _LOW_CONFIDENCE_THRESHOLD
-        ]
-        if low_conf_pages:
-            warnings.append(
-                f"OCR confidence thấp (<{_LOW_CONFIDENCE_THRESHOLD}) tại trang: {low_conf_pages}"
-            )
 
         if split_clauses:
             # Kiểm tra điều khoản rỗng

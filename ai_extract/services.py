@@ -3,31 +3,21 @@ ai_extract/services.py
 ======================
 Business-logic layer for AI Extract & Summarize.
 
-Calls kaggle_qwen_service (at settings.KAGGLE_QWEN_SERVICE_URL) via HTTP:
-  • POST /api/v1/summarize        → saves to ai_extract.ContractSummary
-  • POST /api/v1/extract_entities → saves to contracts.ExtractedEntity (same table as rule-based entities)
+Uses the notebook's OpenAI-compatible /v1/chat/completions API, with a
+legacy fallback for the former /api/v1/* service.
 """
 
 import logging
-import requests
-from django.conf import settings
 
 from contracts.models import Contract, ContractVersion
 from .models import Clause
 from .repositories import ContractSummaryRepository, ExtractedEntityRepository
 from contracts.repositories import ClauseRepository
+from .qwen_client import request_qwen
 
 logger = logging.getLogger("ai_extract")
 
-MODEL_ID = "phamthanhfd/contract-analysis-qwen2.5-3b"
-REQUEST_TIMEOUT = 300  # 5-minute timeout – model inference can be slow
-
-
-def _kaggle_url() -> str:
-    """Return the base URL of kaggle_qwen_service (no trailing slash)."""
-    return getattr(
-        settings, "KAGGLE_QWEN_SERVICE_URL", "http://kaggle-qwen-service:8000"
-    ).rstrip("/")
+MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,18 +56,15 @@ class SummarizeService:
             },
         }
 
-        url = f"{_kaggle_url()}/api/v1/summarize"
         logger.info(
-            f"[summarize] POST {url} – version_id={version.id}, "
+            f"[summarize] Qwen chat completion – version_id={version.id}, "
             f"{len(clauses)} clauses"
         )
 
         try:
-            resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"kaggle_qwen_service /api/v1/summarize error: {e}")
+            data = request_qwen("summarize", payload)
+        except RuntimeError as e:
+            raise RuntimeError(f"Qwen summarize error: {e}") from e
 
         summary_text = data.get("summary", "")
 
@@ -154,25 +141,18 @@ class ExtractEntityService:
                     f"ContractVersion {version.id} has no clauses after splitting."
                 )
 
-        url = f"{_kaggle_url()}/api/v1/extract_entities"
         results = []
 
         for clause in clauses:
             text = f"[{clause.clause_title}]\n{clause.clause_content}"
             logger.info(
-                f"[extract] POST {url} – clause_id={clause.id} "
+                f"[extract] Qwen chat completion – clause_id={clause.id} "
                 f"'{clause.clause_title[:40]}'"
             )
 
             try:
-                resp = requests.post(
-                    url,
-                    json={"text": text},
-                    timeout=REQUEST_TIMEOUT,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except requests.RequestException as e:
+                data = request_qwen("extract_entities", {"text": text})
+            except RuntimeError as e:
                 logger.error(f"[extract] HTTP error for clause {clause.id}: {e}")
                 raise RuntimeError(f"Không thể kết nối đến máy chủ AI (AI Service communication failed): {e}")
 
@@ -233,15 +213,12 @@ class ExtractEntityService:
         Returns:
             {"entities": {…}, "saved_count": int}
         """
-        url = f"{_kaggle_url()}/api/v1/extract_entities"
-        logger.info(f"[extract] POST {url} – free-text len={len(text)}")
+        logger.info(f"[extract] Qwen chat completion – free-text len={len(text)}")
 
         try:
-            resp = requests.post(url, json={"text": text}, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"kaggle_qwen_service /api/v1/extract_entities error: {e}")
+            data = request_qwen("extract_entities", {"text": text})
+        except RuntimeError as e:
+            raise RuntimeError(f"Qwen extract_entities error: {e}") from e
 
         raw_entities = data.get("entities", {})
         saved_count = 0
@@ -277,77 +254,20 @@ class ClauseExtractService:
     def extract_version(self, version: ContractVersion, re_extract: bool = False, force_rule_based: bool = False) -> dict:
         """
         Run AI clause extraction for a ContractVersion.
-        Delegates document processing to DocumentService, saves pages to ContractContext,
+        Delegates document processing to the PlanA vision pipeline, saves pages to ContractContext,
         and uses Kaggle AI for clause splitting. Falls back to ClauseSplitter if AI fails.
         """
-        import os
-        import tempfile
-        from decimal import Decimal
-        from django.conf import settings
-        from contracts.crypto_utils import decrypt_pdf
-        from contracts.models import ContractContext
-        from document_processor.services.document_service import DocumentService
         from document_processor.splitter.clause_splitter import ClauseSplitter
+        from .layout_service import LayoutExtractionService
 
-        # 1. Decrypt and run DocumentService if not already parsed or re_extract is True
+        # 1. Decrypt and run PlanA page-layout extraction when needed.
         contexts_exist = version.contexts.filter(context_type='raw_text').exists()
         if re_extract or not contexts_exist:
-            latest_file = version.files.first()
-            if not latest_file or not latest_file.file_path:
-                if not (contexts_exist or version.ai_extract_clauses.exists()):
-                    raise ValueError("No file available for this contract version.")
-            else:
-                import urllib.parse
-                rel_path = urllib.parse.unquote(latest_file.file_path)
-                url_prefix = settings.MEDIA_URL
-                if rel_path.startswith(url_prefix):
-                    rel_path = rel_path[len(url_prefix):]
-                physical_path = os.path.join(settings.MEDIA_ROOT, rel_path)
-
-                if not os.path.exists(physical_path):
-                    raise ValueError(f"Contract file does not exist on disk: {physical_path}")
-
-                # Read and decrypt file
-                with open(physical_path, 'rb') as f:
-                    encrypted_bytes = f.read()
-                decrypted_bytes = decrypt_pdf(encrypted_bytes)
-
-                # Write to a secure temporary file keeping the original extension
-                ext = os.path.splitext(latest_file.file_name)[1].lower() if latest_file.file_name else '.pdf'
-                if not ext:
-                    ext = '.pdf'
-                    
-                temp_dir = tempfile.gettempdir()
-                temp_file_name = f"temp_contract_{version.id}_{os.getpid()}{ext}"
-                temp_file_path = os.path.join(temp_dir, temp_file_name)
-
-                try:
-                    with open(temp_file_path, 'wb') as temp_file:
-                        temp_file.write(decrypted_bytes)
-
-                    # Process file with DocumentService
-                    service = DocumentService(ocr_lang="vi")
-                    doc_output = service.process(temp_file_path, split_clauses=False)
-
-                    # Clean existing ContractContext for this version to avoid duplicates
-                    ContractContext.objects.filter(version=version, context_type='raw_text').delete()
-
-                    # Save ContractContext (pages)
-                    for page in doc_output.pages:
-                        ContractContext.objects.create(
-                            version=version,
-                            context_type='raw_text',
-                            source=page.source,
-                            content=page.text,
-                            relevance_score=Decimal(str(round(page.confidence, 2)))
-                        )
-                finally:
-                    # Securely delete the temporary decrypted file
-                    if os.path.exists(temp_file_path):
-                        try:
-                            os.remove(temp_file_path)
-                        except Exception:
-                            pass
+            has_file = version.files.exclude(file_path="").exists()
+            if has_file:
+                LayoutExtractionService().extract_version(version)
+            elif not (contexts_exist or version.ai_extract_clauses.exists()):
+                raise ValueError("No file available for this contract version.")
 
         # 2. Gather raw text from contexts
         raw_text = self._get_raw_text(version)
@@ -361,24 +281,17 @@ class ClauseExtractService:
             version.ai_extract_clauses.all().delete()
 
         # 3. Call AI Clause Splitting Service
-        url = f"{_kaggle_url()}/api/v1/extract_clauses"
         logger.info(
-            f"[clause_extract] POST {url} – version_id={version.id}, text_len={len(raw_text)}"
+            f"[clause_extract] Qwen chat completion – version_id={version.id}, text_len={len(raw_text)}"
         )
 
         ai_clauses = []
         ai_failed = force_rule_based
         if not force_rule_based:
             try:
-                resp = requests.post(
-                    url,
-                    json={"text": raw_text},
-                    timeout=REQUEST_TIMEOUT,
-                )
-                resp.raise_for_status()
-                data = resp.json()
+                data = request_qwen("extract_clauses", {"text": raw_text})
                 ai_clauses = data.get("clauses", [])
-            except requests.RequestException as e:
+            except RuntimeError as e:
                 logger.warning(f"[clause_extract] AI clause splitting failed, falling back to rule-based splitter: {e}")
                 ai_failed = True
         else:

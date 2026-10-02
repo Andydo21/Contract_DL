@@ -1,5 +1,5 @@
 """
-Model đại diện cho một trang tài liệu sau khi extract / OCR.
+Model đại diện cho một trang tài liệu sau khi extract.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class PageData:
         source: Nguồn gốc — "docx", "pdf", hay "ocr".
         confidence: Độ tin cậy từ 0.0 đến 1.0.
             - PDF/DOCX native text: luôn là 1.0.
-            - OCR: confidence trung bình từ PaddleOCR.
+            - Trang visual không có text layer: 0.0.
     """
 
     page_number: int

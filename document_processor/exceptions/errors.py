@@ -49,10 +49,7 @@ class ExtractError(DocumentProcessorError):
 # ---------------------------------------------------------------------------
 
 class OCRError(DocumentProcessorError):
-    """Lỗi trong quá trình OCR.
-
-    Ví dụ: PaddleOCR không khởi tạo được, ảnh không hợp lệ.
-    """
+    """Legacy compatibility error; the active pipeline no longer performs OCR."""
 
 
 # ---------------------------------------------------------------------------

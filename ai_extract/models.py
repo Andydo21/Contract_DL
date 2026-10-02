@@ -81,3 +81,83 @@ class ExtractedEntity(models.Model):
 
     def __str__(self):
         return f"{self.entity_type}: {self.entity_value[:30]}"
+
+
+class LayoutExtractionRun(models.Model):
+    STATUS_CHOICES = (
+        ("RUNNING", "Running"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    )
+    INDEX_STATUS_CHOICES = (
+        ("PENDING", "Pending"),
+        ("RUNNING", "Running"),
+        ("COMPLETED", "Completed"),
+        ("PARTIAL", "Partial"),
+        ("FAILED", "Failed"),
+        ("SKIPPED", "Skipped"),
+    )
+    version = models.ForeignKey(
+        "contracts.ContractVersion",
+        on_delete=models.CASCADE,
+        related_name="layout_extraction_runs",
+    )
+    pipeline_name = models.CharField(max_length=100, default="plan-a-surya-colpali")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="RUNNING")
+    total_pages = models.PositiveIntegerField(default=0)
+    total_blocks = models.PositiveIntegerField(default=0)
+    dense_index_status = models.CharField(
+        max_length=20, choices=INDEX_STATUS_CHOICES, default="PENDING"
+    )
+    dense_points_count = models.PositiveIntegerField(default=0)
+    dense_index_error = models.TextField(blank=True)
+    colpali_index_status = models.CharField(
+        max_length=20, choices=INDEX_STATUS_CHOICES, default="PENDING"
+    )
+    colpali_points_count = models.PositiveIntegerField(default=0)
+    colpali_index_error = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.version} - {self.pipeline_name} ({self.status})"
+
+
+class LayoutExtractionPage(models.Model):
+    run = models.ForeignKey(LayoutExtractionRun, on_delete=models.CASCADE, related_name="pages")
+    page_number = models.PositiveIntegerField()
+    width = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    image_path = models.CharField(max_length=500, blank=True)
+    extracted_text = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["page_number"]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "page_number"], name="unique_layout_page_per_run")
+        ]
+
+    def __str__(self):
+        return f"{self.run.version} - page {self.page_number}"
+
+
+class LayoutExtractionBlock(models.Model):
+    page = models.ForeignKey(LayoutExtractionPage, on_delete=models.CASCADE, related_name="blocks")
+    block_order = models.PositiveIntegerField()
+    layout_type = models.CharField(max_length=50, default="paragraph")
+    text = models.TextField(blank=True)
+    bbox = models.JSONField(default=list)
+    confidence = models.DecimalField(max_digits=5, decimal_places=4, default=0)
+
+    class Meta:
+        ordering = ["block_order"]
+        constraints = [
+            models.UniqueConstraint(fields=["page", "block_order"], name="unique_layout_block_order")
+        ]
+
+    def __str__(self):
+        return f"Page {self.page.page_number} block {self.block_order}"

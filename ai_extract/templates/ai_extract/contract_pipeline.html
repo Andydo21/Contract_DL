@@ -1,0 +1,54 @@
+{% extends 'ai_extract/base.html' %}
+{% load static %}
+{% block title %}{{ contract.contract_code }} · PlanA Extract{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/contract_pipeline.css' %}">{% endblock %}
+{% block content %}
+<a class="back-link" href="/ai-extract/">← Tất cả hợp đồng</a>
+<section class="contract-hero">
+    <div>
+        <p class="eyebrow">{{ contract.contract_code }} · VERSION {{ version.version_number|default:'—' }}</p>
+        <h1>{{ contract.title }}</h1>
+        <p>PlanA dual pipeline · Surya layout + ColPali visual · hai collection Qdrant · no PaddleOCR</p>
+    </div>
+    <form id="extract-form" data-endpoint="/api/ai/contracts/{{ contract.id }}/layout-extract/">
+        {% csrf_token %}
+        <button type="submit" class="primary-button" {% if not version %}disabled{% endif %}>
+            <span class="button-label">{% if run %}Chạy lại extraction{% else %}Chạy extraction{% endif %}</span>
+        </button>
+    </form>
+</section>
+
+<div id="pipeline-message" class="message" hidden></div>
+
+{% if run %}
+<section class="run-strip">
+    <div><span>STATUS</span><strong class="run-status">{{ run.status }}</strong></div>
+    <div><span>PAGES</span><strong>{{ run.total_pages }}</strong></div>
+    <div><span>BLOCKS</span><strong>{{ run.total_blocks }}</strong></div>
+    <div><span>DENSE · denso_document_vectors</span><strong class="index-{{ run.dense_index_status|lower }}">{{ run.dense_index_status }} · {{ run.dense_points_count }} points</strong></div>
+    <div><span>COLPALI · denso_colpali_visual_patches</span><strong class="index-{{ run.colpali_index_status|lower }}">{{ run.colpali_index_status }} · {{ run.colpali_points_count }} pages</strong></div>
+    <div><span>PIPELINE</span><strong>{{ run.pipeline_name }}</strong></div>
+</section>
+{% if run.dense_index_error or run.colpali_index_error %}
+<section class="index-notices">
+    {% if run.dense_index_error %}<p><strong>Dense:</strong> {{ run.dense_index_error }}</p>{% endif %}
+    {% if run.colpali_index_error %}<p><strong>ColPali:</strong> {{ run.colpali_index_error }}</p>{% endif %}
+</section>
+{% endif %}
+{% endif %}
+
+<section class="page-grid">
+    {% for page in pages %}
+    <a class="page-card" href="/ai-extract/contracts/{{ contract.id }}/pages/{{ page.page_number }}/">
+        <div class="preview-frame">
+            {% if page.preview_url %}<img src="{{ page.preview_url }}" alt="Trang {{ page.page_number }}">{% else %}<div class="text-preview">{{ page.extracted_text|truncatechars:260 }}</div>{% endif %}
+            <span class="page-number">PAGE {{ page.page_number }}</span>
+        </div>
+        <div class="page-meta"><strong>{{ page.blocks.count }} blocks</strong><span>{{ page.extracted_text|length }} chars</span></div>
+    </a>
+    {% empty %}
+    <div class="empty-state">Chưa có dữ liệu trang. Chạy extraction để tạo page inspector.</div>
+    {% endfor %}
+</section>
+{% endblock %}
+{% block page_js %}<script src="{% static 'ai_extract/js/contract_pipeline.js' %}"></script>{% endblock %}

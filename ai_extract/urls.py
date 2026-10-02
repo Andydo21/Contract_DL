@@ -1,7 +1,13 @@
 from django.urls import path
 from . import views
+from . import layout_views
 
 urlpatterns = [
+    path(
+        "contracts/<int:contract_id>/layout-extract/",
+        layout_views.api_run_layout_extraction,
+        name="layout_extract",
+    ),
     # ── Summarize ──────────────────────────────────────────────────────────
     # POST  /api/ai/contracts/<id>/summarize/   → run summarize & save
     path(
@@ -53,10 +59,4 @@ urlpatterns = [
     ),
 
     # ── Free-text extraction (no contract binding) ──────────────────────────
-    # POST  /api/ai/extract-from-text/
-    path(
-        "extract-from-text/",
-        views.api_extract_from_text,
-        name="ai_extract_from_text",
-    ),
 ]

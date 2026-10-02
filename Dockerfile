@@ -5,7 +5,8 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+COPY document_processor/requirements.txt /app/document_processor/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r document_processor/requirements.txt
 
 # Copy project files
 COPY . /app/

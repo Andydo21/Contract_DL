@@ -9,7 +9,7 @@ Logic xác định trang cần OCR:
   - Nếu > 50% số trang cần OCR → toàn file là PDF scan.
 
 Extractor này KHÔNG tự gọi OCR để giữ SRP.
-DocumentService sẽ quyết định có gọi OCREngine hay không.
+PlanA pipeline sẽ giữ trang scan dưới dạng visual page, không gọi OCR engine.
 """
 from __future__ import annotations
 

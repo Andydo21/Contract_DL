@@ -1,0 +1,42 @@
+{% extends 'ai_extract/base.html' %}
+{% load static %}
+{% block title %}Trang {{ page.page_number }} · {{ contract.contract_code }}{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/page_inspector.css' %}">{% endblock %}
+{% block content %}
+<div class="inspector-head">
+    <div>
+        <a class="back-link" href="/ai-extract/contracts/{{ contract.id }}/">← {{ contract.contract_code }}</a>
+        <h1>Page {{ page.page_number }}</h1>
+    </div>
+    <div class="pager">
+        {% if previous_page %}<a href="../{{ previous_page }}/">← Page {{ previous_page }}</a>{% endif %}
+        <span>{{ page.blocks.count }} layout blocks</span>
+        {% if next_page %}<a href="../{{ next_page }}/">Page {{ next_page }} →</a>{% endif %}
+    </div>
+</div>
+
+<section class="inspector-grid">
+    <div class="visual-panel">
+        <div class="panel-title">Visual layer</div>
+        <div class="document-canvas">
+            <div class="page-surface">
+                {% if page.preview_url %}<img src="{{ page.preview_url }}" alt="Document page {{ page.page_number }}">{% endif %}
+                {% for block in page.blocks.all %}<button class="bbox bbox-{{ block.layout_type }}" style="{{ block.box_style }}" data-block="block-{{ block.id }}" aria-label="Block {{ block.block_order }}"></button>{% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="blocks-panel">
+        <div class="panel-title">Extracted blocks</div>
+        <div class="block-list">
+            {% for block in page.blocks.all %}
+            <article class="block-card" id="block-{{ block.id }}">
+                <div class="block-top"><span>#{{ block.block_order }} · {{ block.layout_type }}</span><span>{{ block.confidence|floatformat:2 }}</span></div>
+                <p>{% if block.text %}{{ block.text }}{% else %}<em>Visual-only block — không có embedded text.</em>{% endif %}</p>
+                <code>{{ block.bbox }}</code>
+            </article>
+            {% empty %}<div class="empty-state">Không có block trên trang này.</div>{% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}
+{% block page_js %}<script src="{% static 'ai_extract/js/page_inspector.js' %}"></script>{% endblock %}

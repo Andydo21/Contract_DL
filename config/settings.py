@@ -8,6 +8,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables
 load_dotenv(BASE_DIR / ".env")
+# Reuse the dual Kaggle gateway configuration from the bundled PlanA reference
+# when Contract_DL has not overridden those values in its own .env.
+load_dotenv(BASE_DIR / "PlanAProject" / ".env")
 
 # Make shared/ importable (especially inside Docker)
 shared_path = str(BASE_DIR / "shared")
@@ -155,6 +158,13 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
     "KAGGLE_QWEN_SERVICE_URL",
     os.environ.get("KAGGLE_AI_URL", "http://kaggle-qwen-service:8000")
 )
+
+# PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
+COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "")
+QWEN_MODEL_ID = os.environ.get("QWEN_MODEL_ID", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
+QDRANT_URL = os.environ.get("QDRANT_URL", "")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 
 # Workflow Service URL
 WORKFLOW_SERVICE_URL = os.environ.get(
