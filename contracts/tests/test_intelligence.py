@@ -63,7 +63,9 @@ class ContractIntelligenceTests(TestCase):
         self.user.save()
         self.assertEqual(self.search().status_code, 404)
 
-    def test_case_review_uses_existing_manager_role(self):
+    @patch('ai_extract.services.contract_pipeline_service.HybridBackend.rerank_many',
+           side_effect=lambda groups: [[dict(c, neural_logit=2.0) for c in candidates] for _, candidates in groups])
+    def test_case_review_uses_existing_manager_role(self, reranker):
         response = self.write_case()
         self.assertEqual(response.status_code, 200)
         pk = response.json()['case']['id']

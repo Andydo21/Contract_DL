@@ -1,19 +1,7 @@
 """A2 domain rules used by the main Contract Guard web application."""
-import re
-import unicodedata
 
 CASE_FIELDS = ('title', 'clause_type', 'issue', 'reasoning', 'resolution',
                'verification', 'applicability', 'source_reference')
-
-
-def normalized(value):
-    return unicodedata.normalize('NFC', str(value)).casefold().strip()
-
-
-def overlap(query, text):
-    query_terms = set(re.findall(r'[^\W_]+(?:[-./][^\W_]+)*', normalized(query)))
-    terms = set(re.findall(r'[^\W_]+(?:[-./][^\W_]+)*', normalized(text)))
-    return len(query_terms & terms) / len(query_terms) if query_terms else 0
 
 
 def approval_gaps(case):

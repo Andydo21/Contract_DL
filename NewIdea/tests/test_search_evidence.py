@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
-from NewIdea.services.search_evidence_service import with_expert_evidence, matched_structure_nodes, select_answer_sources, select_retrieval_seeds
+from NewIdea.services.search_evidence_service import with_expert_evidence, matched_structure_nodes, select_answer_sources, select_retrieval_seeds, find_expert_cases
 from NewIdea.services.knowledge_answer_service import answer_from_sources
 
 
@@ -16,6 +16,26 @@ def expert(status='approved'):
 
 
 class SearchEvidenceTests(SimpleTestCase):
+    def test_expert_candidates_use_neural_model_not_shared_words(self):
+        case=SimpleNamespace(status='approved',title='Payment schedule',
+            clause_type='',issue='Buyer pays after acceptance.',reasoning='',resolution='',
+            verification='',applicability='',source_reference='block:1')
+        with patch('NewIdea.services.search_evidence_service.evidence_current',return_value=True), \
+             patch('NewIdea.services.search_evidence_service.serialize_case',return_value=dict(case_id='one')), \
+             patch('ai_extract.services.contract_pipeline_service.HybridBackend.rerank_many',
+                   side_effect=lambda groups:[[dict(groups[0][1][0],neural_logit=3.0)]]) as model:
+            result=find_expert_cases('Khi nào bên mua cần thanh toán?', [case])
+        self.assertEqual(result[0]['match_score'],3.0)
+        self.assertEqual(result[0]['score_kind'],'neural_reranker_not_applicability')
+        self.assertEqual(model.call_args.args[0][0][0],'Khi nào bên mua cần thanh toán?')
+
+    def test_expert_model_outage_never_fabricates_a_lexical_score(self):
+        case=SimpleNamespace(status='approved',title='Advice',**{k:'' for k in
+            ('clause_type','issue','reasoning','resolution','verification','applicability','source_reference')})
+        with patch('NewIdea.services.search_evidence_service.evidence_current',return_value=True), \
+             patch('ai_extract.services.contract_pipeline_service.HybridBackend.rerank_many',side_effect=RuntimeError('offline')):
+            with self.assertRaises(RuntimeError):find_expert_cases('Question',[case])
+
     def test_late_question_part_survives_global_seed_budget(self):
         sources=[dict(document_id='a',chunk_id=str(i),text=f'First topic {i}',
             retrieval_ranks=[dict(query=1,rank=i+1)],retrieval_hints=[dict(part=1,rank=i+1)]) for i in range(8)]
@@ -101,11 +121,9 @@ class SearchEvidenceTests(SimpleTestCase):
         sources=[dict(document_id='v1',chunk_id=str(i),text='',image_path=f'{i}.png') for i in range(2)]
         self.assertEqual(len(select_answer_sources(sources)),2)
 
-    def test_demo_advice_is_labeled_in_evidence_sent_to_qwen(self):
+    def test_demo_advice_is_not_answer_evidence(self):
         case = dict(expert(), is_demo=True, title='[DEMO] Payment advice')
-        evidence = with_expert_evidence([], [case])
-        self.assertTrue(evidence[0]['is_demo'])
-        self.assertIn('DEMO sample answer', evidence[0]['text'])
+        self.assertEqual(with_expert_evidence([], [case]), [])
 
     def test_expert_citation_preserves_full_conditions_and_distinguishes_opinion(self):
         evidence = with_expert_evidence([dict(evidence_id='E1', text='Payment.')], [expert()])

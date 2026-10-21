@@ -133,18 +133,18 @@ class SearchOptimizationIntegrationTests(TestCase):
         self.assertEqual(result['context_coverage']['versions_scanned'],result['context_coverage']['versions_total'])
 
     @override_settings(A3_HYBRID_ENABLED=True)
-    def test_negative_corpus_matches_do_not_become_graph_seeds(self):
+    def test_model_ranked_candidates_are_not_rejected_by_fixed_zero_threshold(self):
         with patch('NewIdea.services.knowledge_search_service.plan_retrieval_questions',
                    return_value=dict(status='ready',queries=['payment'])), \
              patch.object(SearchBackend,'dense_knowledge',return_value=[]), \
              patch.object(SearchBackend,'colpali_knowledge',return_value=[]), \
              patch.object(SearchBackend,'rerank',side_effect=lambda q,c:[dict(s,neural_logit=-4) for s in c]), \
-             patch('NewIdea.services.knowledge_answer_service.request_qwen') as model:
+             patch('NewIdea.services.knowledge_answer_service.request_qwen',return_value=dict(answer='Payment is required [E1].')) as model:
             result=search_knowledge(self.user,'payment',generate=True)
-        self.assertEqual(result['generation_status'],'abstained')
-        self.assertEqual(result['citations'],[])
-        self.assertEqual(result['context_coverage']['versions_deeply_searched'],0)
-        model.assert_not_called()
+        self.assertEqual(result['generation_status'],'generated')
+        self.assertTrue(result['citations'])
+        self.assertGreater(result['context_coverage']['versions_deeply_searched'],0)
+        self.assertTrue(model.called)
 
     @override_settings(A3_HYBRID_ENABLED=True)
     def test_reranker_outage_is_not_reported_as_missing_document_evidence(self):
@@ -392,6 +392,24 @@ class ParallelQuestionTests(SimpleTestCase):
 
 
 class PromptDeduplicationTests(SimpleTestCase):
+    def test_sharing_sees_repeated_values_inside_distinct_table_rows(self):
+        import json
+        from NewIdea.services.knowledge_answer_service import _share_graph_values
+        condition='Only after approval and within the specified operating temperature.'
+        metadata=dict(condition=condition,polarity='negated',review_status='unreviewed')
+        original=dict(rows=[[i,condition] for i in range(50)],
+                      metadata=[dict(metadata) for _ in range(20)])
+        packed=_share_graph_values(original)
+        def expand(value):
+            if isinstance(value,dict) and set(value)=={'shared'}:
+                return expand(packed['shared_values'][value['shared']])
+            if isinstance(value,dict):return {k:expand(v) for k,v in value.items()}
+            if isinstance(value,list):return [expand(v) for v in value]
+            return value
+        restored=expand({k:v for k,v in packed.items() if k not in {'shared_values','encoding'}})
+        self.assertEqual(restored,original)
+        self.assertLess(len(json.dumps(packed)),len(json.dumps(original)))
+
     def test_shared_graph_values_are_lossless_and_keep_conditions(self):
         import json
         from copy import deepcopy
@@ -453,6 +471,27 @@ class PromptDeduplicationTests(SimpleTestCase):
 
 
 class RetrievalGroupingIntegrityTests(SimpleTestCase):
+    def test_intent_comes_from_the_same_model_plan_without_an_extra_call(self):
+        import json
+        from ai_extract.services.contract_pipeline_service import _request_openai_compatible
+        from NewIdea.services.knowledge_answer_service import needs_source_images
+        data=dict(queries=['Describe the arrangement.'],groups=[[0]],
+                  intent=dict(scope='focused',needs_images=True))
+        with patch('ai_extract.services.contract_pipeline_service._chat',return_value=json.dumps(data)) as model:
+            result=_request_openai_compatible('http://model','retrieval_plan',dict(query='この配置を説明してください'))
+        self.assertEqual(result['intent'],data['intent'])
+        self.assertTrue(needs_source_images(result,[dict(text='Caption',image_path='figure.png')]))
+        self.assertFalse(needs_source_images(result,[dict(text='No image')]))
+        self.assertEqual(model.call_count,1)
+
+    def test_invalid_model_intent_is_not_used_as_a_keyword_fallback(self):
+        import json
+        from ai_extract.services.contract_pipeline_service import _request_openai_compatible,QwenGatewayError
+        data=dict(queries=['Question'],groups=[[0]],intent=dict(scope='focused',needs_images='yes'))
+        with patch('ai_extract.services.contract_pipeline_service._chat',return_value=json.dumps(data)):
+            with self.assertRaises(QwenGatewayError):
+                _request_openai_compatible('http://model','retrieval_plan',dict(query='Question'))
+
     def test_atomic_scopes_survive_even_when_queries_share_a_retrieval(self):
         import json
         from ai_extract.services.contract_pipeline_service import _request_openai_compatible

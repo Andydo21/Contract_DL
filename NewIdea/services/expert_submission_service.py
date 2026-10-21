@@ -78,6 +78,8 @@ def validate_semantics(result, sources, prefix):
         raise ValueError('Invalid semantic extraction schema')
     source_map = {s['id']:s for s in sources}
     units, mapping, identities = [], {'question':'question'}, set()
+    if any(s['id'].startswith('expert-answer:') for s in sources):
+        mapping['answer']='answer'
     for row in rows:
         if (not isinstance(row, dict) or not isinstance(row.get('id'), str) or not row['id']
             or row['id'] in mapping or row.get('kind') not in KINDS
@@ -160,12 +162,12 @@ def process(receipt):
                 qwen_outputs.extend(dict(item, stage='semantic_extraction', batch=index+1, attempt=attempt+1)
                                     for item in result.get('qwen_outputs', []))
                 try:
-                    # Qwen splits text; the application owns graph predicates.
-                    extracted, _ = validate_semantics(dict(units=result.get('units'), relations=[]), batch, str(index))
+                    extracted, proposed = validate_semantics(result, batch, str(index))
                     break
                 except ValueError:
                     if attempt:raise
             units.extend(extracted)
+            relations.extend(proposed)
         except (RuntimeError, ValueError, TypeError, KeyError) as error:
             qwen_outputs.extend(dict(item, stage='failed', batch=index+1)
                                 for item in getattr(error, 'qwen_outputs', []))
@@ -176,7 +178,8 @@ def process(receipt):
     for unit in units:
         from_answer = unit['source_id'].startswith('expert-answer:')
         relations.append(dict(from_id='answer' if from_answer else 'question', to_id=unit['id'],
-                              kind='HAS_UNIT' if from_answer else 'ASKS_ABOUT'))
+                              kind='HAS_UNIT'))
+    relations=list({(r['from_id'],r['to_id'],r['kind']):r for r in relations}.values())
     receipt.result['semantic_analysis'] = dict(units=units, relations=relations, review_status='draft')
     receipt.result['qwen_outputs'] = qwen_outputs
     knowledge_repository.save_search(receipt, 'result')

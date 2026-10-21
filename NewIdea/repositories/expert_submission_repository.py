@@ -78,11 +78,13 @@ def visible_text_records(user):
         if not user.company_id:
             return []
         jobs = jobs.filter(result__request__company_id=user.company_id)
-    records = [record for receipt in jobs for record in submission_records(receipt)]
+    records = [record for receipt in jobs for record in submission_records(receipt) if not record.get('is_demo')]
     for case in approved_visible_cases(user):
         if not evidence_current(case):
             continue
         details = serialize_case(case)
+        if details['is_demo']:
+            continue
         evidence = with_expert_evidence([], [details])[0]
         evidence.pop('evidence_id', None)
         records.append(text_record(dict(evidence, knowledge_key=evidence['chunk_id'],

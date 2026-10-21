@@ -2,7 +2,7 @@
 from ai_extract.services.document_structure_service import structure_for_version
 import time
 from shared.retrieval import source_excerpt
-from ai_extract.services.contract_pipeline_service import retrieve_hybrid, retrieval_gate, review_contract, GENERAL, STOP
+from ai_extract.services.contract_pipeline_service import retrieve_hybrid, review_contract
 from NewIdea.repositories import contract_repository, knowledge_repository
 from .search_job_service import reserve_search, finish_search, update_progress
 from .errors import KnowledgeError
@@ -48,23 +48,17 @@ def search_contract(user, contract_id, data, existing_receipt=None):
         for index, citation in enumerate(citations, 1):
             citation['text_is_excerpt'] = False
             citation['evidence_id'] = f'E{index}'
-        quality = retrieval_gate(query,citations,coverage)
-        if not quality['accepted'] and not GENERAL.search(query):
-            from shared.retrieval import tokens
-            rewritten = ' '.join(t for t in tokens(query) if t not in STOP)
-            if rewritten and rewritten != query.casefold():
-                corrected, corrected_coverage = retrieve_hybrid(rewritten,tree,version)
-                corrected_quality = retrieval_gate(query,corrected,corrected_coverage)
-                if corrected_quality['accepted']:
-                    citations,coverage,quality = corrected,corrected_coverage,corrected_quality
-                    for index,citation in enumerate(citations,1):
-                        citation['evidence_id']=f'E{index}'
-                coverage['corrective_attempted']=True
-        similar = find_expert_cases(query, contract_repository.approved_related_cases(user, contract))
+        whole_document = data.get('mode') == 'whole_contract' or planning.get('intent',{}).get('scope') == 'whole_document'
+        case_search = dict(state='ready')
+        try:
+            similar = find_expert_cases(query, contract_repository.approved_related_cases(user, contract))
+        except Exception as error:
+            similar = []
+            case_search = dict(state='unavailable', error_type=type(error).__name__)
         matched_nodes = matched_structure_nodes(tree, citations, version, contract_repository.completed_extraction_run(version))
-        if data.get('mode') != 'whole_contract' and not GENERAL.search(query):
-            citations = with_expert_evidence(citations, [case for case in similar if not case.get('is_demo')])
-            quality = retrieval_gate(query, citations, coverage)
+        if not whole_document:
+            citations = with_expert_evidence(citations, similar)
+        quality = dict(accepted=bool(citations), scope='source_availability_not_semantic_verification')
         retrieval_ms = round((time.perf_counter() - started) * 1000, 2)
         answer = source_excerpt(citations) if citations else 'Chưa tìm thấy bằng chứng trong phiên bản hợp đồng này. Hãy chạy trích xuất tài liệu hoặc bổ sung câu hỏi.'
         generation_status = 'source_excerpt' if citations else 'abstained'
@@ -74,11 +68,11 @@ def search_contract(user, contract_id, data, existing_receipt=None):
         citation_check = {'valid': False, 'scope': 'identifier_validation_only'}
         generation_diagnostics = {'state': 'insufficient_evidence' if data.get('generate') is True else 'not_requested'}
         # Generation is opt-in so missing gateway config cannot trigger a legacy external call.
-        if tree['leaves'] and data.get('generate') is True and (quality['accepted'] or data.get('mode') == 'whole_contract' or GENERAL.search(query)):
+        if tree['leaves'] and data.get('generate') is True and (citations or whole_document):
             generation_diagnostics = {'state': 'requested'}
             from ai_extract.services.contract_pipeline_service import request_qwen, QwenGatewayError
             try:
-                if data.get('mode') == 'whole_contract' or GENERAL.search(query):
+                if whole_document:
                     update_progress(receipt, 'reviewing_document')
                     reviewed, generation_status, citation_check, citations, coverage = review_contract(query, tree, request_qwen)
                     answer = reviewed or source_excerpt(citations)
@@ -90,7 +84,7 @@ def search_contract(user, contract_id, data, existing_receipt=None):
                         'outline': [{'kind': n['kind'], 'title': n['title'], 'parent_id': n['parent_id']}
                                     for n in tree['nodes'][:40]], 'coverage': coverage,
                         'expert_policy': EXPERT_INSTRUCTION if any(c.get('evidence_kind')=='expert_opinion' for c in citations) else '',
-                        'use_images': needs_source_images(query,citations)}
+                        'use_images': needs_source_images(planning,citations)}
                     generated = generate_checked_answer(payload, request_model=request_qwen,
                         progress=lambda stage: update_progress(receipt, stage))
                     answer = generated['answer']
@@ -113,7 +107,7 @@ def search_contract(user, contract_id, data, existing_receipt=None):
             'generation_status': generation_status, 'citation_check': citation_check,
             'generation_diagnostics': generation_diagnostics,
             'qwen_outputs': qwen_outputs,
-            'matched_nodes': matched_nodes, 'similar_cases': similar[:3], 'contract_id': contract.pk, 'version_id': version.pk,
+            'matched_nodes': matched_nodes, 'similar_cases': similar[:3], 'expert_case_search': case_search, 'contract_id': contract.pk, 'version_id': version.pk,
             'retrieval_latency_ms': retrieval_ms, 'latency_ms': round((time.perf_counter() - started) * 1000, 2),
             'score_kind': 'retrieval_ranking_not_accuracy', 'search_id': receipt.pk,
             'expert_handoff_recommended': not quality['accepted'],

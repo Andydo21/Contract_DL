@@ -88,7 +88,7 @@ class ExpertSubmissionFlow(TestCase):
         self.assertEqual(log.result['response']['units'][0]['quote'],'Pay within 30 days.')
         self.assertTrue(log.result['response']['requires_expert_review'])
 
-    def test_answer_is_split_and_links_are_created_by_code_not_model(self):
+    def test_model_semantic_links_and_source_membership_are_both_preserved(self):
         response=self.submit(answer='Replace the sensor on AX-203.')
         identity=response.json()['search_id']
         def model(task,payload):
@@ -97,7 +97,7 @@ class ExpertSubmissionFlow(TestCase):
             return dict(units=[dict(id='u1',source_id=source['id'],quote=source['text'],title='Sensor repair',
                 kind='recommendation',concepts=[dict(kind='machine',value='AX-203',quote='AX-203'),
                 dict(kind='action',value='Replace the sensor',quote='Replace the sensor')])],
-                relations=[dict(from_id='invented',to_id='foreign',kind='CONTRADICTS')])
+                relations=[dict(from_id='u1',to_id='question',kind='ANSWERS')])
         with patch('ai_extract.services.contract_pipeline_service.request_qwen',side_effect=model), \
              patch('NewIdea.repositories.expert_submission_repository.sync_semantic_graph',return_value=dict(status='ready')), \
              patch('NewIdea.repositories.expert_submission_repository.related_units',return_value=[]):
@@ -106,6 +106,7 @@ class ExpertSubmissionFlow(TestCase):
         self.assertIn(dict(from_id='answer',to_id='question',kind='ANSWERS'),result['relations'])
         self.assertIn(dict(from_id='answer',to_id=result['units'][0]['id'],kind='HAS_UNIT'),result['relations'])
         self.assertEqual(result['units'][0]['concepts'][0]['relation'],'ABOUT_MACHINE')
+        self.assertIn(dict(from_id=result['units'][0]['id'],to_id='question',kind='ANSWERS'),result['relations'])
         self.assertNotIn('CONTRADICTS',[r['kind'] for r in result['relations']])
 
     def test_foreign_document_anonymous_and_company_change_are_blocked(self):

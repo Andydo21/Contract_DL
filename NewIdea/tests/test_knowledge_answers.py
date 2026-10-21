@@ -17,11 +17,10 @@ class KnowledgeAnswerChecks(SimpleTestCase):
             retrieval_hints=[dict(part=1,rank=2)],retrieval_ranks=[dict(rank=2)])
         operation=dict(chunk_id='operation',text='Operation needs only the controller.',
             retrieval_hints=[dict(part=2,rank=3)],retrieval_ranks=[dict(rank=3)])
-        selected=select_retrieval_seeds(eligible_answer_sources('Setup and operation?',
-            [demo,setup,operation]),limit=2)
+        selected=select_retrieval_seeds(eligible_answer_sources([demo,setup,operation]),limit=2)
         self.assertEqual({s['chunk_id'] for s in selected},{'setup','operation'})
-        self.assertEqual(eligible_answer_sources('Review demo advice',[demo]),[demo])
-        self.assertEqual(eligible_answer_sources('Question',[setup,operation]),[setup,operation])
+        self.assertEqual(eligible_answer_sources([demo]),[])
+        self.assertEqual(eligible_answer_sources([setup,operation]),[setup,operation])
 
     def test_verification_does_not_expand_unrelated_sources_through_shared_parent(self):
         from copy import deepcopy
@@ -227,7 +226,7 @@ class KnowledgeAnswerChecks(SimpleTestCase):
             self.assertTrue(all(ids==['E1'] for ids in seen))
             seen.clear()
             answer_from_sources('Guidance advice',sources,{})
-            self.assertTrue(all(ids==['E1','E2'] for ids in seen))
+            self.assertTrue(all(ids==['E1'] for ids in seen))
 
     def test_generation_and_verification_receive_source_bound_graph(self):
         source=dict(evidence_id='E1',version_id=1,chunk_id='leaf1',text='Guidance runs on a PC.')
@@ -258,13 +257,15 @@ class KnowledgeAnswerChecks(SimpleTestCase):
         self.assertLess(len(json.dumps(compact)), 500)
         self.assertIn('version_details', coverage)
 
-    def test_irrelevant_candidates_are_not_presented_as_an_answer(self):
+    def test_source_sufficiency_is_decided_by_model_not_keyword_overlap(self):
         source = dict(evidence_id='E1', text='Replace the E17 sensor.', source_location='Page 1')
-        with patch('NewIdea.services.knowledge_answer_service.request_qwen') as model:
+        with patch('NewIdea.services.knowledge_answer_service.request_qwen', return_value=dict(
+                answer='The supplied source does not describe Guidance or Runtime.', insufficient_evidence=True)) as model:
             result = answer_from_sources('EVP2 Guidance Runtime PC', [source], {})
         self.assertEqual(result['generation_status'], 'abstained')
         self.assertNotIn('Replace', result['answer'])
-        model.assert_not_called()
+        self.assertTrue(model.called)
+        self.assertTrue(all(c.args[0]=='contract_qa' for c in model.call_args_list))
 
     def test_unsupported_claim_remains_visible_with_advisory_warning(self):
         source = dict(evidence_id='E1', text='The contract price is 120 VND.', source_location='Page 1')

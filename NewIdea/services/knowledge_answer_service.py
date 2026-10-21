@@ -1,5 +1,5 @@
 """Generate an A2 answer from authorized retrieved knowledge, with evidence checks."""
-from ai_extract.services.contract_pipeline_service import request_qwen, retrieval_gate, validate_answer, render_cited_claims, QwenGatewayError, QwenContextLimitError, QwenIncompleteAnswerError
+from ai_extract.services.contract_pipeline_service import request_qwen, validate_answer, render_cited_claims, QwenGatewayError, QwenContextLimitError, QwenIncompleteAnswerError
 from shared.retrieval import source_excerpt
 from .search_evidence_service import EXPERT_INSTRUCTION
 import json
@@ -296,21 +296,18 @@ def generate_checked_answer(payload, request_model=None, progress=None):
     return result
 
 
-def eligible_answer_sources(query, citations):
-    """Apply the same provenance policy before seed admission and generation."""
-    asks_expert = bool(re.search(r'chuyên gia|kinh nghiệm|khuyến nghị|expert|advice|demo',query,re.I))
-    # Synthetic sample advice is available in the UI but does not add factual
-    # evidence to ordinary document questions. Genuine approved advice stays.
-    return [c for c in citations if not c.get('is_demo') or asks_expert]
+def eligible_answer_sources(citations):
+    """Synthetic demo records never become production answer evidence."""
+    return [c for c in citations if not c.get('is_demo')]
 
 
 def answer_from_sources(query, citations, coverage, progress=None):
-    eligible = eligible_answer_sources(query,citations)
+    eligible = eligible_answer_sources(citations)
     # Retrieval already selected relevant, source-bound chunks and expansions.
     # Do not cut away their conditions again for generation.
     evidence = [dict(c, text=c.get('text', '')) for c in distinct_document_passages(eligible)]
     prompt_coverage = generation_coverage(coverage)
-    quality = retrieval_gate(query, evidence, dict(coverage, **prompt_coverage))
+    quality = dict(accepted=bool(evidence), scope='source_availability_not_semantic_verification')
     result = dict(answer=source_excerpt(evidence) if evidence else 'Chưa tìm thấy bằng chứng trong kho tài liệu đã trích xuất.',
                   generation_status='source_excerpt' if evidence else 'abstained',
                   generation_diagnostics={'state': 'insufficient_evidence'}, quality_gate=quality,
@@ -324,27 +321,23 @@ def answer_from_sources(query, citations, coverage, progress=None):
     payload = dict(query=query, evidence=evidence, coverage=prompt_coverage,
                    answer_format='cited_claims',
                    answer_detail='explanatory',
-                   use_images=needs_source_images(query,evidence),
+                   use_images=needs_source_images(coverage.get('query_planning',{}),evidence),
                    instruction='Answer each requested part with the relevant source-supported explanation and conditions. Keep documents, versions and subjects distinct; describe disagreements rather than merging them into one assertion. Use the graph internally to interpret the sources; keep retrieval details out of the answer.')
     if any(c.get('evidence_kind') in {'expert_opinion','expert_question','expert_unit'} for c in evidence):
         payload['expert_policy']=EXPERT_INSTRUCTION
     graph_contexts = [coverage.get('graph_context', {})] + coverage.get('graph_contexts', []) + [item.get('coverage', {}).get('graph_context', {}) for item in coverage.get('version_details', [])]
     result['graph_context'] = payload['graph_context'] = bind_graph_context(graph_contexts, evidence, query=query)
-    if not quality['accepted']:
-        result.update(answer='Chưa tìm thấy bằng chứng đủ liên quan để trả lời câu hỏi trong kho tài liệu được phép truy cập. Bạn có thể xem các ứng viên ở phần nguồn bên dưới.',
-                      generation_status='abstained')
-        return result
     result.update(generate_checked_answer(payload, progress=progress))
     return result
 
 
-def needs_source_images(query, evidence):
-    """Use page images for visual questions or primary hits without readable text."""
-    visual = re.search(r'\b(?:ảnh|hình|sơ đồ|bản vẽ|biểu đồ|diagram|drawing|figure|image|chart|cad|bbox)\b', query, re.I)
+def needs_source_images(planning, evidence):
+    """Use the model's semantic plan; unreadable primary image hits need pixels."""
+    visual = planning.get('intent',{}).get('needs_images') is True
     matches = [source for source in evidence if source.get('evidence_kind')!='expert_opinion'
                and source.get('expansion_reason','query_match')=='query_match']
-    return bool(visual or matches and not any(source.get('text','').strip() for source in matches)
-                and any(source.get('image_path') for source in matches))
+    return bool(any(source.get('image_path') for source in evidence) and
+                (visual or matches and not any(source.get('text','').strip() for source in matches)))
 
 def bind_graph_context(contexts, evidence, max_chars=None, query=''):
     """Send only graph endpoints bound to evidence actually delivered to Qwen."""
@@ -586,7 +579,7 @@ def _share_graph_values(graph):
     counts = Counter()
     values = {}
     def signature(value):
-        if isinstance(value,str) or isinstance(value,list) and value and all(isinstance(v,(str,int,float,bool,type(None))) for v in value):
+        if isinstance(value,(str,dict)) or isinstance(value,list) and value and all(isinstance(v,(str,int,float,bool,type(None))) for v in value):
             encoded=json.dumps(value,ensure_ascii=False,separators=(',',':'))
             return encoded if len(encoded)>=32 else None
     def visit(value):
@@ -594,7 +587,7 @@ def _share_graph_values(graph):
         if key:
             counts[key]+=1
             values[key]=value
-        elif isinstance(value,dict):
+        if isinstance(value,dict):
             for item in value.values():visit(item)
         elif isinstance(value,list):
             for item in value:visit(item)
@@ -703,6 +696,7 @@ def model_graph_context(graph, sources=None):
             'cells are [column_number,text,rowspan?,colspan?], spans default to 1. '
             'Keep the native row/column numbers and merged cells. Row/cell defaults and HAS_ROW/HAS_CELL '
             'metadata apply throughout that grid. All other graph links remain explicit.')
-    return _share_graph_values(result) if sources is not None else result
+    result=_share_graph_values(result) if sources is not None else result
+    return result
 
 

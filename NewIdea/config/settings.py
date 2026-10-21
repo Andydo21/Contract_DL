@@ -83,7 +83,6 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -91,6 +90,5 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Contract searches use the main web's session, tenant scope and A3 indexes.
-NEWIDEA_MODE = os.getenv('NEWIDEA_MODE', 'contracts')
 CONTRACT_WEB_URL = os.getenv('CONTRACT_WEB_URL', 'http://localhost:8000').rstrip('/')
 

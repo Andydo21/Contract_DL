@@ -197,8 +197,6 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
                 if not rerank_failed:
                     ranked=reranked[search_index]
                     state='ready'
-                    if any('neural_logit' in c for c in ranked):
-                        ranked=[c for c in ranked if c.get('neural_logit',float('-inf'))>=0]
                 else:
                     state='unavailable'
                     if generate:
@@ -224,9 +222,8 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
         # Only admitted seeds may expand graph context; discarded documents do
         # not consume graph reads or prompt space.
         seed_sources=list(merged.values())
-        if generate:
-            from .knowledge_answer_service import eligible_answer_sources
-            seed_sources=eligible_answer_sources(query,seed_sources)
+        from .knowledge_answer_service import eligible_answer_sources
+        seed_sources=eligible_answer_sources(seed_sources)
         eligible=select_answer_sources(seed_sources,limit=len(seed_sources))
         seed_limit=getattr(settings,'A2_ANSWER_SOURCE_LIMIT',24)
         if generate:

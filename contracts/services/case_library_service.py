@@ -6,9 +6,9 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 from contracts.models import ContractVersion, ContractKnowledgeCase
-from NewIdea.services.case_rules import CASE_FIELDS, overlap, approval_gaps, can_review, serialize_case
+from NewIdea.services.case_rules import CASE_FIELDS, approval_gaps, can_review, serialize_case
 from NewIdea.repositories.contract_repository import visible_contracts, case_queryset
-from NewIdea.services.evidence_service import bind_evidence, evidence_current
+from NewIdea.services.evidence_service import bind_evidence
 from contracts.services.results import ServiceResult
 from contracts.repositories.knowledge_data_repository import get_record
 
@@ -35,14 +35,14 @@ def manage_cases(user, method, data, query_params):
         contract_type = query_params.get('contract_type', '').strip()
         if contract_type:
             cases = cases.filter(version__contract__contract_type=contract_type)
-        results = []
-        for case in cases:
-            if query and (not evidence_current(case)):
-                continue
-            score = overlap(query, f'{case.title} {case.clause_type} {case.issue}') if query else 0
-            if not query or score:
-                results.append(dict(serialize_case(case), match_score=score, requires_applicability_review=True))
-        results.sort(key=lambda c: c['match_score'], reverse=True)
+        if query:
+            from NewIdea.services.search_evidence_service import find_expert_cases
+            try:
+                results = find_expert_cases(query, cases, limit=100)
+            except Exception:
+                return ServiceResult({'success': False, 'error': 'Dịch vụ xếp hạng AI chưa khả dụng; hãy thử lại sau.'}, status=503)
+        else:
+            results = [dict(serialize_case(case), requires_applicability_review=True) for case in cases[:100]]
         return ServiceResult({'success': True, 'cases': results[:100]})
     try:
         data = data

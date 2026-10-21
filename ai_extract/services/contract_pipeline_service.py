@@ -474,16 +474,17 @@ def plan_retrieval_questions(query):
     try:
         from shared.retrieval import cached_inference, cache_inference
         identity = [_vllm_base_url(), getattr(settings, 'QWEN_MODEL_ID', DEFAULT_MODEL), query,
-                    getattr(settings, 'A2_INFERENCE_CACHE_VERSION', '1')]
+                    getattr(settings, 'A2_INFERENCE_CACHE_VERSION', '1'), 'semantic-routing-v1']
         enabled = getattr(settings, 'A2_INFERENCE_CACHE_ENABLED', False)
         cached = cached_inference('retrieval-plan', identity) if enabled else None
         if cached is not None:
-            return dict(status='ready', queries=cached, cache_hit=True, qwen_outputs=[])
+            return dict(cached, status='ready', cache_hit=True, qwen_outputs=[])
         plan=request_qwen('retrieval_plan',dict(query=query))
         if enabled:
-            cache_inference('retrieval-plan', identity, plan['queries'])
+            cache_inference('retrieval-plan', identity, {k:v for k,v in plan.items() if k != 'qwen_outputs'})
         return dict(status='ready',queries=plan['queries'],answer_parts=plan.get('answer_parts',[]),
-            seed_group_count=plan.get('seed_group_count',len(plan['queries'])),qwen_outputs=plan.get('qwen_outputs',[]))
+            seed_group_count=plan.get('seed_group_count',len(plan['queries'])),
+            intent=plan.get('intent',{}),qwen_outputs=plan.get('qwen_outputs',[]))
     except (QwenGatewayError,KeyError,TypeError):
         return dict(status='unavailable',queries=[query])
 
@@ -706,7 +707,10 @@ def _request_openai_compatible(base_url: str, task: str, payload: dict) -> dict:
                     phase=dict(type='string',description='Explicit temporal/procedural stage only; empty if not specified. Not a product, property or question type.')),
                 required=['question','subject','attribute','phase'])),
             groups=dict(type='array',minItems=1,maxItems=8,items=dict(type='array',minItems=1,maxItems=8,
-                items=dict(type='integer',minimum=0,maximum=7)))),required=['queries','groups'])
+                items=dict(type='integer',minimum=0,maximum=7))),
+            intent=dict(type='object',additionalProperties=False,properties=dict(
+                scope=dict(type='string',enum=['focused','whole_document']),
+                needs_images=dict(type='boolean')),required=['scope','needs_images'])),required=['queries','groups','intent'])
         result=_parse_json_object(_chat(base_url,[dict(role='system',content=(
             'Plan retrieval without answering. FIRST list every DISTINCT explicitly requested fact, explanation and condition '
             'as standalone questions in queries. Preserve subjects, identifiers, comparisons, phases and language. '
@@ -721,7 +725,11 @@ def _request_openai_compatible(base_url: str, task: str, payload: dict) -> dict:
             'Keep different subjects/properties/phases as distinct questions. Phase means an explicit temporal '
             'or procedural stage, not a product name, property or question type. Use an empty string when unspecified. '
             'Do not create every subject/phase combination unless the user asks it. Never infer facts or conditions. '
-            'Return queries and groups.')),
+            'Also return intent: scope is whole_document ONLY when the request asks to summarize or review '
+            'an entire document; otherwise focused. needs_images is true when answering requires visual '
+            'appearance, geometry, layout or reading source figures; false for facts sufficiently represented '
+            'by extracted text. Decide from the meaning of the question in its language, never a keyword list. '
+            'Return queries, groups and intent.')),
             dict(role='user',content=payload['query'])],max_tokens=1200,json_schema=schema))
         raw_queries=result.get('queries')
         typed=isinstance(raw_queries,list) and bool(raw_queries) and all(isinstance(q,dict) for q in raw_queries)
@@ -757,16 +765,24 @@ def _request_openai_compatible(base_url: str, task: str, payload: dict) -> dict:
         parts=[dict(question=question,query_scope=scopes.get(i,{}),retrieval_query=combined[next(
             group_index for group_index,group in enumerate(groups) if i in group)]) for i,question in enumerate(queries)]
         # The original question remains a corpus search too; no user text is replaced by a summary.
-        return dict(queries=list(dict.fromkeys(combined)),answer_parts=parts,seed_group_count=seed_group_count)
+        intent=result.get('intent',{})
+        if intent and (not isinstance(intent,dict) or intent.get('scope') not in {'focused','whole_document'}
+                       or type(intent.get('needs_images')) is not bool):
+            raise QwenGatewayError('Invalid retrieval intent')
+        return dict(queries=list(dict.fromkeys(combined)),answer_parts=parts,seed_group_count=seed_group_count,intent=intent)
     if task == 'expert_semantic_extract':
         import json
         instruction = ('Extract semantic units from expert questions, notes and supplied A3 sources. '
             'Return JSON {"units":[{"id":"u1","source_id":"supplied ID","quote":"exact contiguous source quote",'
             '"title":"short title","kind":"clause|issue|condition|recommendation|fact",'
             '"concepts":[{"kind":"machine|action|solution",'
-            '"quote":"exact phrase inside the unit quote"}]}]}. '
+            '"quote":"exact phrase inside the unit quote"}]}],'
+            '"relations":[{"from_id":"u1","to_id":"u2","kind":"QUALIFIES"}]}. '
             'Split supplied expert answers as well as notes and documents into semantic units. '
-            'Do not choose graph relations; the application creates those from explicit source bindings. '
+            'Propose semantic relations only when supported by the supplied units: ASKS_ABOUT, SUPPORTED_BY, '
+            'QUALIFIES, CONTRADICTS or ANSWERS. Refer only to returned unit IDs or question; answer may be used '
+            'only when an expert-answer source is supplied. Do not assume every note or attachment answers '
+            'the question. Use relations:[] when the source does not establish a relation. '
             'Use only supplied source IDs and literal quotes. '
             'Extract machine identifiers, actions and solutions explicitly mentioned in each unit. '
             'machine means explicitly identified equipment by its source name or code; '
@@ -804,7 +820,11 @@ def _request_openai_compatible(base_url: str, task: str, payload: dict) -> dict:
                 concepts=dict(type='array',items=concept_schema,maxItems=8)),
             required=['id','source_id','quote','title','kind','concepts'])
         schema=dict(type='object',additionalProperties=False,
-            properties=dict(units=dict(type='array',items=unit_schema,maxItems=8)),required=['units'])
+            properties=dict(units=dict(type='array',items=unit_schema,maxItems=8),
+                relations=dict(type='array',maxItems=40,items=dict(type='object',additionalProperties=False,
+                    properties=dict(from_id=dict(type='string'),to_id=dict(type='string'),
+                        kind=dict(type='string',enum=['ASKS_ABOUT','SUPPORTED_BY','QUALIFIES','CONTRADICTS','ANSWERS'])),
+                    required=['from_id','to_id','kind']))),required=['units','relations'])
         return _parse_json_object(_chat(base_url, messages, max_tokens=1600, json_schema=schema))
     if task == 'expert_case_draft':
         messages = [{'role': 'system', 'content': 'Chuẩn hóa ghi chú chuyên gia thành JSON theo các field: ' + ', '.join(payload['fields']) + '. Chỉ dùng điều được ghi rõ trong ghi chú. Không tự suy diễn kết quả xác minh hoặc điều kiện áp dụng. Field thiếu để chuỗi rỗng. Đây là đề xuất nháp, chưa phê duyệt.'}, {'role': 'user', 'content': payload['note']}]

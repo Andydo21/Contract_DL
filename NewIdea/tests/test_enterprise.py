@@ -72,7 +72,9 @@ class EnterpriseKnowledgeTests(TestCase):
             self.assertEqual(self.search(query='x'*2001).status_code, 400)
         retrieval.assert_not_called()
 
-    def test_expert_workflow_requires_independent_approval(self):
+    @patch('ai_extract.services.contract_pipeline_service.HybridBackend.rerank_many',
+           side_effect=lambda groups: [[dict(c, neural_logit=2.0) for c in candidates] for _, candidates in groups])
+    def test_expert_workflow_requires_independent_approval(self, reranker):
         receipt = self.search(version_id=self.version.pk).json()['search_id']
         item = self.inquiry(search_id=receipt).json()['inquiry']
         self.assertEqual(self.inquiry(search_id=receipt).json()['inquiry']['id'], item['id'])

@@ -197,9 +197,9 @@ class RelationContextTests(SimpleTestCase):
     def test_images_are_used_for_visual_questions_and_primary_visual_hits(self):
         text_source=dict(text='Guidance runs on a PC.',image_path='page.png',expansion_reason='query_match')
         figure_context=dict(text='',image_path='figure.png',expansion_reason='neo4j_source_relation')
-        self.assertFalse(needs_source_images('Guidance có cần PC không?',[text_source,figure_context]))
-        self.assertTrue(needs_source_images('Ảnh này có thiết bị nào?',[text_source]))
-        self.assertTrue(needs_source_images('Đây là gì?',[dict(figure_context,expansion_reason='query_match')]))
+        self.assertFalse(needs_source_images({},[text_source,figure_context]))
+        self.assertTrue(needs_source_images(dict(intent=dict(needs_images=True)),[text_source]))
+        self.assertTrue(needs_source_images({},[dict(figure_context,expansion_reason='query_match')]))
 
     def test_graph_context_cannot_bind_foreign_or_unsent_evidence(self):
         context=dict(state='ready',version_id=1,nodes=[

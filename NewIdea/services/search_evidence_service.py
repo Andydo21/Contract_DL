@@ -3,22 +3,27 @@ from urllib.parse import urlencode
 import math
 from django.conf import settings
 from ai_extract.services.document_graph_service import graph_scope
-from shared.retrieval import evidence_identity, lexical_search, tokens
+from shared.retrieval import evidence_identity, tokens
 from .case_rules import CASE_FIELDS, serialize_case
 from .evidence_service import evidence_current
 
 
 def find_expert_cases(query, cases, limit=3):
-    """Rank approved cases only while their saved evidence is still current."""
+    """Rank actual, current approved cases with the multilingual neural reranker."""
+    from ai_extract.services.contract_pipeline_service import HybridBackend
     records = [
         dict(case=case, text=' '.join(getattr(case, field) for field in CASE_FIELDS),
              original_name=case.title)
-        for case in cases if evidence_current(case)
+        for case in cases if case.status == 'approved' and not case.title.startswith('[DEMO]')
+        and evidence_current(case)
     ]
+    if not records:
+        return []
+    ranked = HybridBackend().rerank_many([(query, records)])[0]
     return [
-        dict(serialize_case(hit['case']), match_score=hit['lexical_score'],
-             requires_applicability_review=True, score_kind='bm25_not_applicability')
-        for hit in lexical_search(query, records, limit=limit)
+        dict(serialize_case(hit['case']), match_score=hit['neural_logit'],
+             requires_applicability_review=True, score_kind='neural_reranker_not_applicability')
+        for hit in ranked[:limit]
     ]
 
 
@@ -94,8 +99,6 @@ EXPERT_INSTRUCTION = ('Distinguish document facts from approved expert opinions.
     'Expert cases are conditional advice, not facts established by the source document. State their author, '
     'revision and applicability; do not assume they apply to the current document. '
     'Never omit an expert case applicability condition or its verification limits. '
-    'Cases marked DEMO are illustrative sample answers, not real expert testimony '
-    'or validated operating procedures; explicitly identify them as demo advice. '
     'Expert units marked draft are unreviewed user submissions, not approved procedures. '
     'Expert questions describe what someone asked, never evidence that its premise is true. '
     'State the author and review status when citing expert submissions; preserve conditions.')
@@ -105,7 +108,7 @@ def with_expert_evidence(citations, cases):
     evidence = [dict(c, evidence_kind=c.get('evidence_kind', 'document')) for c in citations]
     for case in cases[:3]:
         snapshot = case.get('evidence_snapshot') or {}
-        if case.get('status') != 'approved' or not snapshot.get('sha256') or not snapshot.get('text'):
+        if case.get('is_demo') or case.get('status') != 'approved' or not snapshot.get('sha256') or not snapshot.get('text'):
             continue
         identifier = f'E{len(evidence)+1}'
         # Full conditions remain intact, rather than keyword-windowing advice.
@@ -113,8 +116,6 @@ def with_expert_evidence(citations, cases):
             ('Issue', 'issue'), ('Reasoning', 'reasoning'), ('Resolution', 'resolution'),
             ('Verification', 'verification'), ('Applicability', 'applicability')))
         text += '\nSupporting source: '+snapshot['text']
-        if case.get('is_demo'):
-            text = 'Provenance: DEMO sample answer, checked against document text only.\n' + text
         evidence.append(dict(evidence_id=identifier, evidence_kind='expert_opinion',
             is_demo=case.get('is_demo', False),
             chunk_id=case['evidence_id'], expert_case_id=case['case_id'], revision=case['revision'],

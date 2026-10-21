@@ -180,10 +180,6 @@ class IndexedCorpus:
                 self.loaded[version_id] = self.snapshots[version_id].tree
             return self.loaded[version_id]
 
-    def records_for(self, version_ids):
-        for identity in dict.fromkeys(version_ids):
-            yield from self.snapshots[identity].records
-
     def _matching(self, terms):
         from ai_extract.models import RetrievalPassage
         if not terms:
