@@ -1,5 +1,4 @@
 """NewIdea search entry points over the web's tenant-scoped A3 pipeline."""
-import json
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from NewIdea.services import contract_search_service
@@ -16,28 +15,31 @@ def workspace(request, contract_id=None):
 @knowledge_api
 def render_workspace(request, contract_id):
     from django.shortcuts import render
-    return render(request, 'contracts/intelligence.html',
-        contract_search_service.workspace_context(request.user, contract_id, request.GET.get('version_id')))
+    from django.urls import reverse
+    context=contract_search_service.workspace_context(request.user,contract_id,request.GET.get('version_id'))
+    selected=context['selected_contract']
+    context.update(newidea_mode=True,contract_workspace_url_name='newidea_contract',
+        search_endpoint=reverse('newidea_search',args=[selected.pk]) if selected else '')
+    return render(request,'contracts/intelligence.html',context)
 
 
 @require_POST
 @knowledge_api
 def search_contract(request, contract_id):
-    data = contract_search_service.search_contract(request.user, contract_id, json_body(request))
-    data['search_engine'] = 'newidea_a3'
-    return JsonResponse(data)
+    return search_response(request.user,contract_id,json_body(request))
+
+
+def search_response(user, contract_id, data):
+    result=contract_search_service.search_contract(user,contract_id,data)
+    return JsonResponse(dict(result,search_engine='newidea_a3'))
 
 
 @require_POST
+@knowledge_api
 def ask(request):
     """Body-based endpoint for NewIdea clients that already send contract_id."""
-    if not request.user.is_authenticated:
-        return JsonResponse({'success':False,'error':'Authentication required.'},status=401)
-    try:
-        data=json.loads(request.body)
-        contract_id=data.get('contract_id') if isinstance(data,dict) else None
-        if type(contract_id) is not int or contract_id < 1:
-            raise ValueError('Chọn hợp đồng trước khi tìm tài liệu A3.')
-    except (ValueError,TypeError) as error:
-        return JsonResponse({'success':False,'error':str(error)},status=400)
-    return search_contract(request,contract_id)
+    data=json_body(request)
+    contract_id=data.get('contract_id')
+    if type(contract_id) is not int or contract_id < 1:
+        raise ValueError('Chọn hợp đồng trước khi tìm tài liệu A3.')
+    return search_response(request.user,contract_id,data)

@@ -114,58 +114,50 @@ def metadata_key(version):
                  version.contract.contract_code, version.contract.title, version.version_number))
 
 
-def refresh_snapshot(version):
+def lock_snapshot(version):
+    from ai_extract.models import RetrievalSnapshot
+    snapshot,_=RetrievalSnapshot.objects.get_or_create(version=version)
+    snapshot=RetrievalSnapshot.objects.select_for_update().get(pk=snapshot.pk)
+    version=ContractVersion.objects.select_related('contract').get(pk=version.pk)
+    return snapshot,version
+
+
+def replace_snapshot(snapshot, version, run, records, tree, scope):
     from collections import Counter
-    from django.db import transaction
-    from ai_extract.models import RetrievalSnapshot, RetrievalPassage
-    from ai_extract.services.document_structure_service import structure_for_version
-    from ai_extract.services.document_graph_service import graph_scope
+    from ai_extract.models import RetrievalPassage
     from shared.retrieval import tokens
-    with transaction.atomic():
-        snapshot, _ = RetrievalSnapshot.objects.get_or_create(version=version)
-        snapshot = RetrievalSnapshot.objects.select_for_update().get(pk=snapshot.pk)
-        # Read fresh objects, never rebuild from a stale prefetch after ingestion.
-        version = ContractVersion.objects.select_related('contract').get(pk=version.pk)
-        run = completed_extraction_run(version)
-        records = source_records(version)
-        tree = structure_for_version(version, records, version.contract.title)
-        rows = []
-        for record in tree['leaves']:
-            if record.get('retrieval_excluded'):
-                continue
-            counts = dict(Counter(tokens(record.get('text', '') + ' ' + record.get('original_name', ''))))
-            rows.append(RetrievalPassage(snapshot=snapshot, record=record,
-                                        token_counts=counts, length=sum(counts.values())))
-        snapshot.passages.all().delete()
-        RetrievalPassage.objects.bulk_create(rows, batch_size=500)
-        snapshot.run = run
-        snapshot.records, snapshot.tree = records, tree
-        snapshot.graph_scope = graph_scope(run, tree) if run and tree.get('graph_index', {}).get('status') == 'ready' else {}
-        snapshot.passage_count, snapshot.token_count = len(rows), sum(r.length for r in rows)
-        snapshot.metadata_key, snapshot.schema, snapshot.dirty = metadata_key(version), 1, False
-        snapshot.save()
-        return snapshot
+    rows=[]
+    for record in tree['leaves']:
+        if record.get('retrieval_excluded'):continue
+        counts=dict(Counter(tokens(record.get('text','')+' '+record.get('original_name',''))))
+        rows.append(RetrievalPassage(snapshot=snapshot,record=record,
+                                    token_counts=counts,length=sum(counts.values())))
+    snapshot.passages.all().delete()
+    RetrievalPassage.objects.bulk_create(rows,batch_size=500)
+    snapshot.run=run
+    snapshot.records,snapshot.tree=records,tree
+    snapshot.graph_scope=scope
+    snapshot.passage_count,snapshot.token_count=len(rows),sum(r.length for r in rows)
+    snapshot.metadata_key,snapshot.schema,snapshot.dirty=metadata_key(version),1,False
+    snapshot.save()
+    return snapshot
+
+
+def retrieval_snapshots(versions):
+    from ai_extract.models import RetrievalSnapshot
+    return {s.version_id:s for s in RetrievalSnapshot.objects.filter(
+        version_id__in=[v.pk for v in versions]).defer('records','tree')}
 
 
 class IndexedCorpus:
     """Search authorized postings; hydrate full trees only for admitted documents."""
-    def __init__(self, versions, runs, knowledge):
+    def __init__(self, snapshots, knowledge, rebuilt=0):
         from collections import Counter
-        from ai_extract.models import RetrievalSnapshot
         from shared.retrieval import tokens
         from threading import Lock
         self.load_lock = Lock()
-        self.loaded, self.rebuilt = {}, 0
-        self.snapshots = {s.version_id: s for s in RetrievalSnapshot.objects.filter(
-            version_id__in=[v.pk for v in versions]).defer('records', 'tree')}
-        for version in versions:
-            snapshot = self.snapshots.get(version.pk)
-            if (snapshot is None or snapshot.dirty or snapshot.schema != 1
-                or snapshot.run_id != getattr(runs.get(version.pk), 'pk', None)
-                or snapshot.metadata_key != metadata_key(version)):
-                snapshot = refresh_snapshot(version)
-                self.snapshots[version.pk] = snapshot
-                self.rebuilt += 1
+        self.loaded,self.rebuilt={},rebuilt
+        self.snapshots=snapshots
         self.knowledge = []
         for record in knowledge:
             if not record.get('retrieval_excluded'):
@@ -189,19 +181,9 @@ class IndexedCorpus:
                 r for r in self.knowledge if terms.intersection(r[1])]
 
     def keyword_search(self, query, limit=60):
-        import math
-        from collections import Counter
-        from shared.retrieval import tokens
-        terms = set(tokens(query))
-        rows = self._matching(terms)
-        frequencies = Counter(t for _, counts, _ in rows for t in terms if t in counts)
-        ranked = []
-        for record, counts, length in rows:
-            score = sum(math.log(1 + (self.count-frequencies[t]+.5)/(frequencies[t]+.5))
-                * counts[t]*2.5/(counts[t]+1.5*(.25+.75*length/self.average)) for t in terms if counts.get(t))
-            if score > 0:
-                ranked.append(dict(record, lexical_score=round(score, 6), score=score))
-        return sorted(ranked, key=lambda r:r['lexical_score'], reverse=True)[:limit]
+        from shared.retrieval import tokens, rank_indexed_records
+        terms=set(tokens(query))
+        return rank_indexed_records(terms,self._matching(terms),self.count,self.average,limit)
 
     def identifier_documents(self, requested):
         return {r['document_id'] for r, counts, _ in self._matching(set(requested))

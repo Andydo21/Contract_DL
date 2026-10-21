@@ -425,7 +425,7 @@ class PageExtractionSession:
             details.update(retire_superseded_artifacts(run))
         if run.status == 'COMPLETED':
             with self.progress.stage('retrieval_index'):
-                from NewIdea.repositories.contract_repository import refresh_snapshot
+                from NewIdea.services.knowledge_search_service import refresh_snapshot
                 refresh_snapshot(run.version)
         indexes_ready = graph_ready and run.dense_index_status == 'COMPLETED' and run.colpali_index_status in {'COMPLETED', 'SKIPPED'}
         self.progress.emit('pipeline', 'partial' if self.failed_pages else 'completed_with_source_warnings' if visual_missing or body_missing or entity_missing or document_missing or review_missing else 'completed' if indexes_ready else 'completed_with_index_errors',

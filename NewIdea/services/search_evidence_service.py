@@ -1,6 +1,9 @@
 """Build source-bound A2 expert citations and discover indexed structure nodes."""
 from urllib.parse import urlencode
 import math
+import hashlib
+import re
+from NewIdea.repositories import contract_repository, expert_submission_repository
 from django.conf import settings
 from ai_extract.services.document_graph_service import graph_scope
 from shared.retrieval import evidence_identity, tokens
@@ -163,3 +166,109 @@ def matched_structure_nodes(tree, citations, version, run=None):
                 params = urlencode(dict(version_id=version.pk, graph_node=scope['key']+':node:'+identity))
                 item['graph_url'] = f'/ai-extract/contracts/{version.contract_id}/pages/{page}/?{params}#neo4j-graph'
     return list(matches.values())[:30]
+
+
+def text_record(record):
+    """Stable source identity plus a fingerprint checked before using a hit."""
+    import json
+    record = dict(record, source_kind='knowledge_text')
+    record['content_sha256'] = hashlib.sha256(json.dumps(record, sort_keys=True,
+        ensure_ascii=False, default=str).encode()).hexdigest()
+    return record
+
+
+def submission_records(receipt):
+    """Use original Q/A and verified quotes; titles are navigation, not facts."""
+    data = receipt.result.get('request', {})
+    company = data.get('company_id')
+    if not company or receipt.user.company_id != company:
+        return []
+    root = f'a2-expert:{company}:{receipt.pk}'
+    # Preserve explicitly marked sample provenance for the whole submission,
+    # including semantic units whose short quote omits the original marker.
+    is_demo = data.get('is_demo') is True or any(
+        re.search(r'^\s*(?:\[DEMO\]|DEMO\s*:|Mẫu trả lời demo\s*:)', data.get(key, ''), re.I | re.M)
+        for key in ('answer', 'note'))
+    common = dict(company_id=company, submission_id=receipt.pk, document_id=root,
+        contract_id=None, version_id=None, page_number=1, bbox=[], layout_type='expert_text',
+        author=receipt.user.username, review_status='draft', is_demo=bool(is_demo),
+        source_url=f'/newidea/?submission_id={receipt.pk}#expert-submission',
+        source_location=f'Expert submission {receipt.pk}', original_name=f'Expert: {receipt.user.username}',
+        heading_path=[], ancestor_ids=[], question=receipt.query)
+    source_texts = {'question': receipt.query, 'expert-answer': data.get('answer', ''),
+                    'expert-note': data.get('note', '')}
+    records = []
+    for source, text in source_texts.items():
+        if text.strip():
+            key = root+':'+source
+            records.append(text_record(dict(common, knowledge_key=key, chunk_id=key,
+                text=text, evidence_kind='expert_question' if source=='question' else 'expert_unit',
+                source_role=source, heading_path=[receipt.query],
+                graph_node_key=root if source=='question' else root+':answer' if source=='expert-answer' else root)))
+    for unit in receipt.result.get('semantic_analysis', {}).get('units', []):
+        source = unit.get('source_id', '').rsplit(':', 1)[0]
+        quote = unit.get('quote', '')
+        if not quote or source in source_texts and quote not in source_texts[source]:
+            continue
+        # Document quotes already have source pointers recorded by validation.
+        if source not in source_texts and not unit.get('snapshot_key'):
+            continue
+        key = root+':'+unit['id']
+        records.append(text_record(dict(common, knowledge_key=key, chunk_id=key, text=quote,
+            evidence_kind='expert_question' if source=='question' else 'expert_unit',
+            source_role=source, graph_node_key=key, unit_kind=unit['kind'],
+            source_chunk_id=unit.get('source_chunk_id', ''),
+            source_url=unit.get('source_url') or common['source_url'],
+            heading_path=[receipt.query, unit['title']], concepts=unit.get('concepts', []))))
+    return records
+
+
+def visible_text_records(user):
+    """Reload source records for access checks and stale-vector rejection."""
+    jobs = expert_submission_repository.visible_submissions(user)
+    records = [record for receipt in jobs for record in submission_records(receipt) if not record.get('is_demo')]
+    for case in contract_repository.approved_visible_cases(user):
+        if not evidence_current(case):
+            continue
+        details = serialize_case(case)
+        if details['is_demo']:
+            continue
+        evidence = with_expert_evidence([], [details])[0]
+        evidence.pop('evidence_id', None)
+        records.append(text_record(dict(evidence, knowledge_key=evidence['chunk_id'],
+            company_id=case.version.contract.company_id, document_id='a2-case:'+str(case.case_id),
+            review_status=case.status, expert_case=details, page_number=1, bbox=[])))
+    return records
+
+
+def submission_context(receipt, records):
+    """Source-bound saved graph edges, including ANSWERS and shared concepts."""
+    if receipt.result.get('graph_index', {}).get('status') == 'cleared':
+        return dict(state='cleared', version_id=None, nodes=[], edges=[],
+                    origin='explicit_graph_reset')
+    root = f'a2-expert:{receipt.result["request"]["company_id"]}:{receipt.pk}'
+    nodes, edges = {}, []
+    by_graph = {}
+    for record in records:
+        if record.get('submission_id') != receipt.pk:
+            continue
+        key = record['graph_node_key']
+        by_graph.setdefault(key, []).append(record)
+        node = nodes.setdefault(key, dict(id=key, kind=record.get('unit_kind', record['source_role']),
+            label=record.get('text', '')[:100], source_leaf_ids=[]))
+        node['source_leaf_ids'].append(record['chunk_id'])
+    for relation in receipt.result.get('semantic_analysis', {}).get('relations', []):
+        source = root if relation['from_id']=='question' else root+':'+relation['from_id']
+        target = root if relation['to_id']=='question' else root+':'+relation['to_id']
+        if source in by_graph and target in by_graph:
+            edges.append(dict(from_id=source, to_id=target, type=relation['kind'], review_status='unreviewed',
+                source_leaf_ids=[r['chunk_id'] for endpoint in (source, target) for r in by_graph[endpoint]]))
+    return dict(state='ready', version_id=None, nodes=list(nodes.values()), edges=edges,
+                origin='persisted_a2_graph_proposals', review_status='draft')
+
+
+def contexts_for_records(records):
+    identities = {r['submission_id'] for r in records if r.get('submission_id')}
+    jobs = expert_submission_repository.submissions_by_ids(identities)
+    return [submission_context(receipt, records) for receipt in jobs]
+

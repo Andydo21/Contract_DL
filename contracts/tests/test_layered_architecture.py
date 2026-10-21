@@ -10,6 +10,19 @@ from ai_extract.models import ContractSummary
 
 
 class LayerBoundaryTests(SimpleTestCase):
+    def test_newidea_views_use_services_and_repositories_do_not_call_services(self):
+        root=Path(__file__).resolve().parents[2]/'NewIdea'
+        for layer in ('views','repositories'):
+            for path in (root/layer).glob('*.py'):
+                for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+                    if not isinstance(node,ast.ImportFrom) or not node.module:continue
+                    with self.subTest(file=path.name,module=node.module):
+                        if layer=='views':
+                            self.assertNotIn('repositories',node.module.split('.'))
+                        else:
+                            self.assertNotIn('services',node.module.split('.'))
+                            self.assertFalse(node.module.startswith('django.http'))
+
     def test_web_has_one_ai_processing_application(self):
         from django.apps import apps
         root = Path(__file__).resolve().parents[2]

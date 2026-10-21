@@ -9,7 +9,7 @@ from ai_extract.services.contract_pipeline_service import structural_retrieve
 
 class A3ModelBoundaryTests(SimpleTestCase):
     def setUp(self):
-        index = patch('NewIdea.repositories.contract_repository.refresh_snapshot')
+        index = patch('NewIdea.services.knowledge_search_service.refresh_snapshot')
         index.start()
         self.addCleanup(index.stop)
 

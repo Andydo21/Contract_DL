@@ -1,7 +1,7 @@
 """Index existing saved expert knowledge; never rerun Qwen or document OCR."""
 from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth import get_user_model
-from NewIdea.repositories.expert_submission_repository import visible_text_records
+from NewIdea.services.search_evidence_service import visible_text_records
 from ai_extract.services.contract_pipeline_service import PlanACollectionIndexer
 
 

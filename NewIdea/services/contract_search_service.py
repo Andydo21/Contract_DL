@@ -122,7 +122,6 @@ def search_contract(user, contract_id, data, existing_receipt=None):
 
 
 def workspace_context(user, contract_id=None, version_id=None):
-    from django.urls import reverse
     from .case_rules import can_review
     contracts = contract_repository.workspace_contracts(user)
     selected = contract_repository.get_visible_contract(user, contract_id) if contract_id else None
@@ -132,5 +131,4 @@ def workspace_context(user, contract_id=None, version_id=None):
             raise KnowledgeError('Version ID không hợp lệ.')
         version = contract_repository.contract_version(selected, version_id)
     return dict(available_contracts=contracts, selected_contract=selected, selected_version=version,
-        can_review=can_review(user), newidea_mode=True, contract_workspace_url_name='newidea_contract',
-        search_endpoint=reverse('newidea_search', args=[selected.pk]) if selected else '')
+        can_review=can_review(user))

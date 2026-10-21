@@ -7,7 +7,7 @@ from io import StringIO
 from qdrant_client import QdrantClient
 from contracts.models import KnowledgeSearchLog
 from contracts.tests.test_intelligence import ContractIntelligenceTests
-from NewIdea.repositories.expert_submission_repository import submission_records, visible_text_records
+from NewIdea.services.search_evidence_service import submission_records, visible_text_records
 from NewIdea.services.knowledge_search_service import SearchBackend, search_knowledge
 from NewIdea.services.knowledge_answer_service import answer_from_sources
 from ai_extract.services.contract_pipeline_service import PlanACollectionIndexer, HybridBackend, DENSE_COLLECTION

@@ -177,3 +177,16 @@ def cache_inference(namespace, identity, value, timeout=1800):
 def _inference_key(namespace, identity):
     return 'inference:v1:' + namespace + ':' + hashlib.sha256(
         json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def rank_indexed_records(terms, rows, count, average, limit=60):
+    """BM25 over authorized postings supplied by a repository; no database access."""
+    import math
+    from collections import Counter
+    frequencies=Counter(t for _,counts,_ in rows for t in terms if t in counts)
+    ranked=[]
+    for record,counts,length in rows:
+        score=sum(math.log(1+(count-frequencies[t]+.5)/(frequencies[t]+.5))
+            *counts[t]*2.5/(counts[t]+1.5*(.25+.75*length/average)) for t in terms if counts.get(t))
+        if score>0:ranked.append(dict(record,lexical_score=round(score,6),score=score))
+    return sorted(ranked,key=lambda r:r['lexical_score'],reverse=True)[:limit]

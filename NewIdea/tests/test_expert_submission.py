@@ -15,7 +15,7 @@ from contracts.services.document_encryption_service import decrypt_pdf
 class SemanticGroundingTests(SimpleTestCase):
     def test_reset_graph_does_not_recreate_context_from_saved_relations(self):
         from types import SimpleNamespace
-        from NewIdea.repositories.expert_submission_repository import submission_context
+        from NewIdea.services.search_evidence_service import submission_context
         receipt=SimpleNamespace(result={'graph_index': {'status': 'cleared'}})
         context=submission_context(receipt, [])
         self.assertEqual(context['state'], 'cleared')

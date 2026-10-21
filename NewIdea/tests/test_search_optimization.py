@@ -249,7 +249,8 @@ class DurableCorpusTests(TestCase):
     def corpus(self):
         from NewIdea.repositories.contract_repository import latest_visible_versions, completed_extraction_run, IndexedCorpus
         versions, _ = latest_visible_versions(self.user, limit=None, load_sources=False)
-        return IndexedCorpus(versions, {v.pk: completed_extraction_run(v) for v in versions}, [])
+        from NewIdea.services.knowledge_search_service import indexed_corpus
+        return indexed_corpus(versions, {v.pk: completed_extraction_run(v) for v in versions}, [])
 
     def test_warm_lookup_avoids_source_reconstruction_and_preserves_bm25(self):
         from shared.retrieval import lexical_search

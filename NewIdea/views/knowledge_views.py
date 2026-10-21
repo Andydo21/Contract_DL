@@ -4,7 +4,7 @@ from functools import wraps
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
-from NewIdea.services import knowledge_search_service, expert_workflow_service, search_job_service
+from NewIdea.services import knowledge_search_service, expert_workflow_service, search_job_service, expert_submission_service
 from NewIdea.services.errors import KnowledgeError
 
 
@@ -70,11 +70,6 @@ def evidence_sources(request, version_id):
 @knowledge_api
 def expert_submission(request):
     if request.method == 'GET':
-        from NewIdea.repositories.expert_submission_repository import visible_submission
-        identity = request.GET.get('id', '')
-        if not identity.isdecimal():
-            raise ValueError('Invalid submission ID')
-        return JsonResponse(visible_submission(request.user, int(identity)))
-    from NewIdea.services import expert_submission_service
+        return JsonResponse(expert_submission_service.read_submission(request.user,request.GET.get('id','')))
     data = request.POST.dict() if request.content_type.startswith('multipart/') else json_body(request)
     return JsonResponse(expert_submission_service.enqueue(request.user, data, request.FILES.getlist('files')), status=202)

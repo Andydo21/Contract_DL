@@ -52,6 +52,11 @@ Không di chuyển hay sửa dữ liệu đã lưu trong lần dọn code này.
 - `case_rules.py`: trường case, điều kiện duyệt, quyền reviewer và xuất case.
 - `evidence_service.py`: gắn nguồn và kiểm tra SHA-256 nguồn đã duyệt.
 
+View không gọi repository trực tiếp. Repository không import service: nó chỉ
+đọc/ghi nguồn, tệp, snapshot và graph. Service dựng cây, kiểm tra nghiệp vụ và
+chuẩn bị bằng chứng rồi gọi repository lưu kết quả trong cùng giao dịch.
+BM25 trên postings dùng hàm thuần trong `shared/retrieval.py`; không chứa ORM.
+
 Không có Spec Drift trong luồng hiện tại. Không tự tìm Internet. Cache kết
 quả qua nhiều lượt hỏi không bật mặc định. Quyền công ty, nguồn gốc, kiểu dữ
 liệu và tính toàn vẹn graph vẫn được kiểm tra bằng code.

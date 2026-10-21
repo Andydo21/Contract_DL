@@ -6,12 +6,40 @@ import time
 from django.conf import settings
 from ai_extract.services.contract_pipeline_service import HybridBackend, hydrate, expand_retrieval_context, plan_retrieval_questions
 from shared.retrieval import LexicalOnlyReranker, evidence_identity, identifiers
-from NewIdea.repositories import contract_repository, knowledge_repository, expert_submission_repository
+from NewIdea.repositories import contract_repository, knowledge_repository
 from .search_job_service import reserve_search, finish_search, update_progress
 from .errors import KnowledgeError
 from .search_evidence_service import (
     matched_structure_nodes, select_answer_sources, select_retrieval_seeds,
+    visible_text_records, contexts_for_records,
 )
+
+def refresh_snapshot(version):
+    """Build the source tree in the service; repository persists its index atomically."""
+    from django.db import transaction
+    from ai_extract.services.document_structure_service import structure_for_version
+    from ai_extract.services.document_graph_service import graph_scope
+    with transaction.atomic():
+        snapshot,version=contract_repository.lock_snapshot(version)
+        run=contract_repository.completed_extraction_run(version)
+        records=contract_repository.version_sources(version)
+        tree=structure_for_version(version,records,version.contract.title)
+        scope=graph_scope(run,tree) if run and tree.get('graph_index',{}).get('status')=='ready' else {}
+        return contract_repository.replace_snapshot(snapshot,version,run,records,tree,scope)
+
+
+def indexed_corpus(versions, runs, knowledge):
+    snapshots=contract_repository.retrieval_snapshots(versions)
+    rebuilt=0
+    for version in versions:
+        snapshot=snapshots.get(version.pk)
+        if (snapshot is None or snapshot.dirty or snapshot.schema!=1
+            or snapshot.run_id!=getattr(runs.get(version.pk),'pk',None)
+            or snapshot.metadata_key!=contract_repository.metadata_key(version)):
+            snapshots[version.pk]=refresh_snapshot(version)
+            rebuilt+=1
+    return contract_repository.IndexedCorpus(snapshots,knowledge,rebuilt)
+
 
 class SearchBackend(HybridBackend):
     def __init__(self):
@@ -103,10 +131,10 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
                     dense_runs[version.pk] = run.pk
                 if run.colpali_index_status == 'COMPLETED':
                     visual_runs[version.pk] = run.pk
-        knowledge = expert_submission_repository.visible_text_records(user)
+        knowledge = visible_text_records(user)
         by_key = {r['knowledge_key']: r for r in knowledge}
         # Keyword lookup is one corpus stream, not a separate expert-case path.
-        trees = contract_repository.IndexedCorpus(versions, runs, knowledge)
+        trees = indexed_corpus(versions, runs, knowledge)
         mark('corpus_index')
         backend = SearchBackend()
         def collect(query):
@@ -298,7 +326,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
                     title=citation.get('text', '')[:100], kind=citation.get('unit_kind', 'expert_text'),
                     evidence_ids=[citation['evidence_id']], source_url=citation['source_url'],
                     retrieval_basis='unified_knowledge_hit', review_status=citation.get('review_status')))
-        graph_contexts = expert_submission_repository.contexts_for_records(
+        graph_contexts = contexts_for_records(
             [r for r in knowledge if r.get('submission_id') in expert_roots])
         cases = list({c['expert_case_id']: c['expert_case'] for c in citations if c.get('expert_case_id')}.values())
         result = dict(success=True, results=results, citations=citations, matched_nodes=matched_nodes[:30],

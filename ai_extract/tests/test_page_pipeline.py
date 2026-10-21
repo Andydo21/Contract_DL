@@ -14,7 +14,7 @@ from ai_extract.services.layout_service import PageExtractionSession
 @override_settings(MEDIA_ROOT=Path('/test-media'))
 class PagePipelineTests(SimpleTestCase):
     def setUp(self):
-        index = patch('NewIdea.repositories.contract_repository.refresh_snapshot')
+        index = patch('NewIdea.services.knowledge_search_service.refresh_snapshot')
         index.start()
         self.addCleanup(index.stop)
 

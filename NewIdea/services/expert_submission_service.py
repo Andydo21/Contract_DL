@@ -6,6 +6,7 @@ from django.conf import settings
 from NewIdea.repositories import contract_repository, knowledge_repository, expert_submission_repository
 from .search_job_service import reserve_search
 from .errors import KnowledgeError
+from .search_evidence_service import submission_records
 
 KINDS = {'clause', 'issue', 'condition', 'recommendation', 'fact'}
 RELATIONS = {'ASKS_ABOUT', 'SUPPORTED_BY', 'QUALIFIES', 'CONTRADICTS', 'ANSWERS'}
@@ -60,7 +61,12 @@ def enqueue(user, data, files):
             receipt = reserve_search(user, question, version, generated=True, scope='expert')
             if receipt is None:
                 raise KnowledgeError('Đã đạt giới hạn xử lý; thử lại sau một phút.', 429)
-            attachments = [expert_submission_repository.store_attachment(user, f, saved).pk for f in files]
+            from contracts.services.document_encryption_service import encrypt_pdf
+            attachments = []
+            for file in files:
+                content=file.read()
+                attachments.append(expert_submission_repository.store_attachment(
+                    user,file,encrypt_pdf(content),hashlib.sha256(content).hexdigest(),saved).pk)
             receipt.status = 'QUEUED'
             receipt.result = dict(request=dict(scope='expert', company_id=user.company_id,
                 question=question.strip(), note=note.strip(), answer=answer.strip(), version_id=version.pk if version else None,
@@ -196,7 +202,7 @@ def process(receipt):
     receipt.result['progress'] = dict(stage='indexing_knowledge')
     knowledge_repository.save_search(receipt, 'result')
     indexed = (IndexResult.capture(lambda: PlanACollectionIndexer().index_text_records(
-        expert_submission_repository.submission_records(receipt))) if getattr(settings, 'A3_HYBRID_ENABLED', True)
+        submission_records(receipt))) if getattr(settings, 'A3_HYBRID_ENABLED', True)
         else IndexResult('SKIPPED', error='Neural indexing disabled'))
     receipt.result['semantic_index'] = dict(status=indexed.status, points=indexed.indexed_count, error=indexed.error)
     knowledge_repository.save_search(receipt, 'result')
@@ -206,3 +212,19 @@ def process(receipt):
         analysis_status='unavailable' if errors and not units else 'partial' if errors or len(batches)>12 else 'completed',
         coverage=dict(batches_total=len(batches), batches_attempted=index+1 if batches else 0,
                       max_batches=12, errors=errors, semantic_correctness_verified=False))
+
+
+def read_submission(user, identity):
+    if not str(identity).isdecimal():
+        raise ValueError('Invalid submission ID')
+    receipt=expert_submission_repository.get_visible_submission(user,int(identity))
+    if not submission_records(receipt):
+        raise KnowledgeError('Submission not found.',404)
+    data = receipt.result['request']
+    return dict(success=True, submission_id=receipt.pk, author=receipt.user.username, review_status='draft',
+        question=receipt.query, answer=data.get('answer', ''), note=data.get('note', ''),
+        units=receipt.result.get('semantic_analysis', {}).get('units', []),
+        relations=receipt.result.get('semantic_analysis', {}).get('relations', []),
+        qwen_outputs=receipt.result.get('qwen_outputs', []),
+        vector_index=receipt.result.get('semantic_index', {}))
+

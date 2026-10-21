@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from NewIdea.repositories import knowledge_repository, contract_repository
 from .evidence_service import digest
+from .search_evidence_service import visible_text_records
 from .errors import KnowledgeError
 import time
 
@@ -104,9 +105,8 @@ def process_next_job(search):
             raise RuntimeError('Requester account disabled')
         receipt._defer_completion = True
         if data.get('scope') == 'knowledge_index':
-            from NewIdea.repositories import expert_submission_repository
             from ai_extract.services.contract_pipeline_service import PlanACollectionIndexer
-            records = [r for r in expert_submission_repository.visible_text_records(receipt.user)
+            records = [r for r in visible_text_records(receipt.user)
                        if r['knowledge_key'] == data['knowledge_key']]
             indexed = PlanACollectionIndexer().index_text_records(records)
             response = dict(success=indexed.status == 'COMPLETED', index_status=indexed.status,
