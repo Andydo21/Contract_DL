@@ -41,6 +41,15 @@ scripts/
 *.ipynb
 .ipynb_checkpoints/
 
+# Generated reports, recordings and retired standalone prototypes
+output/
+/PlanAProject/
+/PlanA/
+/PlanB/
+/DiffusionAD/
+/denso_demo/
+/chatter/
+
 
 ai_extract/a3/retired_processing_code.zip
 
