@@ -1,0 +1,481 @@
+{
+  "label": "30 synthetic contract questions, manually specified template ground truth",
+  "documents": {
+    "synthetic-contract-1": [
+      {
+        "chunk_id": "synthetic-contract-1:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 1000 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-1:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-1:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 30 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-1:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ],
+    "synthetic-contract-2": [
+      {
+        "chunk_id": "synthetic-contract-2:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 1500 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-2:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-2:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 35 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-2:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ],
+    "synthetic-contract-3": [
+      {
+        "chunk_id": "synthetic-contract-3:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 2000 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-3:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-3:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 40 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-3:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ],
+    "synthetic-contract-4": [
+      {
+        "chunk_id": "synthetic-contract-4:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 2500 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-4:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-4:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 45 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-4:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ],
+    "synthetic-contract-5": [
+      {
+        "chunk_id": "synthetic-contract-5:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 3000 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-5:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-5:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 50 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-5:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ],
+    "synthetic-contract-6": [
+      {
+        "chunk_id": "synthetic-contract-6:p1",
+        "page_number": 1,
+        "text": "Article 1. Payment\nThe buyer pays 3500 USD within 15 days after acceptance."
+      },
+      {
+        "chunk_id": "synthetic-contract-6:p2",
+        "page_number": 2,
+        "text": "Article 2. Termination\nThe buyer may terminate after breach, subject to Article 3."
+      },
+      {
+        "chunk_id": "synthetic-contract-6:p3",
+        "page_number": 3,
+        "text": "Article 3. Notice\nWritten notice must be sent 55 days before termination."
+      },
+      {
+        "chunk_id": "synthetic-contract-6:p4",
+        "page_number": 4,
+        "text": "Article 4. Confidentiality\nConfidentiality survives termination for 2 years."
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "1-1",
+      "document_id": "synthetic-contract-1",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "1000 USD"
+      ],
+      "answer_values": [
+        "1000"
+      ]
+    },
+    {
+      "id": "1-2",
+      "document_id": "synthetic-contract-1",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "1-3",
+      "document_id": "synthetic-contract-1",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "30 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "30"
+      ]
+    },
+    {
+      "id": "1-4",
+      "document_id": "synthetic-contract-1",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "1-5",
+      "document_id": "synthetic-contract-1",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    },
+    {
+      "id": "2-1",
+      "document_id": "synthetic-contract-2",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "1500 USD"
+      ],
+      "answer_values": [
+        "1500"
+      ]
+    },
+    {
+      "id": "2-2",
+      "document_id": "synthetic-contract-2",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "2-3",
+      "document_id": "synthetic-contract-2",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "35 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "35"
+      ]
+    },
+    {
+      "id": "2-4",
+      "document_id": "synthetic-contract-2",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "2-5",
+      "document_id": "synthetic-contract-2",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    },
+    {
+      "id": "3-1",
+      "document_id": "synthetic-contract-3",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "2000 USD"
+      ],
+      "answer_values": [
+        "2000"
+      ]
+    },
+    {
+      "id": "3-2",
+      "document_id": "synthetic-contract-3",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "3-3",
+      "document_id": "synthetic-contract-3",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "40 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "40"
+      ]
+    },
+    {
+      "id": "3-4",
+      "document_id": "synthetic-contract-3",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "3-5",
+      "document_id": "synthetic-contract-3",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    },
+    {
+      "id": "4-1",
+      "document_id": "synthetic-contract-4",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "2500 USD"
+      ],
+      "answer_values": [
+        "2500"
+      ]
+    },
+    {
+      "id": "4-2",
+      "document_id": "synthetic-contract-4",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "4-3",
+      "document_id": "synthetic-contract-4",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "45 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "45"
+      ]
+    },
+    {
+      "id": "4-4",
+      "document_id": "synthetic-contract-4",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "4-5",
+      "document_id": "synthetic-contract-4",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    },
+    {
+      "id": "5-1",
+      "document_id": "synthetic-contract-5",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "3000 USD"
+      ],
+      "answer_values": [
+        "3000"
+      ]
+    },
+    {
+      "id": "5-2",
+      "document_id": "synthetic-contract-5",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "5-3",
+      "document_id": "synthetic-contract-5",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "50 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "50"
+      ]
+    },
+    {
+      "id": "5-4",
+      "document_id": "synthetic-contract-5",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "5-5",
+      "document_id": "synthetic-contract-5",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    },
+    {
+      "id": "6-1",
+      "document_id": "synthetic-contract-6",
+      "query": "What amount does the buyer pay?",
+      "answerable": true,
+      "required_phrases": [
+        "3500 USD"
+      ],
+      "answer_values": [
+        "3500"
+      ]
+    },
+    {
+      "id": "6-2",
+      "document_id": "synthetic-contract-6",
+      "query": "When is payment due after acceptance?",
+      "answerable": true,
+      "required_phrases": [
+        "15 days"
+      ],
+      "answer_values": [
+        "15"
+      ]
+    },
+    {
+      "id": "6-3",
+      "document_id": "synthetic-contract-6",
+      "query": "What notice is required when the buyer may terminate after breach?",
+      "answerable": true,
+      "required_phrases": [
+        "55 days",
+        "Written notice"
+      ],
+      "answer_values": [
+        "55"
+      ]
+    },
+    {
+      "id": "6-4",
+      "document_id": "synthetic-contract-6",
+      "query": "How long does confidentiality survive termination?",
+      "answerable": true,
+      "required_phrases": [
+        "2 years"
+      ],
+      "answer_values": [
+        "2"
+      ]
+    },
+    {
+      "id": "6-5",
+      "document_id": "synthetic-contract-6",
+      "query": "Which arbitration institution is named?",
+      "answerable": false,
+      "required_phrases": [],
+      "answer_values": []
+    }
+  ]
+}

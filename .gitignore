@@ -1,41 +1,47 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Django & Databases
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-PlanAProject/qdrant_storage/
-PlanAProject/db.sqlite3
-
-# Media & Uploads
-PlanAProject/media/extracted_images/*
-!PlanAProject/media/extracted_images/.gitkeep
-PlanAProject/media/uploaded_documents/2026/09/05/
-
-# Environments & Large Datasets
-.env
-*.env
-PlanAProject/.env
-.venv/
+*.pyc
+*.pyo
+*.pyd
 venv/
-ENV/
+.venv/
 env/
-data/
-ZeroToCAD_sample/
-PlanAProject/media/uploaded_documents/*
-!PlanAProject/media/uploaded_documents/.gitkeep
-*.tar.gz
-*.zip
-*.7z
-*.iso
+*.swp
+*.bak
 
-# IDE & System
-.vscode/
-.idea/
+# Django
+db.sqlite3
+NewIdea/backups/
+media/
+staticfiles/
+.env
+
+# OS
 .DS_Store
-.gemini/
-PlanAProject/scratch_*.py
+Thumbs.db
+
+# Logs
+*.log
+NewIdea/test_out.txt
+NewIdea/neo4j_storage/
+NewIdea/qdrant_storage/
+ai_extract/a3/qdrant_storage/
+explorer_logs/
+fabric/crypto-config/
+fabric/chaincode/package_id.txt
+fabric/contracts-channel.block
+fabric/gateway/node_modules/
+fabric/contract_verify_v2.tar.gz
+
+# Temporary and Scratch Directories
+scratch/
+scripts/
+*.docx
+~$*.docx
+*.ipynb
+.ipynb_checkpoints/
+
+
+ai_extract/a3/retired_processing_code.zip
+
+ai_extract/a3/retired_code_manifest.json

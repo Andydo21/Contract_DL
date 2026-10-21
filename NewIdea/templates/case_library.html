@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% block title %}A2 — Thư viện kinh nghiệm đã xác minh{% endblock %}
+{% block extra_head %}
+<style>
+.case-workspace{max-width:1180px;margin:32px auto;padding:0 24px;color:#e8edf5;overflow:auto;height:calc(100vh - 120px)}
+.case-workspace h2{font-size:28px;margin-bottom:12px}.case-workspace p{line-height:1.6}
+.case-columns{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px}
+.case-panel{padding:24px;background:#172334;border:1px solid #38475d;border-radius:12px}
+.case-panel label{display:block;margin:14px 0 6px}.case-panel input,.case-panel textarea{width:100%;box-sizing:border-box;padding:10px;background:#0e1828;color:#fff;border:1px solid #617189;border-radius:6px}
+.case-panel button,.case-workspace button{padding:10px 16px;margin:12px 8px 0 0;border:0;border-radius:6px;background:#a92537;color:white;cursor:pointer}
+.case-item{border-top:1px solid #617189;padding:16px 0}.case-item p{white-space:pre-wrap;overflow-wrap:anywhere}
+#case-status{white-space:pre-wrap;color:#ffd785;min-height:24px}.case-workspace a{color:#93caff}
+@media(max-width:800px){.case-columns{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<main class="case-workspace">
+  <h2>A2 — Kinh nghiệm có nguồn và người duyệt</h2>
+  <p>Lưu case → kiểm tra nguyên nhân và kết quả → phê duyệt → tìm lại theo máy. Revision mới giữ lại lịch sử; bản nháp chưa thay thế bản đã duyệt.</p>
+  {% if not user.is_authenticated %}<p><a href="/admin/login/?next=/cases/">Đăng nhập</a> để nhập case. Reviewer dùng tài khoản staff để phê duyệt.</p>{% endif %}
+  <div id="case-status" role="status" aria-live="polite"></div>
+  <div class="case-columns">
+    <section class="case-panel">
+      <h3>Ghi nhận case chuyên gia</h3>
+      <form id="case-form">{% csrf_token %}
+        <input type="hidden" id="revision-source">
+        <label for="title">Tiêu đề *</label><input id="title" name="title" required maxlength="255">
+        <label for="machine">Máy / revision thiết bị *</label><input id="machine" name="machine" required maxlength="128">
+        <label for="component">Linh kiện</label><input id="component" name="component" maxlength="128">
+        <label for="error_code">Mã lỗi</label><input id="error_code" name="error_code" maxlength="64">
+        <label for="symptom">Hiện tượng *</label><textarea id="symptom" name="symptom" required rows="3"></textarea>
+        <label for="investigation">Kiểm tra đã thực hiện và kết quả đo</label><textarea id="investigation" name="investigation" rows="3"></textarea>
+        <label for="root_cause">Nguyên nhân có bằng chứng</label><textarea id="root_cause" name="root_cause" rows="2"></textarea>
+        <label for="solution">Các bước xử lý</label><textarea id="solution" name="solution" rows="3"></textarea>
+        <label for="verification">Cách xác minh và kết quả sau xử lý</label><textarea id="verification" name="verification" rows="3"></textarea>
+        <label for="applicability">Điều kiện áp dụng và ngoại lệ</label><textarea id="applicability" name="applicability" rows="2"></textarea>
+        <label for="source_reference">Nguồn: ticket, SOP hoặc biên bản đo</label><input id="source_reference" name="source_reference" maxlength="255">
+        {% if user.is_authenticated %}<button type="submit">Lưu nháp / revision mới</button><button type="button" id="reset-case">Case mới</button>{% endif %}
+      </form>
+    </section>
+    <section class="case-panel">
+      <h3>Tìm và tái sử dụng case</h3>
+      <form id="search-form">
+        <label for="case-query">Hiện tượng / mã lỗi</label><input id="case-query" placeholder="Ví dụ: E-404 rung động">
+        <label for="case-machine">Đúng máy / revision thiết bị</label><input id="case-machine" placeholder="Khớp tên máy đầy đủ">
+        <button type="submit">Tìm case đã duyệt</button><button type="button" id="list-cases">Danh sách</button>
+      </form>
+      <p>Kết quả tìm kiếm là gợi ý theo từ khóa. Luôn kiểm tra điều kiện áp dụng trước khi tái sử dụng.</p>
+      <div id="case-results"></div>
+    </section>
+  </div>
+</main>
+{% endblock %}
+{% block extra_scripts %}
+{{ initial_case|json_script:'initial-case' }}
+<script>
+(() => {
+  const form = document.getElementById('case-form');
+  const status = document.getElementById('case-status');
+  const results = document.getElementById('case-results');
+  const fields = ['title','machine','component','error_code','symptom','investigation','root_cause','solution','verification','applicability','source_reference'];
+  const staff = {{ user.is_staff|yesno:'true,false' }};
+  const signedIn = {{ user.is_authenticated|yesno:'true,false' }};
+  const initial = JSON.parse(document.getElementById('initial-case').textContent);
+  fields.forEach(f => {if (initial[f]) form.elements[f].value=initial[f];});
+  async function api(url, body) {
+    const options = body ? {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':form.querySelector('[name=csrfmiddlewaretoken]').value}, body:JSON.stringify(body)} : {};
+    const response = await fetch(url, options);
+    if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Phiên đăng nhập hoặc CSRF không hợp lệ. Tải lại trang.');
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Không thực hiện được thao tác.');
+    return data;
+  }
+  function text(parent, tag, value) { const node=document.createElement(tag); node.textContent=value; parent.appendChild(node); return node; }
+  function render(cases) {
+    results.replaceChildren();
+    if (!cases.length) text(results,'p','Chưa có case phù hợp.');
+    cases.forEach(c => {
+      const card=document.createElement('article'); card.className='case-item'; results.appendChild(card);
+      text(card,'h4',c.title);
+      text(card,'p',`${c.machine} · r${c.revision} · ${c.status}\nNguồn: ${c.source_reference || 'Chưa ghi'}\nTác giả: ${c.author} · Reviewer: ${c.reviewer || 'Chưa duyệt'}`);
+      for (const [key,label] of [['symptom','Hiện tượng'],['root_cause','Nguyên nhân'],['solution','Xử lý'],['verification','Xác minh'],['applicability','Điều kiện áp dụng']]) text(card,'p',`${label}: ${c[key] || 'Chưa ghi'}`);
+      text(card,'p',c.evidence_id);
+      if (signedIn) {
+        const edit=text(card,'button','Tạo revision'); edit.onclick=()=>{ fields.forEach(f=>form.elements[f].value=c[f]); document.getElementById('revision-source').value=c.id; status.textContent=`Đang tạo revision từ r${c.revision}; bản cũ được giữ nguyên.`; };
+      }
+      if (staff && ['draft','approved'].includes(c.status)) {
+        const action=c.status==='draft'?'approve':'deprecate';
+        const button=text(card,'button',action==='approve'?'Xác nhận và phê duyệt':'Ngừng sử dụng');
+        button.onclick=async()=>{button.disabled=true;try{await api('/api/cases/',{action,id:c.id});status.textContent='Đã cập nhật trạng thái và ghi audit.';await load();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};
+      }
+    });
+  }
+  async function load(query='') {try{render((await api('/api/cases/'+query)).cases);}catch(e){status.textContent=e.message;}}
+  form.onsubmit=async e=>{e.preventDefault(); const button=form.querySelector('[type=submit]'); button.disabled=true; try{const body=Object.fromEntries(fields.map(f=>[f,form.elements[f].value]));const id=document.getElementById('revision-source').value;body.action=id?'revise':'create';if(id)body.id=Number(id);const data=await api('/api/cases/',body);status.textContent=`Đã lưu nháp r${data.case.revision}. Cần reviewer phê duyệt trước khi tái sử dụng.`;form.reset();await load();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};
+  document.getElementById('reset-case')?.addEventListener('click',()=>form.reset());
+  document.getElementById('search-form').onsubmit=e=>{e.preventDefault();const params=new URLSearchParams({q:document.getElementById('case-query').value,machine:document.getElementById('case-machine').value});load('?'+params);};
+  document.getElementById('list-cases').onclick=()=>load();
+  load();
+})();
+</script>
+{% endblock %}

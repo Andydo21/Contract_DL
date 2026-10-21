@@ -1,0 +1,415 @@
+{% extends 'base.html' %}
+
+{% block title %}Chat Kỹ thuật Viên & Chuyên gia — DENSO Zero-Error Cockpit{% endblock %}
+
+{% block content %}
+<div class="split-cockpit">
+    <!-- LEFT PANEL: UNIFIED CHAT CONVERSATION -->
+    <section class="chat-panel">
+        <div class="panel-header">
+            <div class="panel-title-group">
+                <span class="panel-icon">💬</span>
+                <h2>Khung Chat Kỹ Thuật Hiện Trường (Shopfloor Copilot)</h2>
+            </div>
+            <div class="panel-controls">
+                <span class="active-machine-badge" id="active-machine-label">Thiết bị: Tự động</span>
+                <button type="button" class="btn-clear-chat" onclick="clearChatHistory()" title="Bắt đầu phiên chat mới" style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-dim); color: var(--text-dim); border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: all 0.2s ease;">
+                    <span>🧹 Làm mới phiên</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- MESSAGE STREAM (LƯU TRỮ VÀ TẢI TRỰC TIẾP TỪ CSDL DATABASE SQLITE) -->
+        <div class="message-stream" id="message-stream">
+            {% if not db_messages %}
+            <!-- Welcome Bot Message khi chưa có lịch sử trong CSDL -->
+            <div class="chat-msg ai-msg">
+                <div class="msg-avatar">🤖</div>
+                <div class="msg-content">
+                    <div class="msg-header">
+                        <strong class="msg-author">Hệ thống AI Zero-Error Copilot</strong>
+                        <span class="msg-time">Hệ thống</span>
+                    </div>
+                    <div class="msg-body">
+                        Xin chào! Hệ thống đã kích hoạt <strong>Quy trình 5 Lớp Kiểm Chứng Không-Sai-Lệch (Zero-Error Engine)</strong>:
+                        <ul class="engine-steps-list">
+                            <li><strong>Lớp 1 (Neo4j Graph):</strong> Khóa cứng mắt xích nhân quả thực tế, không đoán xác suất.</li>
+                            <li><strong>Lớp 2 (Visual BBox):</strong> "Nói có sách, mách có BBox" - hiển thị tọa độ bản vẽ bên phải.</li>
+                            <li><strong>Lớp 3 (Gating ≥ 85%):</strong> Cross-Encoder soi kỹ từng từ; dưới ngưỡng sẽ từ chối đoán mò.</li>
+                            <li><strong>Lớp 4 (Fail-Safe):</strong> Tự động phát hiện khoảng trống tri thức và gửi chuông báo cho Chuyên gia.</li>
+                            <li><strong>Lớp 5 (Human-in-the-Loop):</strong> Chuyên gia duyệt và lưu trực tiếp vào Neo4j.</li>
+                        </ul>
+                        Hãy nhập câu hỏi kỹ thuật về máy móc hoặc chọn gợi ý bên dưới!
+                    </div>
+                    <div class="msg-footer">
+                        <span class="msg-badge" style="background: rgba(56, 189, 248, 0.12); color: var(--neon-cyan); border: 1px solid rgba(56, 189, 248, 0.3);">🟢 Động cơ 5 Lớp Sẵn Sàng (Standby)</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Tải toàn bộ tin nhắn từ CSDL Database SQLite -->
+            {% for msg in db_messages %}
+            <div class="chat-msg {% if msg.sender_role == 'operator' %}user-msg{% elif msg.sender_role == 'expert' %}user-msg{% else %}ai-msg{% endif %}">
+                <div class="msg-avatar">{% if msg.sender_role == 'operator' %}👷{% elif msg.sender_role == 'expert' %}👨‍🏭{% else %}🤖{% endif %}</div>
+                <div class="msg-content" {% if msg.sender_role == 'expert' %}style="background: linear-gradient(135deg, rgba(6, 78, 59, 0.4), #0f172a); border: 1.5px solid var(--neon-emerald);"{% endif %}>
+                    <div class="msg-header">
+                        <strong class="msg-author" {% if msg.sender_role == 'expert' %}style="color: var(--neon-emerald);"{% endif %}>{{ msg.sender_name }}</strong>
+                        <span class="msg-time">{{ msg.created_at|date:"H:i d/m" }}</span>
+                    </div>
+                    <div class="msg-body" style="white-space: pre-line;">{{ msg.message }}</div>
+
+                    {% with meta=msg.get_metadata %}
+                        {% if meta.is_knowledge_contribution and meta.question_variations %}
+                        <!-- 5 BIẾN THỂ CÂU HỎI HIỆN TRƯỜNG ĐÃ TỰ ĐỘNG SINH & VECTOR HÓA -->
+                        <div style="margin-top: 12px; padding: 12px; background: rgba(59, 130, 246, 0.08); border: 1px dashed var(--neon-cyan); border-radius: 8px;">
+                            <div style="font-size: 11.5px; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                <span>⚡</span> 5 BIẾN THỂ CÂU HỎI HIỆN TRƯỜNG ĐÃ TỰ ĐỘNG TẠO & ĐỒNG BỘ VECTOR:
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                {% for q in meta.question_variations %}
+                                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; gap: 8px;">
+                                    <span style="font-size: 12.5px; color: #e2e8f0;">🔹 <em>"{{ q }}"</em></span>
+                                    <button type="button" onclick="testAskVariation('{{ q|escapejs }}')" style="background: rgba(59, 130, 246, 0.2); border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap;">
+                                        💬 Thử hỏi
+                                    </button>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if msg.sender_role == 'ai' %}
+                            {% if meta.is_knowledge_contribution %}
+                            <div class="msg-footer">
+                                <span class="msg-badge" style="background: var(--neon-emerald); color: #000; font-weight: 800;">
+                                    ✅ ĐÃ THIẾT LẬP ĐẦY ĐỦ QUAN HỆ NEO4J
+                                </span>
+                                <span class="msg-badge badge-neo4j">🔗 5 QUESTION VARIATIONS VECTORIZED</span>
+                            </div>
+                            {% elif meta.fail_safe %}
+                            <div class="msg-footer">
+                                <span class="msg-badge" style="background: rgba(245, 158, 11, 0.2); color: var(--neon-amber); border: 1px solid var(--neon-amber);">
+                                    🛡️ FAIL-SAFE ACTIVATED (ĐỘ TIN CẬY &lt; 85%)
+                                </span>
+                                {% if meta.ticket_id %}
+                                <a href="/expert/ticket/{{ meta.ticket_id }}/" class="msg-badge" style="background: var(--neon-amber); color: #000; text-decoration: none; font-weight: 800;">
+                                    MỞ PHIÊN CHUYÊN GIA ➔
+                                </a>
+                                {% endif %}
+                            </div>
+                            {% elif meta.confidence %}
+                            <div class="msg-footer">
+                                <span class="msg-badge badge-neo4j">✅ NEO4J CAUSAL PATH VERIFIED</span>
+                                <span class="msg-badge badge-bbox" style="background: rgba(59, 130, 246, 0.2); color: var(--neon-cyan); border-color: var(--neon-cyan);">📄 TRANG QUY CHUẨN XÁC MINH</span>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                    {% endwith %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- QUICK PROMPT CHIPS -->
+        <div class="quick-prompts-bar">
+            <span class="prompt-chip" style="background: rgba(16, 185, 129, 0.15); border-color: var(--neon-emerald); color: var(--neon-emerald); font-weight: 700;" onclick="openKnowledgeModal()">
+                ➕ Đóng góp Tri thức Mới (Chuyên gia)
+            </span>
+            <span class="prompt-chip" onclick="applyQuickPrompt('Máy M12 rung 4.8 mm/s thì xử lý thế nào?', 'Máy gia công M12')">
+                ⚡ Máy M12 rung 4.8 mm/s (Test BBox & SOP-023)
+            </span>
+            <span class="prompt-chip" onclick="applyQuickPrompt('Trạm ép Solenoid ST02 van E-102 xì khí khi nhiệt độ tăng 55°C', 'Trạm ép Solenoid ST02')">
+                🛡️ Van Solenoid E-102 xì khí (Test Fail-Safe & Gán Chuyên gia)
+            </span>
+            <span class="prompt-chip" onclick="applyQuickPrompt('Cụm robot gắp 4-Axis DENSO sai vị trí trục Z 0.5mm', 'Robot 4-Axis DENSO')">
+                🤖 Robot 4-Axis sai tọa độ Z
+            </span>
+        </div>
+
+        <!-- CHAT INPUT COMPOSER -->
+        <div class="chat-composer-container">
+            <form id="chat-form" onsubmit="handleSendQuestion(event)">
+                <div class="composer-meta-row">
+                    <div class="meta-field">
+                        <label>Người hỏi:</label>
+                        <input type="text" id="operator-name-input" value="Kỹ thuật viên Nguyễn Văn Tuấn (Trạm 3)" required>
+                    </div>
+                    <div class="meta-field">
+                        <label>Thiết bị / Cụm máy:</label>
+                        <select id="machine-select" onchange="updateActiveMachine()">
+                            <option value="" selected>✨ Tự động nhận diện thiết bị (AI Auto-Detect)</option>
+                            {% for m in known_machines %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% empty %}
+                            <option value="Máy gia công M12">Máy gia công M12</option>
+                            <option value="Trạm ép Solenoid ST02">Trạm ép Solenoid ST02</option>
+                            <option value="Robot 4-Axis DENSO">Robot 4-Axis DENSO</option>
+                            <option value="Máy phay CNC M14">Máy phay CNC M14</option>
+                            <option value="Máy ép nhiệt vòng bi M08">Máy ép nhiệt vòng bi M08</option>
+                            <option value="Tủ điều khiển PLC Line 1">Tủ điều khiển PLC Line 1</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="composer-input-row">
+                    <textarea id="question-input" rows="2" placeholder="Nhập câu hỏi kỹ thuật hiện trường (Ví dụ: Máy M12 rung vượt ngưỡng 4.5 mm/s thì kiểm tra gì?)..." required></textarea>
+                    <button type="submit" class="send-btn" id="send-btn">
+                        <span>Gửi câu hỏi</span>
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <!-- RIGHT PANEL: PLANA VISUAL CANVAS & NEO4J GROUNDING -->
+    <section class="canvas-panel">
+        <div class="panel-header">
+            <div class="panel-title-group">
+                <span class="panel-icon">📑</span>
+                <h2>Căn Cứ Tài Liệu SOP & Chuỗi Nhân Quả Đồ Thị</h2>
+            </div>
+            <div class="panel-controls">
+                <span class="sop-code-badge" id="canvas-sop-badge">TRẠNG THÁI: CHỜ CÂU HỎI</span>
+            </div>
+        </div>
+
+        <!-- CANVAS DISPLAY WRAPPER -->
+        <div class="canvas-viewport" id="canvas-viewport">
+            <!-- Standby Placeholder (Hiển thị khi chưa đặt câu hỏi) -->
+            <div class="canvas-standby-state" id="canvas-standby-state">
+                <div class="standby-radar">📡</div>
+                <h3>Sẵn Sàng Tiếp Nhận Sự Cố Shopfloor</h3>
+                <p>Khi bạn nhập câu hỏi ở khung chat bên trái, AI sẽ truy vết mắt xích Neo4j và hiển thị trang tài liệu quy chuẩn SOP chính xác tại đây.</p>
+            </div>
+
+            <!-- MULTI-DOCUMENT SELECTOR STRIP (HIỂN THỊ KHI CÓ NHIỀU TÀI LIỆU QUY CHUẨN LIÊN QUAN) -->
+            <div class="related-docs-panel" id="related-docs-panel" style="display: none;">
+                <div class="related-docs-header">
+                    <div class="related-docs-badge">
+                        <span class="related-icon">📚</span>
+                        <span class="related-title">CÁC TÀI LIỆU QUY CHUẨN LIÊN QUAN (<span id="related-docs-count">0</span>)</span>
+                    </div>
+                    <span class="related-hint">💡 Nhấp chọn tài liệu bên dưới để đổi trang xem</span>
+                </div>
+                <div class="related-docs-pills" id="related-docs-pills">
+                    <!-- Được render động qua JS: selectRelatedDocument(idx) -->
+                </div>
+            </div>
+
+            <!-- BANNER CHỈ RÕ TRANG CHỨA NỘI DUNG & NÚT XEM FULL TRANG (HIỂN THỊ KHI CÓ CĂN CỨ) -->
+            <div class="page-indicator-banner" id="page-indicator-banner" style="display: none;">
+                <div class="page-meta-left">
+                    <div class="page-badge-pill">
+                        <span class="page-icon">📄</span>
+                        <strong id="page-indicator-doc-code">PA-DOC-079</strong>
+                        <span class="page-num-tag" id="page-indicator-num">TRANG 6</span>
+                    </div>
+                    <div class="page-title-text" id="page-indicator-title">Starter Troubleshooting _ DENSO Auto Parts.pdf</div>
+                </div>
+                <div class="page-actions-right">
+                    <button type="button" class="btn-open-fullscreen" onclick="openPageLightbox()" title="Nhấp để xem toàn bộ trang đầy đủ, không bị thiếu nội dung">
+                        <span class="btn-icon">🔍</span>
+                        <span>XEM FULL TRANG (PHÓNG TO)</span>
+                    </button>
+                    <a href="#" id="link-download-pdf" class="btn-pdf-link" target="_blank" style="display: none;" title="Mở file PDF gốc">
+                        <span>📥 PDF Gốc</span>
+                    </a>
+                </div>
+            </div>
+
+            <!-- KHUNG HÌNH ẢNH TRANG TÀI LIỆU (CLICK ĐỂ MỞ TOÀN BỘ TRANG) -->
+            <div class="canvas-image-container" id="canvas-image-container" style="display: none;" onclick="openPageLightbox()" title="Nhấp vào để xem toàn bộ trang với độ phân giải cao">
+                <div class="image-click-hint">
+                    <span class="hint-icon">🔍</span>
+                    <span>Nhấp vào ảnh để Xem Toàn Bộ Trang (Full Screen)</span>
+                </div>
+                <img id="canvas-img" src="" alt="Trang tài liệu SOP" onerror="handleImageFallback(this)">
+            </div>
+
+            <!-- NỘI DUNG DẪN CHIẾU TỪ TRANG TÀI LIỆU -->
+            <div class="canvas-text-snippet" id="canvas-text-snippet" style="display: none;">
+                <div class="snippet-header">
+                    <strong>📑 [NỘI DUNG TRÍCH DẪN TỪ TRANG TÀI LIỆU NÀY]:</strong>
+                    <button type="button" class="btn-snippet-view-full" onclick="openPageLightbox('text')">
+                        <span>📝 Xem toàn bộ văn bản trang</span>
+                    </button>
+                </div>
+                <p id="canvas-snippet-body"></p>
+            </div>
+        </div>
+
+        <!-- NEO4J CAUSAL CHAIN LIVE VISUALIZER (Ẩn mặc định cho đến khi có câu hỏi được trả lời) -->
+        <div class="neo4j-chain-card" id="neo4j-chain-card" style="display: none;">
+            <div class="card-header">
+                <span class="icon">🔗</span>
+                <strong id="neo4j-chain-title">Chuỗi Nhân Quả Đồ Thị Neo4j (Lớp 1)</strong>
+                <span class="confidence-pill" id="neo4j-chain-conf">98% Verified</span>
+            </div>
+            <div class="card-body">
+                <div class="causal-chain-steps" id="causal-chain-steps">
+                    <div class="step-node machine-node">
+                        <span class="node-type">Máy</span>
+                        <strong class="node-val" id="node-machine">---</strong>
+                    </div>
+                    <span class="chain-arrow">➔</span>
+                    <div class="step-node comp-node">
+                        <span class="node-type">Linh kiện</span>
+                        <strong class="node-val" id="node-component">---</strong>
+                    </div>
+                    <span class="chain-arrow">➔</span>
+                    <div class="step-node sym-node">
+                        <span class="node-type">Hiện tượng</span>
+                        <strong class="node-val" id="node-symptom">---</strong>
+                    </div>
+                    <span class="chain-arrow">➔</span>
+                    <div class="step-node sol-node">
+                        <span class="node-type">Giải pháp chuẩn</span>
+                        <strong class="node-val" id="node-solution">---</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- EXPERT ASSIGNMENT CALLOUT (Shown when Fail-safe triggered) -->
+        <div class="expert-callout-card" id="expert-callout-card" style="display: none;">
+            <div class="callout-header">
+                <span class="warn-pulse">⚠️</span>
+                <strong>ĐÃ CHUYỂN TIẾP CHO CHUYÊN GIA XỬ LÝ (FAIL-SAFE ACTIVATED)</strong>
+            </div>
+            <div class="callout-body">
+                <p>Thắc mắc này chưa có căn cứ quy chuẩn SOP chắc chắn 100%. Hệ thống đã phát thông báo khẩn cấp đến:</p>
+                <div class="assigned-expert-box">
+                    <div class="assigned-avatar">👨‍🏭</div>
+                    <div class="assigned-meta">
+                        <div class="assigned-name" id="callout-expert-name">Trần Văn Minh</div>
+                        <div class="assigned-role" id="callout-expert-pos">Senior Line Master • Bảo trì Cơ điện</div>
+                    </div>
+                    <a href="#" id="callout-action-link" class="open-expert-btn">
+                        <span>Mở Khung Chat Chuyên Gia ➔</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- MODAL ĐÓNG GÓP TRI THỨC MỚI DÀNH CHO CHUYÊN GIA -->
+<div id="knowledge-modal" class="modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 9999; align-items: center; justify-content: center;">
+    <div class="modal-box" style="background: var(--bg-card); border: 1.5px solid var(--neon-emerald); border-radius: var(--radius-lg); width: 92%; max-width: 650px; box-shadow: 0 0 35px rgba(16, 185, 129, 0.25); padding: 22px; display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-dim); padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 22px;">💡</span>
+                <h3 style="margin: 0; color: var(--neon-emerald); font-size: 16px;">Đóng Góp Tri Thức Kỹ Thuật Mới (Line Master)</h3>
+            </div>
+            <button type="button" onclick="closeKnowledgeModal()" style="background: none; border: none; color: var(--text-dim); font-size: 20px; cursor: pointer;">✕</button>
+        </div>
+
+        <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5;">
+            Chuyên gia có thể nhập kinh nghiệm xử lý thực tế, quy chuẩn SOP hoặc phương án bảo dưỡng. AI sẽ tự động bóc tách thực thể (Machine, Component, Symptom, RootCause, Solution, SOP), tạo các <strong>biến thể câu hỏi</strong> và thiết lập toàn bộ quan hệ trong <strong>Neo4j Graph & Vector Qdrant</strong>.
+        </p>
+
+        <form id="knowledge-contribution-form" onsubmit="submitKnowledgeContribution(event)">
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                    <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">CHUYÊN GIA BẢO CHỨNG:</label>
+                    <input type="text" id="contrib-expert-name" value="Trần Văn Minh (Line Master)" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 8px; border-radius: 6px; font-size: 12.5px;" required>
+                </div>
+                <div style="flex: 1;">
+                    <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">THIẾT BỊ ÁP DỤNG:</label>
+                    <select id="contrib-machine" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 8px; border-radius: 6px; font-size: 12.5px;">
+                        {% for m in known_machines %}
+                        <option value="{{ m }}">{{ m }}</option>
+                        {% empty %}
+                        <option value="Máy gia công M12">Máy gia công M12</option>
+                        <option value="Trạm ép Solenoid ST02">Trạm ép Solenoid ST02</option>
+                        <option value="Robot 4-Axis DENSO">Robot 4-Axis DENSO</option>
+                        <option value="Máy phay CNC M14">Máy phay CNC M14</option>
+                        <option value="Máy ép nhiệt vòng bi M08">Máy ép nhiệt vòng bi M08</option>
+                        <option value="Tủ điều khiển PLC Line 1">Tủ điều khiển PLC Line 1</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">NỘI DUNG TRI THỨC KỸ THUẬT / QUY TẮC XỬ LÝ SỰ CỐ:</label>
+                <textarea id="contrib-knowledge-text" rows="4" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 10px; border-radius: 6px; font-size: 13px; font-family: inherit; line-height: 1.5; resize: vertical;" placeholder="Ví dụ: Khi motor trục chính máy M12 quá nhiệt > 75°C do kẹt quạt tản nhiệt hoặc hết mỡ, xử lý bằng cách vệ sinh quạt và tra mỡ chịu nhiệt Kluber theo SOP-023." required></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closeKnowledgeModal()" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-dim); color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12.5px;">Hủy bỏ</button>
+                <button type="submit" id="btn-submit-knowledge" style="background: linear-gradient(135deg, var(--neon-emerald), #059669); border: none; color: #000; font-weight: 800; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 12.5px; display: flex; align-items: center; gap: 6px;">
+                    <span>🚀 NẠP TRI THỨC & TỰ ĐỘNG TẠO BIẾN THỂ</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ==============================================================================
+     MODAL XEM FULL TRANG TÀI LIỆU / BẢN VẼ (LIGHTBOX ZOOMABLE & KHÔNG THIẾU NỘI DUNG)
+     ============================================================================== -->
+<div id="page-lightbox-modal" class="modal-backdrop" style="display: none;" onclick="handleLightboxBackdropClick(event)">
+    <div class="lightbox-dialog" onclick="event.stopPropagation()">
+        <!-- LIGHTBOX HEADER -->
+        <div class="lightbox-header">
+            <div class="lightbox-title-group">
+                <span class="lightbox-icon">📄</span>
+                <div>
+                    <h3 id="lightbox-modal-title" class="lightbox-title">Starter Troubleshooting _ DENSO Auto Parts.pdf</h3>
+                    <div class="lightbox-subtitle" id="lightbox-modal-subtitle">Mã tài liệu: PA-DOC-079 • TRANG 6 (Bản Gốc Đầy Đủ)</div>
+                </div>
+            </div>
+            <div class="lightbox-controls">
+                <button type="button" class="btn-zoom" onclick="changeLightboxZoom(0.2)" title="Phóng to (+)">🔍 +</button>
+                <button type="button" class="btn-zoom" onclick="changeLightboxZoom(-0.2)" title="Thu nhỏ (-)">🔍 -</button>
+                <button type="button" class="btn-zoom" onclick="resetLightboxZoom()" title="Đặt lại kích thước">🔄 100%</button>
+                <a href="#" id="lightbox-open-tab-btn" target="_blank" class="btn-zoom" title="Mở ảnh trong tab mới">↗️ Mở Tab</a>
+                <button type="button" class="btn-close-lightbox" onclick="closePageLightbox()" title="Đóng cửa sổ (ESC)">✕ Đóng</button>
+            </div>
+        </div>
+
+        <!-- LIGHTBOX TABS -->
+        <div class="lightbox-tabs-bar">
+            <button type="button" class="lightbox-tab-btn active" id="tab-btn-image" onclick="switchLightboxTab('image')">
+                🖼️ Hình ảnh trang đầy đủ (Full Image)
+            </button>
+            <button type="button" class="lightbox-tab-btn" id="tab-btn-text" onclick="switchLightboxTab('text')">
+                📝 Toàn bộ văn bản trang (Full OCR Text)
+            </button>
+        </div>
+
+        <!-- LIGHTBOX BODY -->
+        <div class="lightbox-body">
+            <!-- TAB 1: FULL IMAGE VIEW -->
+            <div id="lightbox-image-view" class="lightbox-tab-content active">
+                <div class="lightbox-img-scroller" id="lightbox-img-scroller">
+                    <img id="lightbox-full-img" src="" alt="Trang tài liệu bản đầy đủ" style="transform: scale(1); transform-origin: top center;">
+                </div>
+            </div>
+
+            <!-- TAB 2: FULL OCR TEXT VIEW -->
+            <div id="lightbox-text-view" class="lightbox-tab-content" style="display: none;">
+                <div class="lightbox-text-panel">
+                    <div class="text-panel-toolbar">
+                        <span>Dưới đây là toàn bộ nội dung văn bản được số hóa từ trang này (không bị cắt bớt):</span>
+                        <button type="button" class="btn-copy-ocr" onclick="copyFullPageText()">📋 Sao chép văn bản</button>
+                    </div>
+                    <pre class="lightbox-full-text" id="lightbox-full-text"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.INITIAL_DB_GROUNDING = {{ last_grounding_json|safe }};
+    window.INITIAL_DB_RELATED_DOCS = {{ last_related_docs_json|safe }};
+    window.INITIAL_DB_GRAPH = {{ last_graph_path_json|safe }};
+    window.INITIAL_DB_CONFIDENCE = {{ last_confidence_val }};
+    window.INITIAL_DB_MACHINE = "{{ last_machine_name }}";
+</script>
+{% endblock %}

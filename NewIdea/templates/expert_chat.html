@@ -1,0 +1,408 @@
+{% extends 'base.html' %}
+
+{% block title %}Không gian Xử lý Chuyên gia — DENSO Zero-Error Workspace{% endblock %}
+
+{% block content %}
+<div class="expert-workspace-container">
+    <a href="/cases/?ticket={{ inquiry.id }}" style="color:var(--neon-cyan);padding:12px;display:block;">Chuẩn hóa ticket thành case A2 có xác minh và phê duyệt</a>
+    <!-- TOP URGENT INQUIRY BANNER -->
+    <div class="inquiry-banner-card {% if inquiry.status == 'RESOLVED' %}resolved-banner{% else %}pending-banner{% endif %}">
+        <div class="banner-left">
+            <div class="banner-badge-group">
+                <span class="badge-code">{{ inquiry.ticket_code }}</span>
+                <span class="badge-machine">⚙️ {{ inquiry.machine }}</span>
+                <span class="badge-status" id="ticket-status-badge">
+                    {% if inquiry.status == 'RESOLVED' %}
+                    ✅ ĐÃ GIẢI ĐÁP & ĐỒNG BỘ NEO4J
+                    {% else %}
+                    🔔 ĐANG CHỜ CHUYÊN GIA GIẢI ĐÁP
+                    {% endif %}
+                </span>
+            </div>
+            <div class="banner-question">
+                <span class="q-label">Câu hỏi thắc mắc từ hiện trường:</span>
+                <h2 class="q-text">"{{ inquiry.question }}"</h2>
+            </div>
+            <div class="banner-meta">
+                <span>Người hỏi: <strong>{{ inquiry.operator_name }}</strong></span>
+                <span>•</span>
+                <span>Chuyên gia phụ trách: <strong>{{ inquiry.assigned_expert.name|default:"Chuyên gia Line Master" }}</strong> ({{ inquiry.assigned_expert.position|default:"Bảo trì Cơ điện" }})</span>
+                <span>•</span>
+                <span>Thời gian: {{ inquiry.created_at|date:"H:i d/m/Y" }}</span>
+            </div>
+        </div>
+
+        <div class="banner-right">
+            <a href="/chat/" class="back-home-btn">
+                <span>⬅ Về Khung Chat Kỹ Thuật Viên</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- MAIN TWO-COLUMN EXPERT WORKSPACE -->
+    <div class="split-cockpit expert-split">
+        <!-- LEFT COLUMN: INTERACTIVE CHAT STREAM (OPERATOR REPORT + EXPERT CONSULTATION WITH AI + OFFICIAL RESOLUTION) -->
+        <section class="chat-panel expert-dossier-panel" style="display: flex; flex-direction: column;">
+            <div class="panel-header">
+                <div class="panel-title-group">
+                    <span class="panel-icon">💬</span>
+                    <div>
+                        <h2>Khung Chat Tra Cứu AI & Lịch Sử Xử Lý</h2>
+                        <span style="font-size: 11px; color: var(--text-dim); display: block;">Tra cứu SOP, đối soát Đồ thị Tri thức và lưu toàn bộ kết quả thảo luận</span>
+                    </div>
+                </div>
+                <div class="panel-controls">
+                    <span class="active-machine-badge">Thiết bị: {{ inquiry.machine }}</span>
+                </div>
+            </div>
+
+            <!-- CHAT STREAM WITH MESSAGES DIRECT FROM DATABASE -->
+            <div class="message-stream" id="expert-ai-stream" style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+                {% for msg in messages %}
+                    {% if msg.sender_role == 'operator' %}
+                    <!-- TIN NHẮN TỪ KỸ THUẬT VIÊN HIỆN TRƯỜNG -->
+                    <div class="chat-msg user-msg">
+                        <div class="msg-avatar">👷</div>
+                        <div class="msg-content">
+                            <div class="msg-header">
+                                <strong class="msg-author">{{ msg.sender_name }} (Kỹ thuật viên Hiện trường)</strong>
+                                <span class="msg-time">{{ msg.created_at|date:"H:i d/m/Y" }}</span>
+                            </div>
+                            <div class="msg-body" style="white-space: pre-line;">{{ msg.message }}</div>
+                            <div class="msg-footer">
+                                <span class="msg-badge" style="background: rgba(59, 130, 246, 0.2); color: var(--neon-cyan); border: 1px solid var(--neon-cyan);">
+                                    📌 BÁO CÁO HIỆN TRƯỜNG: {{ inquiry.machine }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% elif msg.sender_role == 'expert' %}
+                        {% if msg.get_metadata.is_official_resolution %}
+                        <!-- KẾT QUẢ GIẢI ĐÁP CHÍNH THỨC CỦA CHUYÊN GIA -->
+                        <div class="chat-msg" style="width: 100%; max-width: 100%;">
+                            <div class="msg-avatar" style="background: rgba(16, 185, 129, 0.25); border-color: var(--neon-emerald); font-size: 20px;">🎖️</div>
+                            <div class="msg-content" style="background: linear-gradient(135deg, rgba(6, 78, 59, 0.5), rgba(17, 26, 46, 0.95)); border: 1.5px solid var(--neon-emerald); width: 100%;">
+                                <div class="msg-header" style="border-bottom: 1px solid rgba(16, 185, 129, 0.3); padding-bottom: 6px; margin-bottom: 8px;">
+                                    <strong style="color: var(--neon-emerald); font-size: 13px;">👨‍🏭 {{ msg.sender_name }} — KẾT QUẢ GIẢI ĐÁP CHÍNH THỨC ĐÃ LƯU NEO4J</strong>
+                                    <span class="msg-time">{{ msg.created_at|date:"H:i d/m/Y" }}</span>
+                                </div>
+                                <div class="msg-body" style="white-space: pre-line; color: #fff; font-size: 13.5px; line-height: 1.6;">{{ msg.message }}</div>
+                                <div class="msg-footer" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; border-top: 1px dashed rgba(16, 185, 129, 0.3); padding-top: 8px;">
+                                    <span class="msg-badge" style="background: var(--neon-emerald); color: #000; font-weight: 800;">
+                                        ✅ ĐÃ KÝ DUYỆT & ĐỒNG BỘ ĐỒ THỊ NEO4J
+                                    </span>
+                                    <span class="msg-badge badge-neo4j">
+                                        🔗 DETERMINISTIC MERGE EXECUTED
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <!-- TIN NHẮN CHUYÊN GIA HỎI TRA CỨU AI -->
+                        <div class="chat-msg user-msg">
+                            <div class="msg-avatar" style="background: rgba(245, 158, 11, 0.2); border-color: var(--neon-amber);">👨‍🏭</div>
+                            <div class="msg-content" style="background: linear-gradient(135deg, #1e3a8a, #0f172a); border: 1px solid var(--neon-cyan);">
+                                <div class="msg-header">
+                                    <strong class="msg-author" style="color: var(--neon-amber);">{{ msg.sender_name }} (Chuyên gia hỏi AI)</strong>
+                                    <span class="msg-time">{{ msg.created_at|date:"H:i d/m/Y" }}</span>
+                                </div>
+                                <div class="msg-body" style="white-space: pre-line;">{{ msg.message }}</div>
+                                <div class="msg-footer">
+                                    <span class="msg-badge" style="background: rgba(245, 158, 11, 0.15); color: var(--neon-amber); border: 1px solid var(--neon-amber);">
+                                        ⚡ TRA CỨU TÀI LIỆU
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                    {% elif msg.sender_role == 'ai' %}
+                    <!-- PHẢN HỒI TỪ AI COPILOT -->
+                    <div class="chat-msg ai-msg">
+                        <div class="msg-avatar">🤖</div>
+                        <div class="msg-content">
+                            <div class="msg-header">
+                                <strong class="msg-author">{{ msg.sender_name }}</strong>
+                                <span class="msg-time">{{ msg.created_at|date:"H:i d/m/Y" }}</span>
+                            </div>
+                            <div class="msg-body" style="white-space: pre-line;">{{ msg.message }}</div>
+
+                            {% if msg.get_metadata.is_knowledge_contribution and msg.get_metadata.question_variations %}
+                            <!-- 5 BIẾN THỂ CÂU HỎI HIỆN TRƯỜNG ĐÃ TỰ ĐỘNG SINH & VECTOR HÓA -->
+                            <div style="margin-top: 12px; padding: 12px; background: rgba(59, 130, 246, 0.08); border: 1px dashed var(--neon-cyan); border-radius: 8px;">
+                                <div style="font-size: 11.5px; font-weight: 700; color: var(--neon-cyan); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                                    <span>⚡</span> 5 BIẾN THỂ CÂU HỎI HIỆN TRƯỜNG ĐÃ TỰ ĐỘNG TẠO & ĐỒNG BỘ VECTOR:
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 6px;">
+                                    {% for q in msg.get_metadata.question_variations %}
+                                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 6px 10px; border-radius: 6px; gap: 8px;">
+                                        <span style="font-size: 12.5px; color: #e2e8f0;">🔹 <em>"{{ q }}"</em></span>
+                                        <button type="button" onclick="testAskVariation('{{ q|escapejs }}')" style="background: rgba(59, 130, 246, 0.2); border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap;">
+                                            💬 Thử hỏi
+                                        </button>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if msg.get_metadata.suggested_text %}
+                            <div style="margin-top: 10px; padding: 10px; background: rgba(16, 185, 129, 0.1); border: 1px dashed var(--neon-emerald); border-radius: 6px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <span style="font-size: 11px; font-weight: 700; color: var(--neon-emerald);">💡 ĐỀ XUẤT NỘI DUNG CHO CHUYÊN GIA:</span>
+                                    <button type="button" onclick="applySuggestionToComposer('{{ msg.get_metadata.suggested_text|escapejs }}')" style="background: var(--neon-emerald); color: #000; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; cursor: pointer;">
+                                        📋 Chèn vào ô trả lời
+                                    </button>
+                                </div>
+                                <div style="font-size: 12px; color: #cbd5e1; font-style: italic;">
+                                    "{{ msg.get_metadata.suggested_text }}"
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <div class="msg-footer">
+                                {% if msg.get_metadata.is_knowledge_contribution %}
+                                <span class="msg-badge" style="background: var(--neon-emerald); color: #000; font-weight: 800;">
+                                    ✅ ĐÃ THIẾT LẬP ĐẦY ĐỦ QUAN HỆ NEO4J
+                                </span>
+                                <span class="msg-badge badge-neo4j">🔗 5 QUESTION VARIATIONS VECTORIZED</span>
+                                {% else %}
+                                <span class="msg-badge badge-neo4j">✅ NEO4J CAUSAL CHAIN</span>
+                                <span class="msg-badge badge-bbox">📑 DẪN CHIẾU SOP</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            <!-- GỢI Ý CÂU HỎI TRA CỨU NHANH CHO CHUYÊN GIA -->
+            <div class="quick-prompts-bar">
+                <span class="prompt-chip" style="background: rgba(16, 185, 129, 0.15); border-color: var(--neon-emerald); color: var(--neon-emerald); font-weight: 700;" onclick="openKnowledgeModal('{{ inquiry.machine }}')">
+                    ➕ Đóng góp Tri thức Mới
+                </span>
+                <span class="prompt-chip" onclick="fillExpertConsult('Tra cứu quy chuẩn SOP và thông số vận hành tiêu chuẩn của thiết bị {{ inquiry.machine }}')">📖 Tra cứu SOP máy</span>
+                <span class="prompt-chip" onclick="fillExpertConsult('Kiểm tra mắt xích nguyên nhân gốc rễ và linh kiện liên quan trên Neo4j')">🔗 Mắt xích Neo4j</span>
+                <span class="prompt-chip" onclick="fillExpertConsult('Gợi ý quy trình xử lý rò rỉ và danh mục phốt chịu nhiệt tương thích')">⚙️ Phụ tùng & Phốt</span>
+            </div>
+
+            <!-- KHUNG CHAT: CHUYÊN GIA HỎI AI ĐỂ TRA CỨU TÀI LIỆU & BẢN VẼ -->
+            <div class="chat-composer-container">
+                <form id="expert-consult-form" onsubmit="handleExpertConsultAI(event)">
+                    <input type="hidden" id="expert-consult-ticket-id" value="{{ inquiry.id }}">
+                    <div class="composer-input-row">
+                        <input type="text" id="expert-consult-input" placeholder="Chuyên gia gõ câu hỏi để AI tra cứu SOP, bản vẽ, linh kiện máy..." autocomplete="off" required>
+                        <button type="submit" class="send-btn" id="btn-expert-consult" style="background: linear-gradient(135deg, var(--neon-cyan), #0284c7);">
+                            <span>Hỏi AI ➔</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- RIGHT COLUMN: OFFICIAL EXPERT ANSWER & NEO4J DISTILLATION (TÍNH NĂNG CHÍNH CỦA CHUYÊN GIA) -->
+        <section class="expert-answer-panel">
+            <div class="panel-header primary-expert-header">
+                <div class="panel-title-group">
+                    <span class="panel-icon">✍️</span>
+                    <h2>Soạn Thảo Câu Trả Lời Của Chuyên Gia</h2>
+                </div>
+                <div class="panel-controls">
+                    <span class="authority-badge">Thẩm Quyền Ký Duyệt Tri Thức</span>
+                </div>
+            </div>
+
+            <div class="expert-composer-body">
+                <div class="inquiry-reference-box">
+                    <div class="ref-title">CÂU HỎI ĐANG CẦN CHUYÊN GIA GIẢI QUYẾT:</div>
+                    <div class="ref-question">"{{ inquiry.question }}"</div>
+                </div>
+
+                <!-- CÁC TÀI LIỆU QUY CHUẨN LIÊN QUAN DO AI TÌM KIẾM ĐƯỢC -->
+                {% if related_documents %}
+                <div class="dossier-card" style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-md); padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--neon-emerald); text-transform: uppercase;">
+                            📚 Các Tài Liệu Quy Chuẩn Liên Quan (AI Đã Tìm Thấy):
+                        </span>
+                        <span style="font-size: 10.5px; color: #94a3b8;">{{ related_documents|length }} tài liệu</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        {% for rdoc in related_documents %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                            <div style="font-size: 11.5px; color: #f1f5f9; display: flex; align-items: center; gap: 6px;">
+                                <span style="color: var(--neon-emerald); font-weight: 700;">[{{ rdoc.doc_code }}]</span>
+                                <span style="color: #cbd5e1;">{{ rdoc.doc_title }} (Trang {{ rdoc.page_number }})</span>
+                                <span style="font-size: 10px; color: var(--neon-cyan); background: rgba(56, 189, 248, 0.15); padding: 1px 5px; border-radius: 3px;">{{ rdoc.relevance_pct }}% khớp</span>
+                            </div>
+                            <div style="display: flex; gap: 6px;">
+                                <button type="button" onclick="selectExpertSop('{{ rdoc.doc_code|escapejs }}', '{{ rdoc.content|escapejs }}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid var(--neon-emerald); color: var(--neon-emerald); padding: 2px 7px; border-radius: 4px; font-size: 10.5px; cursor: pointer; font-weight: 600;">
+                                    📎 Đính kèm & Áp dụng
+                                </button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- FORM TRẢ LỜI CỦA CHUYÊN GIA -->
+                <form id="expert-answer-form" onsubmit="handleSubmitExpertAnswer(event)">
+                    <input type="hidden" id="ticket-id" value="{{ inquiry.id }}">
+                    <input type="hidden" id="expert-name-input" value="{{ inquiry.assigned_expert.name|default:'Trần Văn Minh (Line Master)' }}">
+
+                    <div class="expert-field-group">
+                        <label for="expert-answer-text">
+                            <strong>Nội dung giải đáp thực tế của Chuyên gia:</strong>
+                            <span class="hint-text">(Nêu rõ nguyên nhân hư hỏng, linh kiện lỗi, cách xử lý và quy chuẩn SOP nếu có)</span>
+                        </label>
+                        <textarea id="expert-answer-text" rows="5" placeholder="Ví dụ: Nguyên nhân do van xả khí E-102 bị kẹt màng cao su khi nhiệt độ dầu vượt 50°C. Xử lý: Tắt nguồn khí, tháo cụm van và ngâm rửa bằng dung môi Isopropyl, sau đó tra mỡ chịu nhiệt Kluber theo SOP-015." required>{% if inquiry.expert_answer %}{{ inquiry.expert_answer }}{% endif %}</textarea>
+                    </div>
+
+                    <!-- KHU VỰC ĐÍNH KÈM / UPLOAD TÀI LIỆU (TÙY CHỌN - CHỈ LIÊN KẾT NEO4J KHI CÓ ĐÍNH KÈM) -->
+                    <div class="expert-doc-attachment-box" style="margin-top: 14px; background: rgba(15, 23, 42, 0.7); border: 1px dashed var(--neon-cyan); border-radius: 8px; padding: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong style="color: var(--neon-cyan); font-size: 12px; display: flex; align-items: center; gap: 6px;">
+                                📎 ĐÍNH KÈM TÀI LIỆU DẪN CHỨNG (TÙY CHỌN):
+                            </strong>
+                            <span style="font-size: 10.5px; color: #94a3b8; font-style: italic;">
+                                ⚠️ Chỉ liên kết vào Đồ thị Neo4j khi Chuyên gia đính kèm tài liệu này
+                            </span>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <!-- TÙY CHỌN 1: CHỌN TỪ TÀI LIỆU CÓ SẴN -->
+                            <div>
+                                <label for="expert-sop-select" style="font-size: 11px; color: #cbd5e1; display: block; margin-bottom: 4px; font-weight: 600;">
+                                    1. Chọn tài liệu SOP có sẵn:
+                                </label>
+                                <select id="expert-sop-select" style="width: 100%; background: #0f172a; border: 1px solid var(--border-dim); color: #f8fafc; padding: 7px 10px; border-radius: 6px; font-size: 11.5px; outline: none;">
+                                    <option value="">-- Không đính kèm (Không nối SOP trong Neo4j) --</option>
+                                    {% for doc in all_documents %}
+                                    <option value="{{ doc.doc_code }}" {% if visual_grounding and visual_grounding.doc_code == doc.doc_code %}selected{% endif %}>
+                                        [{{ doc.doc_code }}] {{ doc.title }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <!-- TÙY CHỌN 2: TẢI LÊN FILE TÀI LIỆU MỚI -->
+                            <div>
+                                <label for="expert-upload-file" style="font-size: 11px; color: #cbd5e1; display: block; margin-bottom: 4px; font-weight: 600;">
+                                    2. Hoặc Tải lên file mới (PDF / Bản vẽ / Ảnh):
+                                </label>
+                                <input type="file" id="expert-upload-file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" style="width: 100%; background: #0f172a; border: 1px solid var(--border-dim); color: #94a3b8; padding: 5px 8px; border-radius: 6px; font-size: 11px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PROMINENT BUTTON TRẢ LỜI CÂU HỎI -->
+                    <div class="expert-action-row" style="margin-top: 14px;">
+                        <button type="submit" class="btn-submit-expert-action" id="btn-submit-expert">
+                            <span class="btn-icon">🚀</span>
+                            <span class="btn-text">TRẢ LỜI CÂU HỎI ĐANG THẮC MẮC (LƯU VÀO NEO4J)</span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- LIVE ENTITY EXTRACTION & NEO4J DISTILLATION CARD (HIỂN THỊ KHI BẤM NÚT HOẶC KHI ĐÃ ĐƯỢC GIẢI ĐÁP) -->
+                <div class="distillation-result-card" id="distillation-result-card" {% if not inquiry.neo4j_synced %}style="display: none;"{% endif %}>
+                    <div class="distill-header">
+                        <span class="check-icon">✅</span>
+                        <div>
+                            <strong>AI ĐÃ BÓC TÁCH THỰC THỂ & LƯU CHÍNH THỨC VÀO NEO4J</strong>
+                            <div class="distill-sub">Đồ thị tri thức Kỹ thuật Nhà máy đã được đồng bộ chuẩn xác</div>
+                        </div>
+                    </div>
+
+                    <div class="entities-grid" id="entities-grid">
+                        <div class="entity-item">
+                            <span class="ent-label">🏷️ Thiết bị (Machine):</span>
+                            <strong class="ent-val" id="ent-machine">{{ inquiry.get_extracted_entities.machine|default:inquiry.machine }}</strong>
+                        </div>
+                        <div class="entity-item">
+                            <span class="ent-label">⚙️ Linh kiện (Component):</span>
+                            <strong class="ent-val" id="ent-component">{{ inquiry.get_extracted_entities.component|default:"Chưa xác định" }}</strong>
+                        </div>
+                        <div class="entity-item">
+                            <span class="ent-label">⚡ Triệu chứng (Symptom):</span>
+                            <strong class="ent-val" id="ent-symptom">{{ inquiry.get_extracted_entities.symptom|default:inquiry.question }}</strong>
+                        </div>
+                        <div class="entity-item">
+                            <span class="ent-label">🔍 Nguyên nhân (Root Cause):</span>
+                            <strong class="ent-val" id="ent-root-cause">{{ inquiry.get_extracted_entities.root_cause|default:"Đang phân tích" }}</strong>
+                        </div>
+                        <div class="entity-item full-width">
+                            <span class="ent-label">🛠️ Giải pháp (Solution):</span>
+                            <strong class="ent-val" id="ent-solution">{{ inquiry.get_extracted_entities.solution|default:inquiry.expert_answer }}</strong>
+                        </div>
+                        <div class="entity-item">
+                            <span class="ent-label">📜 Quy chuẩn (SOP):</span>
+                            <strong class="ent-val" id="ent-sop">{{ inquiry.get_extracted_entities.sop_code|default:"SOP-015" }}</strong>
+                        </div>
+                        <div class="entity-item">
+                            <span class="ent-label">👨‍🏭 Bảo chứng (Expert):</span>
+                            <strong class="ent-val" id="ent-expert">{{ inquiry.assigned_expert.name|default:"Trần Văn Minh" }}</strong>
+                        </div>
+                    </div>
+
+                    <!-- CYPHER PREVIEW -->
+                    <div class="cypher-box">
+                        <div class="cypher-title">Câu lệnh Cypher đã thực thi (Deterministic MERGE):</div>
+                        <pre class="cypher-code" id="cypher-code-preview">{{ inquiry.cypher_executed|default:"MERGE (m:Machine {name: $machine})\nMERGE (c:Component {name: $component})\nMERGE (m)-[:HAS_COMPONENT]->(c)\nMERGE (sym:Symptom {name: $symptom})\nMERGE (c)-[:EXHIBITS]->(sym)\nMERGE (rc:RootCause {name: $root_cause})\nMERGE (sym)-[:CAUSED_BY]->(rc)\nMERGE (sol:Solution {name: $solution})\nMERGE (rc)-[:RESOLVED_BY]->(sol)\nMERGE (e:Expert {name: $expert_name})\nMERGE (e)-[:VALIDATED]->(sol)" }}</pre>
+                    </div>
+
+                    <div class="finish-action-row">
+                        <a href="/chat/" class="btn-return-chat">
+                            <span>Quay lại Khung Chat Kỹ Thuật Viên ➔</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+    </div>
+</div>
+
+<!-- MODAL ĐÓNG GÓP TRI THỨC MỚI DÀNH CHO CHUYÊN GIA -->
+<div id="knowledge-modal" class="modal-backdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 9999; align-items: center; justify-content: center;">
+    <div class="modal-box" style="background: var(--bg-card); border: 1.5px solid var(--neon-emerald); border-radius: var(--radius-lg); width: 92%; max-width: 650px; box-shadow: 0 0 35px rgba(16, 185, 129, 0.25); padding: 22px; display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-dim); padding-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 22px;">💡</span>
+                <h3 style="margin: 0; color: var(--neon-emerald); font-size: 16px;">Đóng Góp Tri Thức Kỹ Thuật Mới (Line Master)</h3>
+            </div>
+            <button type="button" onclick="closeKnowledgeModal()" style="background: none; border: none; color: var(--text-dim); font-size: 20px; cursor: pointer;">✕</button>
+        </div>
+
+        <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5;">
+            Chuyên gia có thể nhập kinh nghiệm xử lý thực tế, quy chuẩn SOP hoặc phương án bảo dưỡng. AI sẽ tự động bóc tách thực thể (Machine, Component, Symptom, RootCause, Solution, SOP), tạo các <strong>biến thể câu hỏi</strong> và thiết lập toàn bộ quan hệ trong <strong>Neo4j Graph & Vector Qdrant</strong>.
+        </p>
+
+        <form id="knowledge-contribution-form" onsubmit="submitKnowledgeContribution(event)">
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                    <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">CHUYÊN GIA BẢO CHỨNG:</label>
+                    <input type="text" id="contrib-expert-name" value="{{ inquiry.assigned_expert.name|default:'Trần Văn Minh' }}" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 8px; border-radius: 6px; font-size: 12.5px;" required>
+                </div>
+                <div style="flex: 1;">
+                    <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">THIẾT BỊ ÁP DỤNG:</label>
+                    <input type="text" id="contrib-machine" value="{{ inquiry.machine }}" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 8px; border-radius: 6px; font-size: 12.5px;" required>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-dim); display: block; margin-bottom: 4px;">NỘI DUNG TRI THỨC KỸ THUẬT / QUY TẮC XỬ LÝ SỰ CỐ:</label>
+                <textarea id="contrib-knowledge-text" rows="4" style="width: 100%; background: var(--bg-surface); border: 1px solid var(--border-dim); color: #fff; padding: 10px; border-radius: 6px; font-size: 13px; font-family: inherit; line-height: 1.5; resize: vertical;" placeholder="Ví dụ: Khi van E-102 trạm ép Solenoid xì khí khi dầu nóng ran, thay phốt cao su chịu nhiệt Fluoro-Rubber theo SOP-015." required></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closeKnowledgeModal()" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-dim); color: #fff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12.5px;">Hủy bỏ</button>
+                <button type="submit" id="btn-submit-knowledge" style="background: linear-gradient(135deg, var(--neon-emerald), #059669); border: none; color: #000; font-weight: 800; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 12.5px; display: flex; align-items: center; gap: 6px;">
+                    <span>🚀 NẠP TRI THỨC & TỰ ĐỘNG TẠO BIẾN THỂ</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

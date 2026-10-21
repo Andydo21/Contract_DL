@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}NewIdea — Thư viện case prototype{% endblock %}</title>
+  <style>body{margin:0;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif}header{padding:20px;border-bottom:1px solid #475569}header a{color:#a5b4fc;margin-right:20px}main{padding:20px;max-width:1300px;margin:auto}button,input,textarea,select{font:inherit}button{cursor:pointer}</style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body><header><strong>NewIdea — Prototype case library</strong> · <a href="/cases/">Thư viện case</a><a href="/admin/">Quản trị</a></header>
+<main>{% block content %}{% endblock %}</main>
+{% block extra_js %}{% endblock %}
+</body></html>

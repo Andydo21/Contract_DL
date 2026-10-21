@@ -1,0 +1,135 @@
+# Lightweight web runtime using the database configured in the root .env.
+services:
+  entity-worker:
+    image: riskdl-web-local:latest
+    container_name: contract_entity_worker
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py resolve_document_entities --watch
+    environment:
+      - A3_ENTITY_PROVIDER=gliner
+      - RAG_INFERENCE_URL=http://host.docker.internal:8010
+      - NEO4J_URI=${NEO4J_DOCKER_URI:-}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+  knowledge-worker:
+    image: riskdl-web-local:latest
+    container_name: contract_knowledge_worker
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py knowledge_worker
+    environment:
+      - A3_ENTITY_PROVIDER=gliner
+      - RAG_INFERENCE_URL=http://host.docker.internal:8010
+      - NEO4J_URI=${NEO4J_DOCKER_URI:-}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    container_name: contract_qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6335:6333"
+    volumes:
+      - contract-a3-qdrant:/qdrant/storage
+    networks:
+      - riskdl-net
+  web:
+    restart: unless-stopped
+    command: python manage.py runserver 0.0.0.0:8000 --noreload
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - RAG_INFERENCE_URL=http://host.docker.internal:8010
+      - A3_ENTITY_PROVIDER=gliner
+  ai-service:
+    restart: "no"
+    image: contract-ai-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ai-local
+      args:
+        BASE_IMAGE: riskdl-ai-service:latest
+  ai-summary:
+    restart: "no"
+    image: contract-summary-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ai-local
+      args:
+        BASE_IMAGE: riskdl-ai-summary:latest
+  workflow-service:
+    restart: "no"
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8003:8000"
+  blockchain-service:
+    restart: "no"
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8002:8000"
+  fabric-init:
+    container_name: contract_fabric_init
+  orderer.example.com:
+    container_name: contract_orderer
+    restart: "no"
+    volumes:
+      - contract-orderer-ledger:/var/hyperledger/production/orderer
+  peer0.org1.example.com:
+    container_name: contract_peer
+    restart: "no"
+    volumes:
+      - contract-peer-ledger:/var/hyperledger/production
+  fabric-cli:
+    container_name: contract_fabric_cli
+  fabric-chaincode:
+    container_name: contract_chaincode
+    restart: "no"
+    volumes:
+      - contract-go-cache:/go/pkg/mod
+      - contract-go-build:/root/.cache/go-build
+      - ./fabric/crypto-config/peerOrganizations/org1.example.com/users/User1@org1.example.com/msp/signcerts/User1@org1.example.com-cert.pem:/gateway-cert.pem:ro
+    environment:
+      ENTERPRISE_GATEWAY_CERT_PATH: /gateway-cert.pem
+  fabric-gateway:
+    container_name: contract_fabric_gateway
+    restart: "no"
+    entrypoint: /bin/sh -c "npm ci --omit=dev && npm start"
+  ledger-worker:
+    image: riskdl-web-local:latest
+    container_name: contract_ledger_worker
+    restart: "no"
+    working_dir: /app
+    command: python manage.py ledger_worker
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+  gateway:
+    restart: "no"
+volumes:
+  contract-a3-qdrant:
+  contract-orderer-ledger:
+  contract-peer-ledger:
+  contract-go-cache:
+  contract-go-build:

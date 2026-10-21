@@ -1,0 +1,9 @@
+# Install in the A3 inference environment; keep Django from root requirements.
+-r ../requirements.txt
+surya-ocr==0.22.0
+numpy>=1.24
+qdrant-client>=1.10
+sentence-transformers>=3.1
+neo4j>=5.20
+openpyxl>=3.1
+python-pptx>=1.0

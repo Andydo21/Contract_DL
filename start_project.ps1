@@ -1,7 +1,11 @@
-# ==============================================================================
-# DENSO FACTORY INTELLIGENCE - ROOT STARTER (POWERSHELL)
-# ==============================================================================
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DemoDir = Join-Path $ScriptDir "denso_demo"
-Set-Location $DemoDir
-& "$DemoDir\start_project.ps1"
+param(
+    [ValidateSet('Ai','Ledger','All')][string]$Mode = 'Ai',
+    [switch]$SkipLocalInference,
+    [switch]$AllowLowMemory,
+    [switch]$Logs = $true,
+    [switch]$NoLogs
+)
+# Keep the previous entry point while using one Docker service-mode launcher.
+$PSBoundParameters.Remove('NoLogs') | Out-Null
+$PSBoundParameters['Logs'] = $Logs -and -not $NoLogs
+& (Join-Path $PSScriptRoot 'start-services.ps1') @PSBoundParameters
