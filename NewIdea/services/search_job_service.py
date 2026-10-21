@@ -38,7 +38,6 @@ def finish_search(log, data):
     citations = data.get('citations', data.get('results', []))
     log.result = dict(progress=log.result.get('progress', {}), access=access_snapshot(log.user), answer=data.get('answer', ''), generation_status=data.get('generation_status'),
         quality_gate=data.get('quality_gate'), coverage=data.get('context_coverage'),
-        document_checks=data.get('document_checks'),
         qwen_outputs=data.get('qwen_outputs', []),
         answer_text=data.get('answer_text'), answer_source_ids=data.get('answer_source_ids', []),answer_notes=data.get('answer_notes', []),
         citation_check=data.get('citation_check'), generation_diagnostics=data.get('generation_diagnostics'),

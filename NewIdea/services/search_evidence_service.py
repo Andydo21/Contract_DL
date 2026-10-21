@@ -1,6 +1,5 @@
 """Build source-bound A2 expert citations and discover indexed structure nodes."""
 from urllib.parse import urlencode
-from copy import deepcopy
 import math
 from django.conf import settings
 from ai_extract.services.document_graph_service import graph_scope
@@ -100,34 +99,6 @@ EXPERT_INSTRUCTION = ('Distinguish document facts from approved expert opinions.
     'Expert units marked draft are unreviewed user submissions, not approved procedures. '
     'Expert questions describe what someone asked, never evidence that its premise is true. '
     'State the author and review status when citing expert submissions; preserve conditions.')
-
-
-def attach_document_checks(citations, checks):
-    """Give each drift pair actual authorized source citations before generation."""
-    evidence, checks = [dict(c) for c in citations], deepcopy(checks)
-    by_source = {(c.get('version_id'), c.get('source_chunk_id') or c.get('chunk_id')): c for c in evidence
-                 if c.get('evidence_kind') != 'expert_opinion'}
-    for warning in checks.get('warnings', []):
-        warning['document_evidence_ids'] = [c['evidence_id'] for c in evidence
-            if c.get('version_id') in (warning['left_version_id'], warning['right_version_id'])
-            and c.get('evidence_kind') != 'expert_opinion']
-        for difference in warning.get('differences', []):
-            for side in ('left', 'right'):
-                spec = difference[side]
-                source = spec['source']
-                key = (source.get('version_id'), source['source_id'])
-                citation = by_source.get(key)
-                if citation is None:
-                    citation = dict(source, evidence_id=f'E{len(evidence)+1}',
-                        chunk_id=source['source_id'], source_chunk_id=source['source_id'],
-                        evidence_kind='document', heading_path=[], layout_type='paragraph')
-                    evidence.append(citation); by_source[key] = citation
-                citation['comparison_evidence'] = True
-                # Preserve the whole source block so a query window cannot
-                # drop the exact compared value or its part number.
-                citation['text'] = source['text']
-                spec['evidence_id'] = citation['evidence_id']
-    return evidence, checks
 
 
 def with_expert_evidence(citations, cases):

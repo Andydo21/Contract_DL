@@ -68,16 +68,6 @@ def evidence_sources(request, version_id):
 
 @require_http_methods(['GET', 'POST'])
 @knowledge_api
-def spec_drift(request):
-    from NewIdea.services import spec_drift_service
-    if request.method == 'GET':
-        return JsonResponse(spec_drift_service.available_versions(request.user))
-    data = json_body(request)
-    return JsonResponse(spec_drift_service.compare_versions(request.user, data.get('cad_version_id'), data.get('sop_version_id')))
-
-
-@require_http_methods(['GET', 'POST'])
-@knowledge_api
 def expert_submission(request):
     if request.method == 'GET':
         from NewIdea.repositories.expert_submission_repository import visible_submission

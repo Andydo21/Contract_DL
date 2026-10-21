@@ -10,7 +10,7 @@ from NewIdea.repositories import contract_repository, knowledge_repository, expe
 from .search_job_service import reserve_search, finish_search, update_progress
 from .errors import KnowledgeError
 from .search_evidence_service import (
-    matched_structure_nodes, attach_document_checks, select_answer_sources, select_retrieval_seeds,
+    matched_structure_nodes, select_answer_sources, select_retrieval_seeds,
 )
 
 class SearchBackend(HybridBackend):
@@ -291,9 +291,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
         expanded.extend(dict(r, expansion_reason='expert_submission_context') for r in knowledge
             if r.get('submission_id') in expert_roots and r.get('source_role') in {'question', 'expert-answer', 'expert-note'})
         results = select_answer_sources([dict(c, expansion_reason='query_match') for c in candidates] + expanded)
-        from .spec_drift_service import discovered_warnings
-        document_checks = discovered_warnings(list(trees.records_for(v.pk for v in selected_versions)), [v.pk for v in selected_versions])
-        citations, document_checks = attach_document_checks(results, document_checks)
+        citations = results
         for version in selected_versions:
             matched_nodes.extend(matched_structure_nodes(trees[version.pk],
                 [c for c in citations if c.get('version_id') == version.pk and c.get('source_kind') != 'knowledge_text'], version, runs.get(version.pk)))
@@ -307,7 +305,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
             [r for r in knowledge if r.get('submission_id') in expert_roots])
         cases = list({c['expert_case_id']: c['expert_case'] for c in citations if c.get('expert_case_id')}.values())
         result = dict(success=True, results=results, citations=citations, matched_nodes=matched_nodes[:30],
-            document_checks=document_checks, similar_cases=cases, search_id=receipt.pk,
+            similar_cases=cases, search_id=receipt.pk,
             generation_status='discovery_sources', score_kind='retrieval_ranking_not_accuracy',
             context_coverage=dict(mode='unified_knowledge', access_scope='all_companies' if user.is_superuser else 'authorized_documents',
                 versions_total=total, versions_scanned=len(versions), indexed_only=False,
@@ -325,7 +323,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
                 partial=candidate_count>60 or len(versions)<total or len(eligible)>len(candidates), retrieval_streams=diagnostics,
                 dense_state=diagnostics['dense']['state'], reranker_state=reranker_state,
                 knowledge_records=len(knowledge), version_details=details,
-                graph_contexts=graph_contexts, external_web_search=False, document_checks=document_checks))
+                graph_contexts=graph_contexts, external_web_search=False))
         mark('source_and_graph_expansion')
         result['retrieval_latency_ms'] = round((time.perf_counter()-started)*1000, 2)
         if generate and reranker_state=='unavailable' and not candidates:

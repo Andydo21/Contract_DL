@@ -23,20 +23,14 @@
 {% if newidea_mode %}
 <section class="intelligence-panel a2-primary">
   <h2>Bạn muốn biết điều gì?</h2>
-  <p class="a2-intro">Tìm trên toàn bộ kho tài liệu được phép truy cập, chọn nguồn phù hợp và cảnh báo khác biệt hoặc nội dung trùng khi đủ dữ liệu.</p>
+  <p class="a2-intro">Tìm trên toàn bộ kho tài liệu được phép truy cập và tổng hợp câu trả lời từ các nguồn phù hợp.</p>
   {% if request.user.is_superuser %}<p>Tài khoản quản trị đang tìm trong kho của tất cả công ty.</p>{% endif %}
   <form id="company-search-form"><label for="company-query">Câu hỏi</label><textarea id="company-query" rows="3" required maxlength="2000" placeholder="Ví dụ: Chuyên gia khuyến nghị xử lý điều khoản thanh toán như thế nào?"></textarea><button>Hỏi A2</button><details class="a2-options"><summary>Tùy chọn trả lời</summary><label><input type="checkbox" id="company-generate" checked style="width:auto"> Tổng hợp câu trả lời từ nguồn tìm được</label></details></form>
-  <div id="company-warnings"></div><div id="company-answer" style="white-space:pre-wrap" aria-live="polite"></div>
+  <div id="company-answer" style="white-space:pre-wrap" aria-live="polite"></div>
   <details class="a2-sources"><summary>Nguồn và nội dung tìm được</summary><p id="company-coverage"></p><div id="company-nodes"></div><div id="company-results"></div></details>
   <details class="a2-sources"><summary>Ý kiến chuyên gia liên quan</summary><div id="company-cases"></div></details>
 </section>
 {% endif %}
-<details class="a2-tool" id="drift-tools"><summary>Đối chiếu thủ công hai tài liệu (tùy chọn)</summary>
-<section class="intelligence-panel">
-  <p>Chọn hai PDF/ảnh đã trích xuất để đối chiếu thông số. Khác biệt cần chuyên gia xác nhận.</p>
-  <form id="spec-drift-form"><label for="cad-version">Bản vẽ CAD</label><select id="cad-version" required></select><label for="sop-version">SOP</label><select id="sop-version" required></select><button>Đối chiếu</button></form>
-  <div id="spec-drift-results" role="status" aria-live="polite"></div>
-</section></details>
 <div class="intelligence-grid">
   <details class="a2-tool" {% if selected_contract %}open{% endif %}><summary>Hỏi một tài liệu cụ thể</summary>
   <section class="intelligence-panel">
@@ -152,18 +146,7 @@
     const button=document.getElementById('expert-ask'),parent=document.getElementById('expert-ask-result');button.disabled=true;parent.replaceChildren();
     try{const query=document.getElementById('expert-question').value.trim();if(!query)throw new Error('Nhập câu hỏi trước.');text(parent,'p','Đang tìm trong toàn bộ kho kiến thức được phép truy cập…');const result=await queuedSearch({query,scope:'knowledge',generate:true},parent);parent.replaceChildren();renderQwenJson(parent,result);text(parent,'p',result.answer_text||result.answer||'Chưa có câu trả lời đủ bằng chứng.');(result.citations||result.results||[]).forEach(source=>{const row=text(parent,'article','');row.className='evidence-record';text(row,'p',source.text);if(source.source_url){const link=text(row,'a','Mở nguồn');link.href=source.source_url;link.target='_blank';link.rel='noopener';}});}catch(error){text(parent,'p',error.message);}finally{button.disabled=false;}
   };
-  async function loadDriftVersions(){try{const data=await api('/api/newidea/spec-drift/');['cad-version','sop-version'].forEach(id=>{const select=document.getElementById(id);const empty=text(select,'option','Chọn tài liệu đã trích xuất');empty.value='';data.versions.forEach(v=>{const option=text(select,'option',`${v.title} · phiên bản ${v.version_number}`);option.value=v.id;});});}catch(e){document.getElementById('spec-drift-results').textContent=e.message;}}
-  document.getElementById('spec-drift-form').onsubmit=async e=>{
-    e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;
-    const parent=document.getElementById('spec-drift-results');parent.replaceChildren();
-    try{const result=await api('/api/newidea/spec-drift/',{cad_version_id:Number(document.getElementById('cad-version').value),sop_version_id:Number(document.getElementById('sop-version').value)});
-      const labels={same_extracted_text:'Cảnh báo: nội dung trích xuất trùng nhau; chưa xác nhận file nhị phân giống nhau.',similar_text_review_required:'Cảnh báo: hai tài liệu có nội dung gần giống; cần kiểm tra revision.',different_text:'Hai tài liệu có nội dung khác nhau.',insufficient_text:'Chưa đủ chữ để kiểm tra tài liệu trùng.'};text(parent,'p',labels[result.duplicate.status]);
-      text(parent,'p',`Đã đối chiếu ${result.coverage.compared_pairs} cặp thông số; ${result.coverage.ambiguous_specs} thông số chưa đủ điều kiện đối chiếu.`);
-      if(!result.differences.length)text(parent,'p','Chưa thấy khác biệt trong các trường so sánh được. Kết quả này không xác nhận toàn bộ CAD và SOP nhất quán.');
-      result.differences.forEach(d=>{const article=text(parent,'article','');article.className='evidence-record';text(article,'h3',`${d.subject} · ${d.field}: khác biệt cần chuyên gia kiểm tra`);['left','right'].forEach(side=>{const spec=d[side];text(article,'p',`${side==='left'?'CAD':'SOP'}: ${spec.quote}`);const link=text(article,'a',spec.source.grounding_status==='source_block_bbox'?'Mở vùng nguồn đánh dấu đỏ':'Mở nguồn (chưa có bbox)');link.href=spec.source.source_url;link.target='_blank';link.rel='noopener';text(article,'p',`Trang ${spec.source.page_number||'chưa xác định'} · ${spec.source.source_id}`);});});
-    }catch(error){text(parent,'p',error.message);}finally{button.disabled=false;}
-  };
-  loadDriftVersions();
+
   function setSources(records){const select=form.elements.source_reference;select.replaceChildren();const empty=text(select,'option','Chọn bằng chứng');empty.value='';records.forEach(r=>{const option=text(select,'option',`${r.chunk_id} · ${r.source_location} · ${r.text.slice(0,90)}`);option.value=r.chunk_id;});}
   function ensureSource(id){const select=form.elements.source_reference;if(id&&!Array.from(select.options).some(o=>o.value===id)){const option=text(select,'option',id);option.value=id;}select.value=id||'';}
   async function loadInquiries(){try{const data=await api('/api/newidea/inquiries/');const parent=document.getElementById('expert-inquiries');parent.replaceChildren();if(!data.inquiries.length)text(parent,'p','Chưa có yêu cầu.');data.inquiries.forEach(i=>{const row=text(parent,'article','');row.className='evidence-record';text(row,'p',`#${i.id} · ${i.question} · ${i.status} · ${i.assignee||'Chưa phân công'}`);const link=text(row,'a','Mở hợp đồng để xử lý');link.href=`/newidea/contracts/${i.contract_id}/?version_id=${i.version_id}&inquiry_id=${i.id}`;if(canReview&&['OPEN','ASSIGNED'].includes(i.status)){const select=text(row,'select','');data.reviewers.forEach(r=>{const o=text(select,'option',r.username);o.value=r.id;});const button=text(row,'button','Phân công');button.onclick=async()=>{try{await api('/api/newidea/inquiries/',{action:'assign',id:i.id,assignee_id:Number(select.value)});await loadInquiries();}catch(e){status.textContent=e.message;}};}if(i.assignee===currentUsername&&['ASSIGNED','ANSWERED'].includes(i.status)&&Number(version.value)===i.version_id){const answer=text(row,'button','Soạn câu trả lời');answer.onclick=()=>openInquiry(i.id);}});}catch(e){status.textContent=e.message;}}
@@ -317,8 +300,6 @@
       document.getElementById('company-coverage').textContent=`Kho có ${coverage.versions_total} tài liệu; đã khảo sát ${coverage.versions_scanned} tài liệu${coverage.versions_with_sources!==undefined?`, ${coverage.versions_with_sources} có nội dung đã số hóa, ${coverage.indexed_versions} có chỉ mục vector`:''} và ${coverage.knowledge_records||0} nội dung chuyên gia, chọn ${coverage.versions_deeply_searched} tài liệu liên quan để đọc sâu; ${coverage.access_scope==='all_companies'?'tất cả công ty':'toàn bộ nguồn được phép truy cập'}${coverage.partial?'; kết quả truy xuất có giới hạn':''}.`;
       document.getElementById('company-answer').textContent=data.answer_text||data.answer||'';
       renderQwenJson(document.getElementById('company-answer'),data);
-      const warnings=document.getElementById('company-warnings');warnings.replaceChildren();
-      (data.document_checks?.warnings||[]).forEach(w=>{const row=text(warnings,'article','');row.className='evidence-record';text(row,'h3','Cảnh báo dữ liệu trong các tài liệu tìm được');text(row,'p',`${w.left_title} ↔ ${w.right_title}`);if(['same_extracted_text','similar_text_review_required'].includes(w.duplicate.status))text(row,'p',w.duplicate.status==='same_extracted_text'?'Nội dung trích xuất trùng nhau; kiểm tra bản trùng và revision.':'Nội dung gần giống; cần đối chiếu revision.');w.differences.forEach(d=>{text(row,'p',`${d.subject} · ${d.field}: ${d.left.value} ↔ ${d.right.value}. Khác biệt cần chuyên gia kiểm tra.`);[d.left,d.right].forEach(spec=>{const link=text(row,'a','Mở bằng chứng · ');link.href=spec.source.source_url;link.target='_blank';link.rel='noopener';});});});
       status.textContent=body.generate?generationLabel(data):'Đã tìm các đoạn nguồn liên quan';
       const parent=document.getElementById('company-results');parent.replaceChildren();
       if(!data.results.length)text(parent,'p',data.generation_diagnostics?.state==='retrieval_unavailable'?'Chưa lấy được nguồn do dịch vụ tra cứu không sẵn sàng.':'Chưa tìm được đoạn nguồn đủ liên quan. Kiểm tra câu hỏi hoặc số hóa những tài liệu chưa có nội dung.');

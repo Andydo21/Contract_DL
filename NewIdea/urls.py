@@ -3,12 +3,10 @@ from django.urls import path
 from .views import contract_views
 from .views.knowledge_views import inquiries, evidence_sources, search_jobs
 from .views.knowledge_views import search_knowledge
-from .views.knowledge_views import spec_drift
 from .views.knowledge_views import expert_submission
 
 urlpatterns=[
     path('api/newidea/expert-submissions/', expert_submission, name='newidea_expert_submission'),
-    path('api/newidea/spec-drift/', spec_drift, name='newidea_spec_drift'),
     path('newidea/',contract_views.workspace,name='newidea_workspace'),
     path('newidea/contracts/<int:contract_id>/',contract_views.workspace,name='newidea_contract'),
     path('api/newidea/ask/',contract_views.ask,name='newidea_ask'),
