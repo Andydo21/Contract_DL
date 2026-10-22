@@ -4,6 +4,9 @@ from shared.retrieval import source_excerpt
 from .search_evidence_service import EXPERT_INSTRUCTION
 import json
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+from django.conf import settings
 from ai_extract import SEMANTIC_EDGE_TYPES
 
 
@@ -97,12 +100,12 @@ def focus_answer_sources(payload, parts, previous_claims=()):
     if not sources:return payload
     return dict(payload,evidence=sources,graph_context=focused)
 
-def request_answer_with_context_retry(request_model, payload):
-    """Retry shorter output, then read smaller source-bound batches as needed.
+def request_answer_with_context_retry(request_model, payload, *, parallel=True, synthesize=True):
+    """Retry shorter output, then map source-bound groups with bounded concurrency.
 
     Reducing output cannot fit a prompt larger than the entire context. In that
     case split passages, never truncate them or substitute fabricated answers.
-    Citation checks and advisory self-review run on the merged claims.
+    Reduce synthesizes mapped findings against their original cited sources.
     """
     try:
         return request_model('contract_qa',payload)
@@ -118,33 +121,70 @@ def request_answer_with_context_retry(request_model, payload):
         sources=retry['evidence']
         if len(sources)<2:
             raise overflow
-    responses=[];processed=[]
-    required={p['id'] for p in retry.get('answer_parts',[])}
+    enabled=getattr(settings,'A2_MAP_REDUCE_ENABLED',False)
+    # Keep independent documents apart: a condition in one document must not
+    # become a missing property of another simply because both share a keyword.
+    documents={}
+    for source in sources:
+        identity=source.get('document_id') or source.get('version_id') or source.get('submission_id')
+        documents.setdefault(identity,[]).append(source)
     middle=len(sources)//2
-    for batch in (sources[:middle],sources[middle:]):
+    batches=list(documents.values()) if enabled and len(documents)>1 else [sources[:middle],sources[middle:]]
+    children=[]
+    for batch in batches:
         graph,_=claim_verification_context(retry.get('graph_context') or {},sources,
             [dict(evidence_ids=[s['evidence_id'] for s in batch])])
         child=dict(retry,evidence=batch,graph_context=dict(graph,partial=True),
-            source_packets=answer_source_packets(batch,retry.get('answer_parts',[]),graph),
             coverage=dict(retry.get('coverage',{}),partial=True),
             instruction=retry.get('instruction','')+(
                 ' This is one source batch of a larger retrieval. Return only claims supported by this batch. '
                 'Do not claim that information is absent from the whole document or other batches. '
                 'Leave parts unsupported by this batch unanswered; other batches will be read separately.'))
-        covered={part for r in responses for c in r.get('citation_claims',[]) for part in c.get('part_ids',[])}
-        if required:
-            pending=[part for part in retry['answer_parts'] if part['id'] not in covered]
-            if not pending:break
-            child=dict(child,answer_parts=pending,coverage=dict(child['coverage'],requested_parts=[p['question'] for p in pending]))
-        response=request_answer_with_context_retry(request_model,child)
-        # Review the merged answer once. A model verdict must not silently
-        # remove paragraphs here or add another call for every source batch.
-        responses.append(response)
-        processed.extend(s['evidence_id'] for s in batch)
-        covered={part for r in responses for c in r.get('citation_claims',[]) for part in c.get('part_ids',[])}
-        # Once the model has addressed all parts, review the merged answer.
-        # Do not generate more competing answers from lower-priority batches.
-        if required and required<=covered:break
+        available={s['evidence_id'] for s in batch}
+        parts=retry.get('answer_parts',[])
+        relevant=[p for p in parts if not p.get('source_ids') or available.intersection(p['source_ids'])]
+        if parts:
+            child=dict(child,answer_parts=relevant,
+                coverage=dict(child['coverage'],requested_parts=[p['question'] for p in relevant]))
+        child['source_packets']=answer_source_packets(batch,child.get('answer_parts',[]),graph)
+        children.append(child)
+    # Only this level owns a pool. Recursive splits run inside these workers,
+    # so a long document cannot create unbounded requests or nested executors.
+    workers=min(len(children),max(1,int(getattr(settings,'A2_MAP_WORKERS',2)))) if enabled and parallel else 1
+    def read(child):
+        started=time.perf_counter()
+        try:
+            response=request_answer_with_context_retry(request_model,child,parallel=False,synthesize=False)
+        except QwenGatewayError as error:
+            return dict(answer='',citation_claims=[],_error=error,
+                qwen_outputs=getattr(error,'qwen_outputs',[]),
+                answer_notes=[dict(text='Một nhóm nguồn chưa đọc được do lỗi dịch vụ; phần trả lời có thể chưa đầy đủ.',
+                    evidence_ids=[s['evidence_id'] for s in child['evidence']])],
+                generation_input=dict(state='map_failed',processed_source_ids=[],
+                    map_elapsed_ms=round((time.perf_counter()-started)*1000,2),error_type=type(error).__name__))
+        allowed={s['evidence_id'] for s in child['evidence']}
+        if any(not set(c.get('evidence_ids',[]))<=allowed for c in response.get('citation_claims',[])):
+            raise QwenGatewayError('A source map cited evidence outside its assigned source group.')
+        return dict(response,generation_input=dict(response.get('generation_input',{}),
+            map_elapsed_ms=round((time.perf_counter()-started)*1000,2)))
+    if workers>1:
+        with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='a2-source-map') as pool:
+            responses=list(pool.map(read,children))
+    else:
+        responses=[]
+        for child in children:
+            if not enabled and retry.get('answer_parts'):
+                covered={p for response in responses for claim in response.get('citation_claims',[]) for p in claim.get('part_ids',[])}
+                pending=[p for p in retry['answer_parts'] if p['id'] not in covered]
+                if not pending:break
+                child=dict(child,answer_parts=pending,
+                    source_packets=answer_source_packets(child['evidence'],pending,child['graph_context']))
+            responses.append(read(child))
+    if all('_error' in response for response in responses):
+        raise responses[0]['_error']
+    processed=list(dict.fromkeys(identity for batch,response in zip(batches,responses)
+        for identity in response.get('generation_input',{}).get('processed_source_ids',
+            [s['evidence_id'] for s in batch])))
     claims=[]
     for response in responses:
         for claim in response.get('citation_claims',[]):
@@ -152,16 +192,35 @@ def request_answer_with_context_retry(request_model, payload):
     combined=dict(claims=claims)
     answer=render_cited_claims(combined,sources) if claims else ''
     claims=combined['claims']
-    return dict(answer=answer,
+    combined_result=dict(answer=answer,
         citation_claims=claims,insufficient_evidence=not claims,
         answer_part_coverage=[dict(part,status='answered' if any(part['id'] in c.get('part_ids',[]) for c in claims) else 'unavailable') for part in retry.get('answer_parts',[])],
         citation_analysis=[item for r in responses for item in r.get('citation_analysis',[])],
         answer_notes=[item for r in responses for item in r.get('answer_notes',[])],
         qwen_outputs=[item for r in responses for item in r.get('qwen_outputs',[])],
         generation_input=dict(evidence_ids=[s['evidence_id'] for s in sources],
-            context_retry='shorter_output_then_source_batches',requested_output_tokens=retry['max_output_tokens'],
+            context_retry='parallel_source_maps' if enabled else 'shorter_output_then_source_batches',
+            map_workers=workers,reduce='source_bound_claim_merge',
+            requested_output_tokens=retry['max_output_tokens'],
             processed_source_ids=processed,unread_source_ids=[s['evidence_id'] for s in sources if s['evidence_id'] not in processed],
             batches=[r.get('generation_input',{}) for r in responses]))
+    if enabled and synthesize and claims and payload.get('check_completeness'):
+        graph,selected=claim_verification_context(payload.get('graph_context') or {},sources,claims)
+        reduction=dict(retry,evidence=selected,graph_context=graph,mapped_findings=claims,
+            source_packets=answer_source_packets(selected,retry.get('answer_parts',[]),graph),
+            instruction=payload.get('instruction','')+(
+                ' Synthesize the mapped findings against the original passages. Mapped findings are '
+                'unverified proposals, not evidence. Retain only details the cited source establishes '
+                'for the requested subject. Do not transfer a fact between documents without an explicit '
+                'applicability link. Reconcile duplicate findings and preserve source conditions. '
+                'For unsupported details, answer the supported portion and state what remains unknown.'))
+        result=request_answer_with_context_retry(request_model,reduction,parallel=False,synthesize=False)
+        return dict(result,
+            answer_notes=combined_result['answer_notes']+result.get('answer_notes',[]),
+            qwen_outputs=combined_result['qwen_outputs']+result.get('qwen_outputs',[]),
+            generation_input=dict(combined_result['generation_input'],reduce='model_synthesis_with_original_sources',
+                reduce_input=result.get('generation_input',{})))
+    return combined_result
 
 
 def answer_source_packets(sources, parts, graph):
@@ -217,6 +276,121 @@ def answer_source_packets(sources, parts, graph):
     return dict(parts=packets,documents=documents,contexts=contexts,source_scopes=compact)
 
 
+def answer_source_pods(sources, graph, *, include_spatial=False):
+    """Render factual sources by stored scope; never assign a requested subject as ownership."""
+    pods={}
+    for source in sources:
+        heading=list(source.get('heading_path',[]))
+        text=source.get('text','')
+        # Some source trees use the start of a table as its node title. It is
+        # source content, not an additional enclosing heading.
+        if heading and text.startswith(heading[-1]):heading.pop()
+        scope={k:source[k] for k in ('document_id','version_id','original_name','reading_stream_id') if source.get(k) is not None}
+        scope['heading_path']=heading
+        pod=pods.setdefault(json.dumps(scope,sort_keys=True,ensure_ascii=False),dict(scope=scope,sources=[]))
+        record=dict(id=source['evidence_id'],text=text)
+        for key in ('source_location','evidence_kind','source_role','review_status','author','revision','applicability','conditions','polarity','modality'):
+            if source.get(key) is not None:record[key]=source[key]
+        metadata=source.get('structure_metadata') or {}
+        rows=metadata.get('table_rows')
+        if isinstance(rows,list) and rows and all(isinstance(row,list) for row in rows):
+            flattened=' '.join(str(cell) for row in rows for cell in row if cell is not None)
+            if re.sub(r'\s+','',flattened)==re.sub(r'\s+','',text):
+                record.pop('text')
+                record['table_rows']=rows
+                headers=sorted({c['row'] for c in metadata.get('table_cells',[]) if c.get('header') and type(c.get('row')) is int})
+                if headers:record['table_header_rows']=headers
+                spans=[{k:c[k] for k in ('row','column','rowspan','colspan') if k in c}
+                    for c in metadata.get('table_cells',[]) if c.get('rowspan',1)!=1 or c.get('colspan',1)!=1]
+                if spans:record['merged_cells']=spans
+        from ai_extract.services.document_structure_service import table_context
+        context=table_context(source)
+        if context:record['table_context']=context
+        pod['sources'].append(record)
+    allowed={s['evidence_id'] for s in sources}
+    nodes={n['id']:n for n in graph.get('nodes',[])}
+    links=[]
+    kinds=set(SEMANTIC_EDGE_TYPES)|{'REFERENCES','HAS_CAPTION'}
+    if include_spatial:kinds.update({'LEFT_OF','ABOVE','NEAR'})
+    for edge in graph.get('edges',[]):
+        if edge.get('type') not in kinds:continue
+        left,right=nodes.get(edge.get('from_id'),{}),nodes.get(edge.get('to_id'),{})
+        a,b=(set(n.get('evidence_ids',[])) & allowed for n in (left,right))
+        if not a or not b:continue
+        semantic=edge['type'] in SEMANTIC_EDGE_TYPES
+        if a==b and not (semantic and left.get('label') and right.get('label')
+                        and left['label']!=right['label']):continue
+        link=dict(from_sources=sorted(a),to_sources=sorted(b),**{k:edge[k] for k in
+            ('type','predicate','review_status','polarity','modality','condition_quotes','qualification_quote')
+            if edge.get(k) is not None})
+        if semantic:
+            # Two entities may share the same passage. Keep the actual directed
+            # proposition rather than dropping it or claiming the passages differ.
+            for key,node in (('subject',left),('target',right)):
+                if node.get('kind')!='evidence' and node.get('label'):link[key]=node['label']
+        support=sorted(set(edge.get('evidence_ids',[])) & allowed)
+        if support:link['support_sources']=support
+        # Verbatim evidence already appears once in the source body. Point back
+        # to it instead of repeating entire tables as quote/scope metadata.
+        for key in ('quote','scope_quote','target_quote'):
+            value=edge.get(key)
+            if value and not any(value in s.get('text','') for s in sources):link[key]=value
+        if link not in links:links.append(link)
+    return dict(pods=list(pods.values()),source_links=links)
+
+
+def render_source_pods(pods):
+    """Readable source scopes and grids, without serializing graph machinery."""
+    blocks=[]
+    identities={}
+    links_by_source={}
+    for link in pods['source_links']:
+        # Keep direction, evidence IDs and review status. A navigation proposal
+        # is not proof that a nearby note qualifies a particular table value.
+        # Emit each proposition once, next to its first available source.
+        links_by_source.setdefault(link['from_sources'][0],[]).append(link)
+    for ordinal,pod in enumerate(pods['pods'],1):
+        scope=pod['scope']
+        identity=tuple(scope.get(k) for k in ('document_id','version_id','original_name'))
+        label=identities.setdefault(identity,len(identities)+1)
+        title=scope.get('original_name') or 'Unnamed source'
+        heading=' > '.join(scope.get('heading_path',[]))
+        blocks.append(f'## Source scope {ordinal} | Document/version {label}: {title}'
+            +(f'\nHeading: {heading}' if heading else ''))
+        for source in pod['sources']:
+            blocks.append('### ['+source['id']+']')
+            # Internal locations and IDs stay in the trace/UI. Keep semantic
+            # qualifiers, review state and table structure in the model input.
+            fields={k:v for k,v in source.items() if k not in {'id','text','table_rows','source_location'}}
+            if fields:blocks.append(json.dumps(fields,ensure_ascii=False,separators=(',',':')))
+            if 'table_rows' in source:
+                rows=source['table_rows']
+                width=max(len(row) for row in rows)
+                first_header=1 in source.get('table_header_rows',[])
+                if not first_header:
+                    blocks.append('Column labels below indicate positions only; no source header has been inferred.')
+                    blocks.append('| '+' | '.join(f'Column {i+1}' for i in range(width))+' |')
+                    blocks.append('| '+' | '.join(['---']*width)+' |')
+                for index,row in enumerate(rows):
+                    cells=[str(value if value is not None else '').replace('|','\\|').replace('\n','<br>') for value in row]
+                    blocks.append('| '+' | '.join(cells+['']*(width-len(cells)))+' |')
+                    if index==0 and first_header:blocks.append('| '+' | '.join(['---']*width)+' |')
+            else:blocks.append(source.get('text',''))
+            if links_by_source.get(source['id']):
+                blocks.append('Outgoing source links (proposals; source text takes precedence):')
+                for link in links_by_source[source['id']]:
+                    left=', '.join('['+i+']' for i in link['from_sources'])
+                    right=', '.join('['+i+']' for i in link['to_sources'])
+                    subject=json.dumps(link['subject'],ensure_ascii=False) if 'subject' in link else left
+                    target=json.dumps(link['target'],ensure_ascii=False) if 'target' in link else right
+                    qualifiers={k:v for k,v in link.items() if k not in
+                        {'from_sources','to_sources','subject','target','type'}}
+                    blocks.append(f'- {subject} --{link["type"]}--> {target}; sources {left} -> {right}; '
+                        +json.dumps(qualifiers,ensure_ascii=False,separators=(',',':')))
+        blocks.append('--- End source scope ---')
+    return '\n\n'.join(blocks)
+
+
 def generate_checked_answer(payload, request_model=None, progress=None):
     """One generation with inline caveats; validate source bindings without a judge call."""
     model=request_model or request_qwen
@@ -240,7 +414,7 @@ def generate_checked_answer(payload, request_model=None, progress=None):
     payload=dict(payload,evidence=evidence,coverage=generation_coverage(coverage),graph_context=graph,
         answer_parts=parts,source_packets=answer_source_packets(evidence,parts,graph),
         answer_format='cited_claims',answer_detail=payload.get('answer_detail','explanatory'),
-        analyze_citations=False,check_completeness=True,inline_review=True)
+        analyze_citations=False,check_completeness=True,inline_review=True,source_pods=True)
     result=dict(answer=source_excerpt(evidence),answer_text='Chưa tổng hợp được; bạn có thể đối chiếu các đoạn nguồn bên dưới.',
         generation_status='source_excerpt',citation_check=dict(valid=False),generation_calls=[],qwen_outputs=[],
         generation_diagnostics=dict(state='requested'))
@@ -557,10 +731,19 @@ def claim_verification_context(graph, sources, claims):
         return graph,passages  # Legacy contexts without bindings cannot be safely narrowed.
     edges=[]
     for edge in graph.get('edges',[]):
-        bindings=set(edge.get('evidence_ids',[])) or {
-            identity for key in ('from_id','to_id')
-            for identity in nodes.get(edge.get(key),{}).get('evidence_ids',[])}
-        if not bindings or bindings.intersection(selected):edges.append(edge)
+        endpoints=[set(nodes.get(edge.get(key),{}).get('evidence_ids',[]))
+            for key in ('from_id','to_id')]
+        bound=[ids for ids in endpoints if ids]
+        # Shared page/section parents aggregate many sources. Their bindings
+        # must not admit every sibling edge when just one leaf is requested.
+        structural=edge.get('type') in {'CONTAINS','HAS_EVIDENCE','HAS_ROW','HAS_CELL',
+            'NEXT','HAS_VISUAL','APPEARS_IN','HAS_EMBEDDING','LEFT_OF','ABOVE','NEAR'}
+        bindings=set(edge.get('evidence_ids',[]))
+        if bound and (structural or not bindings):
+            include=all(ids.intersection(selected) for ids in bound)
+        else:
+            include=not bindings or bool(bindings.intersection(selected))
+        if include:edges.append(edge)
     keep={key for edge in edges for key in (edge['from_id'],edge['to_id'])}
     keep.update(node['id'] for node in nodes.values() if node.get('kind')=='evidence'
                 and selected.intersection(node.get('evidence_ids',[])))

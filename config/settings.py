@@ -179,6 +179,9 @@ QWEN_REQUEST_TIMEOUT = max(30, int(os.environ.get("QWEN_REQUEST_TIMEOUT", "600")
 QWEN_VERIFY_TIMEOUT = max(30, int(os.environ.get("QWEN_VERIFY_TIMEOUT", "180")))
 A2_ANSWER_SOURCE_LIMIT = max(4, int(os.environ.get("A2_ANSWER_SOURCE_LIMIT", "24")))
 A2_BATCH_RERANK = os.environ.get('A2_BATCH_RERANK', 'True').lower() == 'true'
+A2_RERANK_CANDIDATES = int(os.environ.get('A2_RERANK_CANDIDATES', '20'))
+A2_MAP_WORKERS = int(os.environ.get('A2_MAP_WORKERS', '2'))
+A2_MAP_REDUCE_ENABLED = os.environ.get('A2_MAP_REDUCE_ENABLED', 'False').lower() == 'true'
 A2_INFERENCE_CACHE_ENABLED = False  # Enable only after cross-request caching is requested.
 A2_INFERENCE_CACHE_VERSION = os.environ.get('A2_INFERENCE_CACHE_VERSION', '1')
 A2_SOURCES_PER_DOCUMENT = max(2, int(os.environ.get("A2_SOURCES_PER_DOCUMENT", "6")))

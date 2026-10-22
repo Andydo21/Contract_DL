@@ -192,7 +192,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
             if matched_documents:
                 candidates = [r for r in candidates if r.get('document_id') in matched_documents]
             candidate_count = len(candidates)
-            candidates = candidates[:60]
+            candidates = candidates[:max(1,int(getattr(settings,'A2_RERANK_CANDIDATES',20)))]
             return candidates,diagnostics,matched_documents,candidate_count
         planning = plan_retrieval_questions(query) if generate else dict(status='not_requested',queries=[query])
         mark('question_planning')
@@ -212,7 +212,12 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
         if getattr(settings, 'A3_HYBRID_ENABLED', True) and any(s[1] for s in searches):
             update_progress(receipt, 'reranking', candidates=sum(len(s[1]) for s in searches))
             try:
-                reranked = backend.rerank_many([(s[0], s[1]) for s in searches])
+                # A facet such as a temperature or deadline is not an independent
+                # subject. Keep the original request in every reranker pair so
+                # a locally relevant passage about another entity ranks lower.
+                reranked = backend.rerank_many([
+                    (query if s[0] == query else f'{query}\nFocused question: {s[0]}', s[1])
+                    for s in searches])
             except Exception:
                 rerank_failed = True
         for search_index, (search_query,ranked,current,documents,count) in enumerate(searches):
@@ -345,7 +350,7 @@ def search_knowledge(user, query, generate=False, existing_receipt=None):
                 shared_entity_discovery=identity_discovery,
                 versions_deeply_searched=len(selected_versions), latest_versions_only=True,
                 identifier_matched_versions=[v.pk for v in versions if f'contract-version-{v.pk}' in matched_documents],
-                partial=candidate_count>60 or len(versions)<total or len(eligible)>len(candidates), retrieval_streams=diagnostics,
+                partial=candidate_count>max(1,int(getattr(settings,'A2_RERANK_CANDIDATES',20))) or len(versions)<total or len(eligible)>len(candidates), retrieval_streams=diagnostics,
                 dense_state=diagnostics['dense']['state'], reranker_state=reranker_state,
                 knowledge_records=len(knowledge), version_details=details,
                 graph_contexts=graph_contexts, external_web_search=False))

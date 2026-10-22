@@ -24,4 +24,4 @@ class Command(BaseCommand):
             if options['once']:
                 return
             if not worked:
-                time.sleep(2)
+                time.sleep(0.5)

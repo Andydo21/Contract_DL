@@ -115,8 +115,10 @@ class SearchOptimizationIntegrationTests(TestCase):
         Clause.objects.create(version=self.new_version,clause_title='Compatibility',
             clause_content='Compatible controller RC8A.')
         facet='Which controller is compatible?'
+        ranked_queries=[]
         def rerank(query,candidates):
-            target='RC8A' if query==facet else 'Two robot arms'
+            ranked_queries.append(query)
+            target='RC8A' if query.endswith('Focused question: '+facet) else 'Two robot arms'
             return sorted([dict(c,neural_logit=3 if target in c['text'] else -5) for c in candidates],
                           key=lambda c:c['neural_logit'],reverse=True)
         with patch('NewIdea.services.knowledge_search_service.plan_retrieval_questions',
@@ -126,6 +128,8 @@ class SearchOptimizationIntegrationTests(TestCase):
              patch.object(SearchBackend,'rerank',side_effect=rerank), \
              patch('NewIdea.services.knowledge_answer_service.answer_from_sources',return_value={}):
             result=search_knowledge(self.user,'robot controller compatibility',generate=True)
+        self.assertIn('robot controller compatibility\nFocused question: '+facet,ranked_queries)
+        self.assertNotIn(facet,ranked_queries, 'A facet must retain the original subject at reranking')
         self.assertTrue(any('RC8A' in c['text'] for c in result['citations']))
         detail=next(c for c in result['citations'] if 'RC8A' in c['text'])
         self.assertEqual(detail['retrieval_hints'],[dict(part=1,rank=1)])
@@ -506,6 +510,18 @@ class RetrievalGroupingIntegrityTests(SimpleTestCase):
         self.assertEqual([p['query_scope']['phase'] for p in result['answer_parts']],['setup','operation'])
         self.assertEqual([p['question'] for p in result['answer_parts']],data['queries'])
         self.assertEqual(chat.call_count,1)
+
+    def test_comparison_subjects_share_search_without_sharing_answer_ownership(self):
+        import json
+        from ai_extract.services.contract_pipeline_service import _request_openai_compatible
+        questions=[dict(question='Capacity of Alpha?',subject='Alpha',attribute='capacity',phase=''),
+            dict(question='Capacity of Beta?',subject='Beta',attribute='capacity',phase='')]
+        with patch('ai_extract.services.contract_pipeline_service._chat',return_value=json.dumps(
+                dict(queries=questions,groups=[[0,1]],intent=dict(scope='focused',needs_images=False)))):
+            result=_request_openai_compatible('http://model','retrieval_plan',dict(query='Compare capacities'))
+        self.assertEqual(len(result['queries']),1)
+        self.assertEqual([p['query_scope']['subject'] for p in result['answer_parts']],['Alpha','Beta'])
+        self.assertEqual(len({p['retrieval_query'] for p in result['answer_parts']}),1)
 
     def test_duplicate_optional_facets_do_not_discard_valid_questions(self):
         import json

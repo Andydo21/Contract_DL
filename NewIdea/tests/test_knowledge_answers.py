@@ -8,6 +8,117 @@ from NewIdea.services.search_job_service import process_next_job
 
 
 class KnowledgeAnswerChecks(SimpleTestCase):
+    def test_compact_pods_hide_internal_metadata_but_keep_version_boundaries_and_conditions(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods, render_source_pods
+        sources=[dict(evidence_id=f'E{i}',document_id='internal-document',version_id=f'private-version-{i}',
+            original_name='Same filename',reading_stream_id='internal-stream',source_location='bbox-secret',
+            text=f'Original {i}',conditions='Only with constant temperature',polarity='negative',
+            review_status='unreviewed') for i in (1,2)]
+        rendered=render_source_pods(answer_source_pods(sources,{}))
+        for value in ('internal-document','private-version','internal-stream','bbox-secret'):
+            self.assertNotIn(value,rendered)
+        for value in ('Document/version 1','Document/version 2','Only with constant temperature','negative','unreviewed'):
+            self.assertIn(value,rendered)
+        for source in sources:self.assertEqual(rendered.count(source['text']),1)
+
+    def test_source_links_follow_their_source_without_inventing_a_table_note(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods, render_source_pods
+        sources=[dict(evidence_id='E1',text='Repeatability *3',heading_path=['Table']),
+            dict(evidence_id='E2',text='*3 Constant ambient temperature',heading_path=['Notes']),
+            dict(evidence_id='E3',text='Unrelated same-page note',heading_path=['Notes'])]
+        graph=dict(nodes=[dict(id=i,evidence_ids=[f'E{i}']) for i in (1,2,3)],
+            edges=[dict(from_id=1,to_id=2,type='REFERENCES',review_status='candidate')])
+        rendered=render_source_pods(answer_source_pods(sources,graph))
+        table=rendered.split('--- End source scope ---')[0]
+        self.assertIn('Outgoing source links',table)
+        self.assertIn('[E1] --REFERENCES--> [E2]',table)
+        self.assertIn('candidate',table)
+        self.assertNotIn('E3',table)
+        self.assertEqual(rendered.count('*3 Constant ambient temperature'),1)
+
+    def test_semantic_relation_in_one_passage_keeps_endpoints_negation_and_conditions(self):
+        from copy import deepcopy
+        from NewIdea.services.knowledge_answer_service import answer_source_pods, render_source_pods
+        text='A must not pay B until acceptance.'
+        sources=[dict(evidence_id='E1',text=text)]
+        graph=dict(nodes=[dict(id=i,kind='entity',label=name,evidence_ids=['E1'])
+            for i,name in ((1,'A'),(2,'B'))],edges=[dict(from_id=1,to_id=2,type='PAYS_TO',
+                quote=text,scope_quote=text,review_status='unreviewed',polarity='negative',
+                modality='must',condition_quotes=['until acceptance'])])
+        original=deepcopy(graph)
+        pods=answer_source_pods(sources,graph)
+        rendered=render_source_pods(pods)
+        self.assertIn('"A" --PAYS_TO--> "B"',rendered)
+        self.assertIn('negative',rendered)
+        self.assertIn('until acceptance',rendered)
+        self.assertIn('unreviewed',rendered)
+        self.assertEqual(rendered.count(text),1)
+        self.assertEqual(graph,original)
+
+    def test_spatial_relations_are_opt_in_and_structural_edges_do_not_fill_prompt(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods, render_source_pods
+        sources=[dict(evidence_id=f'E{i}',text=f'Original {i}') for i in (1,2)]
+        graph=dict(nodes=[dict(id=i,evidence_ids=[f'E{i}']) for i in (1,2)],edges=[
+            dict(from_id=1,to_id=2,type=kind) for kind in
+            ('LEFT_OF','ABOVE','NEAR','NEXT','CONTAINS','HAS_CELL','HAS_EMBEDDING')])
+        self.assertFalse(answer_source_pods(sources,graph)['source_links'])
+        rendered=render_source_pods(answer_source_pods(sources,graph,include_spatial=True))
+        for kind in ('LEFT_OF','ABOVE','NEAR'):self.assertIn(kind,rendered)
+        for kind in ('NEXT','CONTAINS','HAS_CELL','HAS_EMBEDDING'):self.assertNotIn(kind,rendered)
+
+    def test_source_pods_keep_document_boundaries_without_inventing_subject_ownership(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods
+        sources=[dict(evidence_id='E1',document_id='one',heading_path=['Alpha'],text='Load: 8 kg.'),
+            dict(evidence_id='E2',document_id='two',heading_path=['Other'],text='Temperature: 85 C.')]
+        pods=answer_source_pods(sources,dict(nodes=[],edges=[]))['pods']
+        self.assertEqual(len(pods),2)
+        self.assertEqual(pods[1]['scope']['document_id'],'two')
+        self.assertNotIn('subject',pods[1]['scope'])
+        self.assertEqual([p['sources'][0]['text'] for p in pods],[s['text'] for s in sources])
+
+    def test_source_pods_preserve_table_cells_spans_and_unmatched_source_text(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods
+        source=dict(evidence_id='E1',text='Name Value\nAlpha 8 kg',structure_metadata=dict(
+            table_rows=[['Name','Value'],['Alpha','8 kg']],
+            table_cells=[dict(row=1,column=1,rowspan=1,colspan=2)]))
+        record=answer_source_pods([source],{})['pods'][0]['sources'][0]
+        self.assertEqual(record['table_rows'],source['structure_metadata']['table_rows'])
+        self.assertEqual(record['merged_cells'][0]['colspan'],2)
+        self.assertNotIn('text',record)
+        source['text']+=' Additional source condition.'
+        record=answer_source_pods([source],{})['pods'][0]['sources'][0]
+        self.assertEqual(record['text'],source['text'])
+
+    def test_markdown_pods_keep_values_with_their_source_headings(self):
+        from NewIdea.services.knowledge_answer_service import answer_source_pods, render_source_pods
+        sources=[dict(evidence_id=f'E{i}',document_id='same',heading_path=[name],
+            text=f'Property Value\nCapacity {value}',structure_metadata=dict(
+                table_rows=[['Property','Value'],['Capacity',value]],
+                table_cells=[dict(row=1,column=1,header=True)]))
+            for i,name,value in [(1,'Alpha','8 kg'),(2,'Beta','5 kg')]]
+        rendered=render_source_pods(answer_source_pods(sources,{}))
+        scopes=rendered.split('--- End source scope ---')
+        self.assertIn('Alpha',scopes[0]);self.assertIn('| Capacity | 8 kg |',scopes[0])
+        self.assertNotIn('5 kg',scopes[0])
+        self.assertIn('Beta',scopes[1]);self.assertIn('| Capacity | 5 kg |',scopes[1])
+        self.assertNotIn('8 kg',scopes[1])
+
+    def test_source_pods_prompt_does_not_send_graph_nodes_or_spatial_edges(self):
+        from ai_extract.services.contract_pipeline_service import _request_openai_compatible
+        graph=dict(nodes=[dict(id='noise',label='UNRELATED_GRAPH_LABEL',kind='section',evidence_ids=['E1'])],edges=[])
+        output=dict(claims=[dict(answer='Supported.',evidence_ids=['E1'],quotes=[],source_limit='')],
+            answer_notes=[],insufficient_evidence=False)
+        with patch('ai_extract.services.contract_pipeline_service._chat',return_value=json.dumps(output)) as model:
+            result=_request_openai_compatible('http://unused','contract_qa',dict(query='Question?',
+                evidence=[dict(evidence_id='E1',text='Original source.',document_id='one')],
+                graph_context=graph,source_pods=True,check_completeness=True,inline_review=True,answer_format='cited_claims'))
+        prompt=model.call_args.args[1][1]['content']
+        self.assertIn('ORIGINAL SOURCE PODS',prompt)
+        self.assertEqual(prompt.count('Original source.'),1)
+        self.assertNotIn('UNRELATED_GRAPH_LABEL',prompt)
+        self.assertNotIn('NEO4J STRUCTURE',prompt)
+        self.assertFalse(result['generation_input']['graph_representation']['raw_graph_sent'])
+
     def test_demo_hits_cannot_consume_the_seed_budget_for_real_document_evidence(self):
         from NewIdea.services.knowledge_answer_service import eligible_answer_sources
         from NewIdea.services.search_evidence_service import select_retrieval_seeds
@@ -40,6 +151,19 @@ class KnowledgeAnswerChecks(SimpleTestCase):
         self.assertEqual(focused['edges'],[graph['edges'][0],graph['edges'][2]])
         self.assertEqual(next(n for n in focused['nodes'] if n['id']==4)['rowspan'],2)
         self.assertEqual(graph,original)
+
+    def test_shared_parent_bindings_do_not_route_unselected_sibling_branches(self):
+        from NewIdea.services.knowledge_answer_service import claim_verification_context
+        graph=dict(nodes=[dict(id='parent',kind='section',evidence_ids=['E1','E2']),
+            dict(id='a',kind='evidence',evidence_ids=['E1']),
+            dict(id='b',kind='evidence',evidence_ids=['E2'])],edges=[
+                dict(from_id='parent',to_id='a',type='HAS_EVIDENCE'),
+                dict(from_id='parent',to_id='b',type='HAS_EVIDENCE',evidence_ids=['E1','E2'])])
+        sources=[dict(evidence_id='E1',text='First branch'),dict(evidence_id='E2',text='Other branch')]
+        routed,selected=claim_verification_context(graph,sources,[dict(evidence_ids=['E1'])])
+        self.assertEqual({node['id'] for node in routed['nodes']},{'parent','a'})
+        self.assertEqual(routed['edges'],graph['edges'][:1])
+        self.assertEqual(selected,sources[:1])
 
     def test_each_part_receives_ranked_source_hints_without_cutting_other_context(self):
         sources=[dict(evidence_id='E1',text='Context.',retrieval_hints=[dict(part=1,rank=2)]),
