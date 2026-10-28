@@ -7,80 +7,67 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import logging
-import requests
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from shared.jwt_middleware import fastapi_jwt_required
-from schemas import (
-    SummarizeRequest,
-    SummarizeResponse,
-    EntityExtractRequest,
-    EntityExtractResponse,
-)
-from services import AISummaryService, get_kaggle_url
-from shared.qwen_gateway import is_connected
+from schemas import CompareRequest, SummarizeRequest, SummarizeResponse
+import llm
+import services
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ai_summary")
+logger = logging.getLogger('ai_summary')
 
 app = FastAPI(
-    title="Kaggle Qwen AI Service",
-    description=(
-        "Proxy service that forwards requests to the Kaggle notebook running "
-        "phamthanhfd/contract-analysis-qwen2.5-3b (4-bit) exposed via an ngrok tunnel."
-    ),
-    version="1.0.0",
+    title='Contract Summary Service',
+    description='Structured, source-verified Vietnamese contract summaries from a vLLM-served text model.',
+    version='2.0.0',
 )
 
-@app.post("/api/v1/summarize", response_model=SummarizeResponse)
-async def summarize_contract(payload: SummarizeRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
-    """
-    Forward to POST {KAGGLE_AI_URL}/api/v1/summarize.
-    Kaggle notebook generates an Executive Summary in Vietnamese (150-250 words).
-    """
-    if not payload.clauses:
-        raise HTTPException(status_code=400, detail="No clauses provided.")
-    result = AISummaryService.summarize(payload)
-    return SummarizeResponse(**result)
 
-@app.post("/api/v1/extract_entities", response_model=EntityExtractResponse)
-async def extract_entities(payload: EntityExtractRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
-    """
-    Forward to POST {KAGGLE_AI_URL}/api/v1/extract_entities.
-    Kaggle notebook extracts: COMPANY_NAME, TAX_CODE, CONTRACT_VALUE,
-    DATE_EFFECTIVE, DATE_EXPIRE from the given text.
-    """
-    if not payload.text:
-        raise HTTPException(status_code=400, detail="No text provided.")
-    result = AISummaryService.extract_entities(payload)
-    return EntityExtractResponse(**result)
+@app.post('/api/v1/summarize', response_model=SummarizeResponse)
+def summarize_contract(payload: SummarizeRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
+    # Sync endpoint: FastAPI runs it in a worker thread, so blocking model calls never stall the event loop.
+    try:
+        return services.summarize(payload.text, payload.contract_metadata, payload.force, payload.model,
+                                  payload.perspective, payload.length, payload.explain_terms)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except llm.LLMError as error:
+        logger.warning('summary model failed: %s', error)
+        raise HTTPException(status_code=502, detail=str(error))
 
-@app.get("/health")
+
+@app.post('/api/v1/compare')
+def compare_versions(payload: CompareRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
+    """Summaries of two versions (or a contract and its amended text) and the field-level changes."""
+    try:
+        return services.compare(payload.old_text, payload.new_text, payload.force, payload.model,
+                                payload.perspective, payload.length, payload.explain_terms)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except llm.LLMError as error:
+        logger.warning('summary model failed: %s', error)
+        raise HTTPException(status_code=502, detail=str(error))
+
+
+@app.post('/api/v1/prepare')
+def prepare_contract(payload: SummarizeRequest, jwt_payload: dict = Depends(fastapi_jwt_required)):
+    """Sections, facts and chunk plan for a text; no model call."""
+    return services.prepare(payload.text)
+
+
+@app.get('/health')
 def health_check():
-    """Health check – also pings the Kaggle notebook's /health endpoint."""
-    kaggle_url = get_kaggle_url()
-    configured = bool(kaggle_url)
-    connected = is_connected(kaggle_url)
-
+    connected = llm.is_connected()
     return JSONResponse({
-        "status": "healthy" if connected else "degraded",
-        "kaggle_url_configured": configured,
-        "kaggle_url": kaggle_url or None,
-        "kaggle_connected": connected,
+        'status': 'healthy' if connected else 'degraded',
+        'llm_url': llm.base_url() or None,
+        'model': llm.model_id(),
+        'llm_connected': connected,
     }, status_code=200 if connected else 503)
 
-@app.get("/")
-async def root():
-    return {
-        "service": "Kaggle Qwen AI Service",
-        "version": "1.0.0",
-        "model": "phamthanhfd/contract-analysis-qwen2.5-3b (4-bit)",
-        "tunnel": "ngrok",
-        "endpoints": [
-            "POST /api/v1/summarize",
-            "POST /api/v1/extract_entities",
-            "GET  /health",
-        ],
-        "docs": "/docs",
-    }
+
+@app.get('/')
+def root():
+    return {'service': 'Contract Summary Service', 'version': '2.0.0', 'model': llm.model_id(),
+            'endpoints': ['POST /api/v1/summarize', 'POST /api/v1/compare', 'POST /api/v1/prepare', 'GET  /health'], 'docs': '/docs'}

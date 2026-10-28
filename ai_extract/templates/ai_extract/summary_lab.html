@@ -1,0 +1,160 @@
+{% extends 'ai_extract/base.html' %}
+{% load static %}
+{% block title %}Summary Lab · PlanA Extract{% endblock %}
+{% block nav_pipeline %}{% endblock %}
+{% block nav_summary %}active{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/summary_lab.css' %}">{% endblock %}
+{% block content %}
+{% csrf_token %}
+<section class="lab-hero">
+    <div>
+        <p class="eyebrow">SUMMARY LAB</p>
+        <h1>Kiểm thử tóm tắt hợp đồng</h1>
+        <p class="lede">Chạy trích xuất OCR, xem chính xác text và điều khoản gửi cho model, rồi tóm tắt và đối chiếu từng giá trị với nguồn.</p>
+    </div>
+    <div class="health" id="health" data-endpoint="/api/ai/summary-lab/health/">
+        <span class="dot"></span><div><strong>ai_summary</strong><small>Đang kiểm tra…</small></div>
+    </div>
+</section>
+
+<nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="contract" role="tab">Theo hợp đồng</button>
+    <button class="tab" data-tab="text" role="tab">Dán text</button>
+    <button class="tab" data-tab="compare" role="tab">So sánh phiên bản</button>
+</nav>
+
+<div class="options" id="options">
+    <label>Góc nhìn
+        <select id="opt-perspective">
+            <option value="general">Chung</option>
+            <option value="employee">Người lao động</option>
+            <option value="hr">HR / quản lý</option>
+        </select>
+    </label>
+    <label>Độ dài
+        <select id="opt-length">
+            <option value="detailed">Chi tiết</option>
+            <option value="short">Ngắn</option>
+            <option value="one_sentence">1 câu</option>
+        </select>
+    </label>
+    <label class="check"><input type="checkbox" id="opt-explain"> Giải thích thuật ngữ</label>
+    <span class="hint">Đổi tùy chọn chỉ dựng lại văn bản từ kết quả đã có, không gọi lại model.</span>
+</div>
+
+<section class="tab-panel" id="tab-contract">
+    <div class="picker">
+        <label for="contract-select">Hợp đồng (phiên bản mới nhất)</label>
+        <select id="contract-select">
+            <option value="">— Chọn hợp đồng —</option>
+            {% for card in cards %}{% if card.version %}
+            <option value="{{ card.contract.id }}">{{ card.contract.contract_code }} · {{ card.contract.title }} · v{{ card.version.version_number }} · {% if card.run %}{{ card.run.status }}{% else %}chưa OCR{% endif %}</option>
+            {% endif %}{% endfor %}
+        </select>
+        <button class="primary" id="run-flow" disabled>Chạy cả luồng</button>
+    </div>
+
+    <div class="steps" id="steps" hidden>
+        <article class="step" id="step-ocr">
+            <header><span class="num">1</span><h2>Trích xuất OCR</h2><span class="pill" id="ocr-status">—</span></header>
+            <dl class="stats">
+                <div><dt>Trang</dt><dd id="ocr-pages">0</dd></div>
+                <div><dt>Khối</dt><dd id="ocr-blocks">0</dd></div>
+                <div><dt>Hoàn tất</dt><dd id="ocr-done">—</dd></div>
+            </dl>
+            <p class="error-text" id="ocr-error" hidden></p>
+            <div class="actions">
+                <button id="run-ocr">Chạy trích xuất</button>
+                <a id="open-pipeline" href="#" target="_blank" rel="noopener">Mở pipeline ↗</a>
+            </div>
+        </article>
+
+        <article class="step" id="step-source">
+            <header><span class="num">2</span><h2>Text nguồn</h2><span class="pill" id="source-origin">—</span></header>
+            <dl class="stats">
+                <div><dt>Ký tự</dt><dd id="source-chars">0</dd></div>
+                <div><dt>Điều khoản</dt><dd id="source-sections">0</dd></div>
+                <div><dt>Chunk / lượt gọi</dt><dd id="source-chunks">0</dd></div>
+            </dl>
+            <p class="hint" id="source-hint"></p>
+        </article>
+
+        <article class="step" id="step-summary">
+            <header><span class="num">3</span><h2>Tóm tắt</h2><span class="pill" id="summary-state">—</span></header>
+            <label class="check"><input type="checkbox" id="contract-force"> Bỏ qua cache (gọi model lại)</label>
+            <div class="actions"><button class="primary" id="run-summary">Tóm tắt</button></div>
+            <p class="hint" id="saved-hint"></p>
+        </article>
+    </div>
+    <div id="contract-prepare"></div>
+    <details class="panel" id="source-panel" hidden>
+        <summary>Text OCR gửi cho model (4.000 ký tự đầu)</summary>
+        <pre id="source-preview"></pre>
+    </details>
+</section>
+
+<section class="tab-panel" id="tab-text" hidden>
+    <label for="lab-text">Văn bản hợp đồng — không lưu vào hệ thống</label>
+    <textarea id="lab-text" rows="12" placeholder="Dán nội dung hợp đồng…"></textarea>
+    <div class="actions">
+        <button id="text-prepare">Xem trước (không gọi model)</button>
+        <button class="primary" id="text-summary">Tóm tắt</button>
+        <label class="check"><input type="checkbox" id="text-force"> Bỏ qua cache</label>
+    </div>
+    <div id="text-prepare-out"></div>
+</section>
+
+<section class="tab-panel" id="tab-compare" hidden>
+    <div class="compare-modes">
+        <label class="check"><input type="radio" name="compare-mode" value="versions" checked> Hai phiên bản của một hợp đồng</label>
+        <label class="check"><input type="radio" name="compare-mode" value="texts"> Dán hai văn bản (bản gốc và bản sửa/phụ lục)</label>
+    </div>
+    <div id="compare-versions" class="compare-grid">
+        <label>Hợp đồng
+            <select id="compare-contract">
+                <option value="">— Chọn hợp đồng —</option>
+                {% for card in cards %}{% if card.version %}
+                <option value="{{ card.contract.id }}">{{ card.contract.contract_code }} · {{ card.contract.title }}</option>
+                {% endif %}{% endfor %}
+            </select>
+        </label>
+        <label>Bản cũ<select id="compare-old" disabled></select></label>
+        <label>Bản mới<select id="compare-new" disabled></select></label>
+    </div>
+    <div id="compare-texts" class="compare-grid two" hidden>
+        <label>Bản gốc<textarea id="compare-old-text" rows="10" placeholder="Dán hợp đồng gốc…"></textarea></label>
+        <label>Bản sửa đổi / phụ lục<textarea id="compare-new-text" rows="10" placeholder="Dán bản đã sửa…"></textarea></label>
+    </div>
+    <div class="actions">
+        <button class="primary" id="run-compare">So sánh</button>
+        <label class="check"><input type="checkbox" id="compare-force"> Bỏ qua cache</label>
+    </div>
+</section>
+
+<section class="result" id="result" hidden>
+    <div class="result-head">
+        <h2>Kết quả</h2>
+        <div class="metrics" id="result-metrics"></div>
+    </div>
+    <pre class="summary-text" id="result-summary"></pre>
+    <div id="result-checklist"></div>
+    <div id="result-unverified"></div>
+    <details class="panel"><summary>Độ tin cậy từng trường</summary><div class="panel-body" id="result-confidence"></div></details>
+    <details class="panel"><summary>JSON cấu trúc từ model (sau kiểm chứng)</summary><pre id="result-json"></pre></details>
+</section>
+
+<section class="result" id="compare-result" hidden>
+    <div class="result-head">
+        <h2>Thay đổi giữa hai bản</h2>
+        <div class="metrics" id="compare-metrics"></div>
+    </div>
+    <pre class="summary-text" id="compare-changes"></pre>
+    <div class="compare-grid two">
+        <div><h3>Bản cũ</h3><pre class="summary-text small" id="compare-old-summary"></pre></div>
+        <div><h3>Bản mới</h3><pre class="summary-text small" id="compare-new-summary"></pre></div>
+    </div>
+</section>
+
+<div class="busy" id="busy" hidden><span class="spinner"></span><span id="busy-text"></span></div>
+{% endblock %}
+{% block page_js %}<script src="{% static 'ai_extract/js/summary_lab.js' %}"></script>{% endblock %}

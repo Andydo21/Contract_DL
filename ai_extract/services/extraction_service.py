@@ -8,29 +8,50 @@ from contracts.repositories import ClauseRepository
 from ai_extract.models import Clause
 from ai_extract.repositories import clause_extract_data_repository as data_repository
 from .contract_pipeline_service import request_qwen
+import requests
+from django.conf import settings
 
 logger = logging.getLogger('ai_extract')
-MODEL_ID = 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ'
+
+
+def summary_service(path, payload=None):
+    """Call the standalone ai_summary service; non-2xx answers surface its detail message."""
+    from shared.jwt_middleware import get_system_auth_header
+    url = getattr(settings, 'AI_SUMMARY_URL', '').rstrip('/') + path
+    try:
+        if payload is None:
+            response = requests.get(url, timeout=10)
+        else:
+            response = requests.post(url, json=payload, headers=get_system_auth_header(), timeout=getattr(settings, 'AI_SUMMARY_TIMEOUT', 600))
+        data = response.json()
+    except (requests.RequestException, ValueError) as e:
+        raise RuntimeError(f'ai_summary không phản hồi ({url}): {e}') from e
+    if not response.ok and payload is not None:
+        raise RuntimeError(f"ai_summary {response.status_code}: {data.get('detail', data) if isinstance(data, dict) else data}")
+    return data
+
+
+def render_options(data):
+    """Audience, length and glossary options accepted by ai_summary; anything else falls back to defaults."""
+    perspective, length = data.get('perspective', 'general'), data.get('length', 'detailed')
+    return dict(perspective=perspective if perspective in ('general', 'employee', 'hr') else 'general',
+                length=length if length in ('one_sentence', 'short', 'detailed') else 'detailed',
+                explain_terms=bool(data.get('explain_terms', False)))
 
 
 class SummarizeService:
-    """Generate and persist a version's executive summary."""
+    """Send a version's OCR text to the standalone ai_summary service and persist the result."""
 
-    def summarize_version(self, version: ContractVersion) -> dict:
-        """Call the Qwen gateway and persist its summary."""
-        clauses = extraction_repository.clauses_for_version(version)
-        if not clauses:
-            raise ValueError(f'ContractVersion {version.id} has no clauses. Run clause extraction first.')
-        payload = {'clauses': [{'title': cl.clause_title, 'content': cl.clause_content} for cl in clauses], 'contract_metadata': {'contract_code': version.contract.contract_code, 'title': version.contract.title, 'version': version.version_number}}
-        logger.info(f'[summarize] Qwen chat completion – version_id={version.id}, {len(clauses)} clauses')
-        try:
-            data = request_qwen('summarize', payload)
-        except RuntimeError as e:
-            raise RuntimeError(f'Qwen summarize error: {e}') from e
-        summary_text = data.get('summary', '')
-        obj = ContractSummaryRepository.create_or_update(version=version, summary=summary_text, model_id=MODEL_ID)
-        logger.info(f'[summarize] Saved ContractSummary id={obj.id}')
-        return {'version_id': version.id, 'contract_id': version.contract.id, 'summary': summary_text, 'model_id': MODEL_ID}
+    def summarize_version(self, version: ContractVersion, force: bool=False, options=None) -> dict:
+        text = ContractSummaryRepository.source(version)['text']
+        if not text.strip():
+            raise ExtractionError('Phiên bản chưa có text OCR. Hãy chạy trích xuất layout trước.')
+        payload = {'text': text, 'force': force, **(options or {}), 'contract_metadata': {'contract_code': version.contract.contract_code, 'title': version.contract.title, 'version': version.version_number}}
+        logger.info(f'[summarize] ai_summary request – version_id={version.id}, {len(text)} chars')
+        data = summary_service('/api/v1/summarize', payload)
+        obj = ContractSummaryRepository.create_or_update(version=version, summary=data['summary'], model_id=data.get('model_id', ''))
+        logger.info(f"[summarize] Saved ContractSummary id={obj.id} cached={data.get('cached')} {data.get('elapsed_ms')}ms")
+        return {'version_id': version.id, 'contract_id': version.contract.id, **data}
 
 
 
@@ -136,7 +157,7 @@ def select_version(user, contract_id, version_id=None):
 
 def summarize(user, contract_id, data):
     _, version = select_version(user, contract_id, data.get('version_id'))
-    return SummarizeService().summarize_version(version)
+    return SummarizeService().summarize_version(version, force=bool(data.get('force', False)), options=render_options(data))
 
 def summary(user, contract_id):
     contract, version = select_version(user, contract_id)
@@ -144,6 +165,61 @@ def summary(user, contract_id):
     if not obj:
         raise ExtractionError('No summary found. Run summarize first.', 404)
     return dict(id=obj.id, contract_id=contract.id, version_id=version.id, summary=obj.summary, model_id=obj.model_id, created_at=obj.created_at.isoformat(), updated_at=obj.updated_at.isoformat())
+
+def summary_lab_contract(user, contract_id):
+    """Everything the Summary Lab shows for the latest version: OCR run, source text and chunk plan."""
+    from ai_extract.repositories import layout_repository
+    contract, version = select_version(user, contract_id)
+    run = layout_repository.latest_run(version)
+    source = ContractSummaryRepository.source(version)
+    prepared, prepare_error = None, ''
+    if source['text'].strip():
+        try:
+            prepared = summary_service('/api/v1/prepare', {'text': source['text']})
+        except RuntimeError as error:
+            prepare_error = str(error)
+    saved = ContractSummaryRepository.get_by_version(version)
+    return dict(contract=dict(id=contract.id, code=contract.contract_code, title=contract.title),
+                version=dict(id=version.id, number=version.version_number),
+                versions=[dict(id=v.id, number=v.version_number) for v in contract.versions.order_by('version_number')],
+                run=dict(id=run.id, status=run.status, total_pages=run.total_pages, total_blocks=run.total_blocks,
+                         error=run.error_message, started_at=run.started_at.isoformat(),
+                         completed_at=run.completed_at.isoformat() if run.completed_at else None) if run else None,
+                source=dict(origin=source['origin'], run_id=source['run_id'], chars=len(source['text']), preview=source['text'][:4000]),
+                prepare=prepared, prepare_error=prepare_error,
+                saved_summary=dict(summary=saved.summary, model_id=saved.model_id, updated_at=saved.updated_at.isoformat()) if saved else None)
+
+def summary_lab_text(user, data):
+    """Summarize pasted text without persisting anything."""
+    text = data.get('text', '')
+    if not isinstance(text, str) or not text.strip():
+        raise ExtractionError("Field 'text' is required.")
+    if data.get('prepare_only'):
+        return summary_service('/api/v1/prepare', {'text': text})
+    return summary_service('/api/v1/summarize', {'text': text, 'force': bool(data.get('force', False)), **render_options(data)})
+
+def summary_lab_compare(user, data):
+    """Changes between two versions of a visible contract, or between two pasted texts."""
+    if data.get('contract_id'):
+        texts = []
+        for key in ('old_version_id', 'new_version_id'):
+            _, version = select_version(user, data['contract_id'], data.get(key))
+            text = ContractSummaryRepository.source(version)['text']
+            if not text.strip():
+                raise ExtractionError(f'Phiên bản v{version.version_number} chưa có text OCR. Hãy chạy trích xuất trước.')
+            texts.append(text)
+    else:
+        texts = [data.get('old_text', ''), data.get('new_text', '')]
+        if not all(isinstance(t, str) and t.strip() for t in texts):
+            raise ExtractionError("Fields 'old_text' and 'new_text' are required.")
+    return summary_service('/api/v1/compare', {'old_text': texts[0], 'new_text': texts[1],
+                                               'force': bool(data.get('force', False)), **render_options(data)})
+
+def summary_lab_health(user):
+    try:
+        return summary_service('/health')
+    except RuntimeError as error:
+        return dict(status='unreachable', llm_connected=False, error=str(error))
 
 def extract_entities(user, contract_id, data):
     contract, version = select_version(user, contract_id, data.get('version_id'))

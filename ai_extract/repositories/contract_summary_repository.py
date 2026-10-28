@@ -1,6 +1,6 @@
 from decimal import Decimal
 from contracts.models import ContractVersion
-from ai_extract.models import ContractSummary, Clause, ExtractedEntity
+from ai_extract.models import ContractSummary, Clause, ExtractedEntity, LayoutExtractionBlock
 
 
 class ContractSummaryRepository:
@@ -21,6 +21,25 @@ class ContractSummaryRepository:
             },
         )
         return obj
+
+    @staticmethod
+    def source(version: ContractVersion) -> dict:
+        """OCR text from the latest completed extraction run, else the stored raw text, with its origin."""
+        run = version.layout_extraction_runs.filter(status="COMPLETED").first()
+        if run:
+            blocks = LayoutExtractionBlock.objects.filter(page__run=run).order_by(
+                "page__page_number", "block_order"
+            ).values_list("text", flat=True)
+            text = "\n\n".join(t.strip() for t in blocks if t and t.strip())
+            if text:
+                return {"text": text, "origin": "ocr_blocks", "run_id": run.id}
+            text = "\n\n".join(p.extracted_text for p in run.pages.all() if p.extracted_text.strip())
+            if text:
+                return {"text": text, "origin": "ocr_pages", "run_id": run.id}
+        text = "\n\n".join(
+            version.contexts.filter(context_type="raw_text").order_by("id").values_list("content", flat=True)
+        )
+        return {"text": text, "origin": "raw_text" if text else "none", "run_id": None}
 
     @staticmethod
     def get_all():

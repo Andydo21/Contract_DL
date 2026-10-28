@@ -50,11 +50,11 @@ class QwenOutputTests(SimpleTestCase):
     def test_legacy_output_does_not_create_a_circular_json_reference(self, base):
         base.return_value=''
         response=Mock(status_code=200)
-        original=dict(summary='Source summary')
+        original=dict(entities=dict(COMPANY_NAME='Source company'))
         response.json.return_value=original
         with patch('ai_extract.services.contract_pipeline_service.requests.post',return_value=response):
-            result=request_qwen('summarize',dict(clauses=[]))
-        self.assertEqual(result['qwen_outputs'],[dict(task='summarize',response=original)])
+            result=request_qwen('extract_entities',dict(text=''))
+        self.assertEqual(result['qwen_outputs'],[dict(task='extract_entities',response=original)])
         self.assertNotIn('qwen_outputs',original)
         self.assertTrue(json.dumps(result))
 
@@ -87,11 +87,11 @@ class QwenOutputTests(SimpleTestCase):
         def post(url, **kwargs):
             key='one' if '[one]' in kwargs['json']['messages'][-1]['content'] else 'two'
             barrier.wait(timeout=5)
-            return api_response(key,identity=key)[0]
+            return api_response(json.dumps(dict(COMPANY_NAME=key)),identity=key)[0]
         with patch('ai_extract.services.contract_pipeline_service.requests.post',side_effect=post):
             with ThreadPoolExecutor(max_workers=2) as pool:
-                results=list(pool.map(lambda key: request_qwen('summarize',dict(clauses=[dict(title=key,content='Source')])),('one','two')))
+                results=list(pool.map(lambda key: request_qwen('extract_entities',dict(text=f'[{key}] Source')),('one','two')))
         for key, result in zip(('one','two'),results):
-            self.assertEqual(result['summary'],key)
+            self.assertEqual(result['entities']['COMPANY_NAME'],key)
             self.assertEqual([r['response']['id'] for r in result['qwen_outputs']],[key])
 

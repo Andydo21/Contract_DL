@@ -22,6 +22,12 @@ urlpatterns = [
         name="ai_get_summary",
     ),
 
+    # ── Summary Lab (test screen at /ai-extract/summary-lab/) ───────────────
+    path("summary-lab/health/", views.api_summary_lab_health, name="ai_summary_lab_health"),
+    path("summary-lab/text/", views.api_summary_lab_text, name="ai_summary_lab_text"),
+    path("summary-lab/compare/", views.api_summary_lab_compare, name="ai_summary_lab_compare"),
+    path("summary-lab/contracts/<int:contract_id>/", views.api_summary_lab_contract, name="ai_summary_lab_contract"),
+
     # ── Extract Entities ────────────────────────────────────────────────────
     # POST  /api/ai/contracts/<id>/extract-entities/  → run per-clause extraction & save
     path(

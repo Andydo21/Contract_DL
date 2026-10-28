@@ -16,7 +16,8 @@
         <a class="brand" href="/ai-extract/"><span class="brand-mark">◈</span><span>A3 Trích xuất</span></a>
         <nav>
             <a href="/">Contract Portal</a>
-            <a class="active" href="/ai-extract/">Vision Pipeline</a>
+            <a class="{% block nav_pipeline %}active{% endblock %}" href="/ai-extract/">Vision Pipeline</a>
+            <a class="{% block nav_summary %}{% endblock %}" href="/ai-extract/summary-lab/">Summary Lab</a>
             <a href="/analyses/">Analyses</a>
             <a href="/contract-intelligence/">A2/A3 Hợp đồng</a>
             <a href="{% url 'newidea_workspace' %}">NewIdea — Tri thức</a>

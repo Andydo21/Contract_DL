@@ -67,3 +67,19 @@ def api_extract_clauses(request, contract_id):
 @extraction_api('GET')
 def api_get_clauses(request, contract_id):
     return extraction_service.clauses(request.user, contract_id, request.GET.get('version_id'))
+
+@extraction_api('GET')
+def api_summary_lab_contract(request, contract_id):
+    return extraction_service.summary_lab_contract(request.user, contract_id)
+
+@extraction_api('POST')
+def api_summary_lab_text(request):
+    return extraction_service.summary_lab_text(request.user, body(request))
+
+@extraction_api('GET')
+def api_summary_lab_health(request):
+    return extraction_service.summary_lab_health(request.user)
+
+@extraction_api('POST')
+def api_summary_lab_compare(request):
+    return extraction_service.summary_lab_compare(request.user, body(request))

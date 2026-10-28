@@ -54,3 +54,9 @@ output/
 ai_extract/a3/retired_processing_code.zip
 
 ai_extract/a3/retired_code_manifest.json
+ai_summary/eval_report.json
+ai_summary/finetune/data/
+
+# Local SQLite fallback (config/local_sqlite_settings.py) and IDE files
+local_db/
+.idea/

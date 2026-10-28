@@ -166,6 +166,10 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
     os.environ.get("KAGGLE_AI_URL", "http://kaggle-qwen-service:8000")
 )
 
+# Standalone contract summary service (ai_summary/). It owns prompts, model and cache.
+AI_SUMMARY_URL = os.environ.get("AI_SUMMARY_URL", "http://ai-summary:8000")
+AI_SUMMARY_TIMEOUT = int(os.environ.get("AI_SUMMARY_TIMEOUT", "600"))
+
 # PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
 COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")
 COLPALI_ENABLED = os.environ.get('COLPALI_ENABLED', 'True').lower() == 'true'

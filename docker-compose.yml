@@ -16,6 +16,7 @@ services:
       - AI_SERVICE_URL=http://ai-service:8000
       - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
       - WORKFLOW_SERVICE_URL=http://workflow-service:8000
+      - AI_SUMMARY_URL=http://ai-summary:8000
       # Unified Kaggle/ngrok endpoint: summarize + entities + clauses.
       - KAGGLE_QWEN_SERVICE_URL=${KAGGLE_QWEN_SERVICE_URL}
       - COLPALI_BASE_URL=${COLPALI_BASE_URL:-}
@@ -60,14 +61,15 @@ services:
     restart: always
     environment:
       - SECRET_KEY=${SECRET_KEY}
-      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
-      - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      - SUMMARY_LLM_URL=${SUMMARY_LLM_URL:-}
+      - SUMMARY_MODEL_ID=${SUMMARY_MODEL_ID:-phamthanhfd/contract-summary-qwen3-1.7b}
+      - SUMMARY_CACHE_DIR=/cache
     ports:
       - "8004:8000"
     volumes:
       - ./ai_summary:/app
       - ./shared:/app/shared
+      - ai_summary_cache:/cache
     networks:
       - riskdl-net
 
@@ -296,3 +298,6 @@ services:
 networks:
   riskdl-net:
     name: riskdl-net
+
+volumes:
+  ai_summary_cache:
