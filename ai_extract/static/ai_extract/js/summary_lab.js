@@ -1,7 +1,8 @@
 (() => {
     const $ = id => document.getElementById(id);
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
-    const ORIGINS = {ocr_blocks: 'Khối OCR', ocr_pages: 'Text trang OCR', raw_text: 'Raw text (không OCR)', none: 'Không có text'};
+    const KINDS = {pdf: 'PDF', docx: 'DOCX', txt: 'TXT'};
+    const AUTO = {queued: 'đang chờ tự tóm tắt', running: 'đang tự tóm tắt', done: 'đã tự tóm tắt', failed: 'tự tóm tắt lỗi'};
     const FACT_LABELS = {contract_numbers: 'Số hợp đồng', parties: 'Các bên', tax_codes: 'Mã số thuế', money: 'Số tiền',
                          dates: 'Ngày', durations: 'Thời hạn', percents: 'Tỷ lệ'};
     const LEVELS = {high: 'cao', medium: 'trung bình', low: 'thấp'};
@@ -25,8 +26,10 @@
     }
 
     async function api(url, body) {
+        const form = body instanceof FormData;
         const response = await fetch(url, body === undefined ? {} : {
-            method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf}, body: JSON.stringify(body)});
+            method: 'POST', headers: form ? {'X-CSRFToken': csrf} : {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: form ? body : JSON.stringify(body)});
         const data = await response.json().catch(() => ({error: `HTTP ${response.status}`}));
         if (!response.ok || data.success === false) throw new Error(data.error || data.detail || `HTTP ${response.status}`);
         return data;
@@ -50,7 +53,6 @@
             clearInterval(timer);
             $('busy').hidden = true;
             document.querySelectorAll('button').forEach(b => b.disabled = b.dataset.wasDisabled === 'true');
-            $('run-flow').disabled = !$('contract-select').value;
             busy = false;
         }
     }
@@ -95,6 +97,14 @@
                     el('tbody', {}, rows)))),
             el('details', {class: 'panel'}, el('summary', {}, 'Giá trị rút bằng regex (gửi kèm làm mốc đối chiếu)'),
                 el('div', {class: 'panel-body facts'}, facts)));
+    }
+
+    function describeSource(source) {
+        if (!source) return '';
+        const parts = [KINDS[source.kind] || source.kind, `${source.chars.toLocaleString('vi-VN')} ký tự`];
+        if (source.pages) parts.push(`${source.pages} trang`);
+        if (source.ocr_pages.length) parts.push(`OCR ${source.ocr_pages.length} trang scan`);
+        return parts.join(' · ') + (source.warnings.length ? ` — ${source.warnings.join(' ')}` : '');
     }
 
     function renderResult(data) {
@@ -158,40 +168,37 @@
         const data = await api(`/api/ai/summary-lab/contracts/${id}/`);
         current = data;
         $('steps').hidden = false;
-        const run = data.run;
-        pill($('ocr-status'), run ? run.status : 'CHƯA OCR', run ? {COMPLETED: 'ok', FAILED: 'bad'}[run.status] || 'warn' : 'warn');
-        $('ocr-pages').textContent = run ? run.total_pages : 0;
-        $('ocr-blocks').textContent = run ? run.total_blocks : 0;
-        $('ocr-done').textContent = run && run.completed_at ? new Date(run.completed_at).toLocaleString('vi-VN') : '—';
-        $('ocr-error').hidden = !(run && run.error);
-        $('ocr-error').textContent = run && run.error ? run.error : '';
-        $('open-pipeline').href = `/ai-extract/contracts/${data.contract.id}/`;
-
         const source = data.source;
-        pill($('source-origin'), ORIGINS[source.origin] || source.origin,
-             {ocr_blocks: 'ok', ocr_pages: 'ok', raw_text: 'warn', none: 'bad'}[source.origin]);
-        $('source-chars').textContent = source.chars.toLocaleString('vi-VN');
+        pill($('file-kind'), data.has_text ? 'TEXT TRONG DB' : source ? KINDS[source.kind] || source.kind : data.file ? 'LỖI ĐỌC' : 'CHƯA CÓ NGUỒN',
+             source ? 'ok' : 'bad');
+        $('file-pages').textContent = source && source.pages ? source.pages : '—';
+        $('file-ocr').textContent = source ? (source.ocr_pages.length || 'không cần') : '—';
+        $('file-uploaded').textContent = data.file ? new Date(data.file.uploaded_at).toLocaleString('vi-VN') : '—';
+        $('file-name').textContent = data.has_text ? 'Dùng text hợp đồng đã lưu trong database.' : data.file ? data.file.name : 'Phiên bản này chưa có text hay file.';
+        const problems = [data.read_error, ...(source ? source.warnings : [])].filter(Boolean);
+        $('file-error').hidden = !problems.length;
+        $('file-error').textContent = problems.join(' ');
+
+        pill($('source-state'), source ? `${source.chars.toLocaleString('vi-VN')} ký tự` : 'KHÔNG CÓ', source ? 'ok' : 'bad');
+        $('source-chars').textContent = source ? source.chars.toLocaleString('vi-VN') : 0;
         $('source-sections').textContent = data.prepare ? data.prepare.sections.length : '—';
         $('source-chunks').textContent = data.prepare ? data.prepare.chunks.length : '—';
         const skipped = data.prepare ? data.prepare.sections.filter(s => !s.included).length : 0;
-        $('source-hint').textContent = source.origin === 'none' ? 'Chưa có text. Chạy trích xuất OCR ở bước 1.'
+        $('source-hint').textContent = !source ? 'Không có text để tóm tắt.'
             : skipped ? `${skipped} điều khoản ít quan trọng bị lược vì vượt giới hạn ${data.prepare.max_chunks} chunk.`
-            : data.prepare ? `Toàn bộ văn bản được gửi${data.prepare.cached ? ' · đã có kết quả trong cache' : ''}.` : '';
-        renderPrepare($('contract-prepare'), data.prepare, data.prepare_error);
-        $('source-panel').hidden = !source.chars;
-        $('source-preview').textContent = source.preview;
+            : `Toàn bộ văn bản được gửi${data.prepare.cached ? ' · đã có kết quả trong cache' : ''}.`;
+        renderPrepare($('contract-prepare'), data.prepare);
+        $('source-panel').hidden = !source;
+        $('source-preview').textContent = source ? source.preview : '';
 
-        $('run-summary').disabled = !source.chars;
-        pill($('summary-state'), data.saved_summary ? 'ĐÃ LƯU' : 'CHƯA CÓ', data.saved_summary ? 'ok' : '');
-        $('saved-hint').textContent = data.saved_summary
-            ? `Bản đang lưu: ${data.saved_summary.model_id || 'không rõ model'} · ${new Date(data.saved_summary.updated_at).toLocaleString('vi-VN')}` : '';
+        $('run-summary').disabled = !source;
+        const auto = data.auto ? AUTO[data.auto.state] || data.auto.state : '';
+        pill($('summary-state'), data.saved_summary ? 'ĐÃ LƯU' : auto ? auto.toUpperCase() : 'CHƯA CÓ',
+             data.saved_summary ? 'ok' : data.auto && data.auto.state === 'failed' ? 'bad' : '');
+        $('saved-hint').textContent = (data.saved_summary
+            ? `Bản đang lưu: ${data.saved_summary.model_id || 'không rõ model'} · ${new Date(data.saved_summary.updated_at).toLocaleString('vi-VN')}` : '')
+            + (data.auto && data.auto.error ? ` Lỗi tự tóm tắt: ${data.auto.error}` : '');
         return data;
-    }
-
-    async function runOcr() {
-        const data = await api(`/api/ai/contracts/${current.contract.id}/layout-extract/`, {});
-        if (data.partial) alert(`Trích xuất xong nhưng chưa trọn vẹn. Trang lỗi: ${data.failed_pages.join(', ') || 'không có'}`);
-        return loadContract(current.contract.id);
     }
 
     async function runSummary() {
@@ -200,13 +207,18 @@
         rerun = runSummary;
         $('compare-result').hidden = true;
         renderResult(data);
-        pill($('summary-state'), 'ĐÃ LƯU', 'ok');
-        $('saved-hint').textContent = `Vừa lưu: ${data.model_id}`;
+        if (data.saved) {
+            pill($('summary-state'), 'ĐÃ LƯU', 'ok');
+            $('saved-hint').textContent = `Vừa lưu: ${data.model_id}`;
+        } else {
+            $('saved-hint').textContent = 'Đang xem góc nhìn khác; bản lưu vẫn là bản chung, chi tiết.';
+        }
     }
 
     document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
         $('tab-contract').hidden = tab.dataset.tab !== 'contract';
+        $('tab-file').hidden = tab.dataset.tab !== 'file';
         $('tab-text').hidden = tab.dataset.tab !== 'text';
         $('tab-compare').hidden = tab.dataset.tab !== 'compare';
     }));
@@ -216,18 +228,26 @@
     }));
 
     $('contract-select').addEventListener('change', event => {
-        $('run-flow').disabled = !event.target.value;
         $('result').hidden = true;
         if (event.target.value) withBusy('Đang tải hợp đồng', () => loadContract(event.target.value));
         else $('steps').hidden = true;
     });
-    $('run-ocr').addEventListener('click', () => withBusy('Đang trích xuất OCR (có thể vài phút)', runOcr));
     $('run-summary').addEventListener('click', () => withBusy('Đang tóm tắt', runSummary));
-    $('run-flow').addEventListener('click', () => withBusy('Đang chạy cả luồng', async () => {
-        await runOcr();
-        if (!current.source.chars) throw new Error('Trích xuất xong nhưng không có text để tóm tắt.');
-        await runSummary();
-    }));
+
+    async function runFileSummary() {
+        const file = $('lab-file').files[0];
+        if (!file) throw new Error('Chọn một file PDF, DOCX hoặc TXT.');
+        const form = new FormData();
+        form.append('file', file);
+        Object.entries({...opts(), force: $('file-force').checked}).forEach(([k, v]) => form.append(k, String(v)));
+        const data = await api('/api/ai/summary-lab/file/', form);
+        $('file-force').checked = false;
+        rerun = runFileSummary;
+        $('compare-result').hidden = true;
+        $('file-source').textContent = `Đã đọc: ${describeSource(data.source)}`;
+        renderResult(data);
+    }
+    $('file-summary').addEventListener('click', () => withBusy('Đang đọc file và tóm tắt', runFileSummary));
 
     $('text-prepare').addEventListener('click', () => withBusy('Đang phân tích text', async () =>
         renderPrepare($('text-prepare-out'), await api('/api/ai/summary-lab/text/', {text: $('lab-text').value, prepare_only: true}))));

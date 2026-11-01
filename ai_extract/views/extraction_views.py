@@ -3,9 +3,10 @@ import json
 import logging
 from functools import wraps
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from django.utils.http import content_disposition_header
 from django.views.decorators.http import require_http_methods
-from ai_extract.services import extraction_service
+from ai_extract.services import extraction_service, summary_service
 logger = logging.getLogger('ai_extract')
 
 def extraction_api(method):
@@ -42,11 +43,11 @@ def body(request):
 
 @extraction_api('POST')
 def api_summarize_contract(request, contract_id):
-    return extraction_service.summarize(request.user, contract_id, body(request))
+    return summary_service.summarize(request.user, contract_id, body(request))
 
 @extraction_api('GET')
 def api_get_summary(request, contract_id):
-    return extraction_service.summary(request.user, contract_id)
+    return summary_service.summary(request.user, contract_id, request.GET.get('version_id'))
 
 @extraction_api('POST')
 def api_extract_entities(request, contract_id):
@@ -70,16 +71,46 @@ def api_get_clauses(request, contract_id):
 
 @extraction_api('GET')
 def api_summary_lab_contract(request, contract_id):
-    return extraction_service.summary_lab_contract(request.user, contract_id)
+    return summary_service.summary_lab_contract(request.user, contract_id)
 
 @extraction_api('POST')
 def api_summary_lab_text(request):
-    return extraction_service.summary_lab_text(request.user, body(request))
+    return summary_service.summary_lab_text(request.user, body(request))
+
+@extraction_api('GET')
+def api_summary_changes(request, contract_id):
+    return summary_service.changes_from_previous(request.user, contract_id, request.GET.get('version_id'))
+
+@extraction_api('GET')
+def api_summary_sections(request, contract_id):
+    return summary_service.clause_sections(request.user, contract_id, request.GET.get('version_id'))
+
+@require_http_methods(['GET'])
+def api_summary_export(request, contract_id):
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Authentication required.'}, status=401)
+    try:
+        name, content = summary_service.export_docx(request.user, contract_id, request.GET.get('version_id'))
+    except ObjectDoesNotExist:
+        return JsonResponse({'error': 'Contract or version not found.'}, status=404)
+    except extraction_service.ExtractionError as error:
+        return JsonResponse({'error': str(error)}, status=error.status)
+    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    response['Content-Disposition'] = content_disposition_header(True, name)
+    return response
+
+@extraction_api('POST')
+def api_summary_lab_read(request):
+    return summary_service.summary_lab_read(request.user, request.FILES.get('file'))
+
+@extraction_api('POST')
+def api_summary_lab_file(request):
+    return summary_service.summary_lab_file(request.user, request.FILES.get('file'), request.POST)
 
 @extraction_api('GET')
 def api_summary_lab_health(request):
-    return extraction_service.summary_lab_health(request.user)
+    return summary_service.summary_lab_health(request.user)
 
 @extraction_api('POST')
 def api_summary_lab_compare(request):
-    return extraction_service.summary_lab_compare(request.user, body(request))
+    return summary_service.summary_lab_compare(request.user, body(request))

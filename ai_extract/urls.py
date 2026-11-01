@@ -22,9 +22,15 @@ urlpatterns = [
         name="ai_get_summary",
     ),
 
+    path("contracts/<int:contract_id>/summary/changes/", views.api_summary_changes, name="ai_summary_changes"),
+    path("contracts/<int:contract_id>/summary/sections/", views.api_summary_sections, name="ai_summary_sections"),
+    path("contracts/<int:contract_id>/summary/export/", views.api_summary_export, name="ai_summary_export"),
+
     # ── Summary Lab (test screen at /ai-extract/summary-lab/) ───────────────
     path("summary-lab/health/", views.api_summary_lab_health, name="ai_summary_lab_health"),
     path("summary-lab/text/", views.api_summary_lab_text, name="ai_summary_lab_text"),
+    path("summary-lab/read/", views.api_summary_lab_read, name="ai_summary_lab_read"),
+    path("summary-lab/file/", views.api_summary_lab_file, name="ai_summary_lab_file"),
     path("summary-lab/compare/", views.api_summary_lab_compare, name="ai_summary_lab_compare"),
     path("summary-lab/contracts/<int:contract_id>/", views.api_summary_lab_contract, name="ai_summary_lab_contract"),
 

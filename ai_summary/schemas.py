@@ -29,6 +29,7 @@ class SummarizeResponse(BaseModel):
     facts: dict
     unverified: list
     checklist: dict | None
+    key_dates: list = []
     model_id: str
     cached: bool
     chunks: int

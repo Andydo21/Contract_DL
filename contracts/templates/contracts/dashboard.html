@@ -16,6 +16,7 @@
     
     <!-- External CSS -->
     <link rel="stylesheet" href="{% static 'contracts/css/dashboard.css' %}?v=1.0.1">
+    <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.2.0">
 </head>
 <body>
 
@@ -180,7 +181,7 @@
             <div class="scanner-overlay" id="scanner-loader">
                 <div class="scanner-circle"></div>
                 <div class="scanner-laser"></div>
-                <div class="scanner-text">AI Scanning & Analyzing Contract...</div>
+                <div class="scanner-text">Đang tải hợp đồng lên...</div>
             </div>
 
             <div class="modal-header">
@@ -233,10 +234,24 @@
                         <label for="file-input" style="display: block; cursor: pointer; width: 100%; height: 100%;">
                             <i class="fa-solid fa-cloud-arrow-up file-icon"></i>
                             <p id="file-drop-text">Drag and drop file here, or click to choose file</p>
-                            <input type="file" name="file" id="file-input" style="display: none;">
+                            <input type="file" name="file" id="file-input" accept=".pdf,.docx,.txt" style="display: none;">
                         </label>
                     </div>
                 </div>
+
+                <!-- Summary comes first: summarize the input right away, before extraction / risk analysis -->
+                <div class="summary-choice">
+                    <label>
+                        <input type="checkbox" name="summarize" value="true" checked>
+                        <span>Tóm tắt ngay sau khi tải lên<small>AI tự đọc file (PDF/DOCX/TXT) và tóm tắt, không cần chạy trích xuất trước.</small></span>
+                    </label>
+                    <button type="button" class="btn" id="btn-quick-summary" style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35); color: #c7d2fe; box-shadow: none;">
+                        <i class="fa-solid fa-bolt"></i> Xem tóm tắt nhanh
+                    </button>
+                </div>
+                <p class="summary-file-warning" id="upload-file-warning" hidden></p>
+                <p class="summary-file-hint" id="upload-file-hint" hidden></p>
+                <div id="upload-quick-summary" hidden></div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 12px;">
                     <button type="button" class="btn" id="btn-cancel-upload" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">Cancel</button>
@@ -247,6 +262,7 @@
     </div>
 
     <!-- External JavaScript -->
-    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.1.8"></script>
+    <script src="{% static 'contracts/js/summary_panel.js' %}?v=1.3.0"></script>
+    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.2.1"></script>
 </body>
 </html>

@@ -1,0 +1,106 @@
+# Core stack: Postgres + Django web + ai_summary, each its own container.
+# Extraction and risk-analysis services are added separately; the summary model stays on Kaggle (SUMMARY_LLM_URL).
+#
+#   docker compose -f docker-compose.core.yml up -d --build      # db -> migrate -> web, ai-summary
+#   docker compose -f docker-compose.core.yml run --rm web python manage.py createsuperuser
+#   docker compose -f docker-compose.core.yml logs -f web ai-summary
+#
+# Web: http://127.0.0.1:${CORE_WEB_PORT:-8020}   Postgres from the host: 127.0.0.1:${CORE_DB_PORT:-5434}
+name: contract-core
+
+x-web: &web
+  build:
+    context: .
+    dockerfile: Dockerfile.core
+  image: contract-core-web:latest
+  env_file: .env
+  # These win over .env, which may point at the shared Neon database.
+  environment:
+    - DB_HOST=db
+    - DB_PORT=5432
+    - DB_NAME=contract_db
+    - DB_USER=postgres
+    - DB_PASSWORD=${CORE_DB_PASSWORD:-contract_core}
+    - DB_SSLMODE=disable
+    - WORKFLOW_DB_NAME=workflow_db
+    - AI_SUMMARY_URL=http://ai-summary:8000
+    - AI_SUMMARY_AUTO=${AI_SUMMARY_AUTO:-1}
+  volumes:
+    - .:/app
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: contract_core_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=contract_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${CORE_DB_PASSWORD:-contract_core}
+    ports:
+      - "127.0.0.1:${CORE_DB_PORT:-5434}:5432"
+    volumes:
+      - core_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d contract_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies Django migrations to Postgres, then exits; web starts only after it succeeds.
+  migrate:
+    <<: *web
+    container_name: contract_core_migrate
+    command: python manage.py migrate --noinput
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *web
+    container_name: contract_core_web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${CORE_WEB_PORT:-8020}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ai-summary:
+        condition: service_started
+
+  # Summarizes contract text that reaches the database, and retries runs that failed while the model was offline.
+  summary-worker:
+    <<: *web
+    container_name: contract_core_summary_worker
+    command: python manage.py retry_summaries --watch
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ai-summary:
+        condition: service_started
+
+  ai-summary:
+    build:
+      context: ./ai_summary
+      dockerfile: Dockerfile
+    image: contract-core-ai-summary:latest
+    container_name: contract_core_ai_summary
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - SUMMARY_LLM_URL=${SUMMARY_LLM_URL:-}
+      - SUMMARY_MODEL_ID=${SUMMARY_MODEL_ID:-phamthanhfd/contract-summary-qwen3-1.7b}
+      - SUMMARY_CACHE_DIR=/cache
+    ports:
+      - "127.0.0.1:8004:8000"
+    volumes:
+      - ./ai_summary:/app
+      - ./shared:/app/shared
+      - core_summary_cache:/cache
+
+volumes:
+  core_pgdata:
+  core_summary_cache:

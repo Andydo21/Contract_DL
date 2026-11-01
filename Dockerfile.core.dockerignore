@@ -1,0 +1,14 @@
+.git
+.idea
+.env
+**/__pycache__
+media
+scratch
+output
+fabric
+explorer_logs
+NewIdea/neo4j_storage
+NewIdea/qdrant_storage
+ai_extract/a3/qdrant_storage
+ai_summary/finetune/data
+**/node_modules

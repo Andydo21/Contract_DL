@@ -10,7 +10,7 @@
     <div>
         <p class="eyebrow">SUMMARY LAB</p>
         <h1>Kiểm thử tóm tắt hợp đồng</h1>
-        <p class="lede">Chạy trích xuất OCR, xem chính xác text và điều khoản gửi cho model, rồi tóm tắt và đối chiếu từng giá trị với nguồn.</p>
+        <p class="lede">Tóm tắt từ text hợp đồng trong database; chưa có text thì ai_summary tự đọc file gốc (PDF, DOCX, TXT). Xem text gửi cho model, tóm tắt và đối chiếu từng giá trị với nguồn.</p>
     </div>
     <div class="health" id="health" data-endpoint="/api/ai/summary-lab/health/">
         <span class="dot"></span><div><strong>ai_summary</strong><small>Đang kiểm tra…</small></div>
@@ -19,6 +19,7 @@
 
 <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="contract" role="tab">Theo hợp đồng</button>
+    <button class="tab" data-tab="file" role="tab">Tải file lên</button>
     <button class="tab" data-tab="text" role="tab">Dán text</button>
     <button class="tab" data-tab="compare" role="tab">So sánh phiên bản</button>
 </nav>
@@ -48,29 +49,25 @@
         <select id="contract-select">
             <option value="">— Chọn hợp đồng —</option>
             {% for card in cards %}{% if card.version %}
-            <option value="{{ card.contract.id }}">{{ card.contract.contract_code }} · {{ card.contract.title }} · v{{ card.version.version_number }} · {% if card.run %}{{ card.run.status }}{% else %}chưa OCR{% endif %}</option>
+            <option value="{{ card.contract.id }}">{{ card.contract.contract_code }} · {{ card.contract.title }} · v{{ card.version.version_number }}</option>
             {% endif %}{% endfor %}
         </select>
-        <button class="primary" id="run-flow" disabled>Chạy cả luồng</button>
     </div>
 
     <div class="steps" id="steps" hidden>
-        <article class="step" id="step-ocr">
-            <header><span class="num">1</span><h2>Trích xuất OCR</h2><span class="pill" id="ocr-status">—</span></header>
+        <article class="step" id="step-file">
+            <header><span class="num">1</span><h2>Nguồn</h2><span class="pill" id="file-kind">—</span></header>
             <dl class="stats">
-                <div><dt>Trang</dt><dd id="ocr-pages">0</dd></div>
-                <div><dt>Khối</dt><dd id="ocr-blocks">0</dd></div>
-                <div><dt>Hoàn tất</dt><dd id="ocr-done">—</dd></div>
+                <div><dt>Trang</dt><dd id="file-pages">—</dd></div>
+                <div><dt>Trang OCR</dt><dd id="file-ocr">—</dd></div>
+                <div><dt>Tải lên</dt><dd id="file-uploaded">—</dd></div>
             </dl>
-            <p class="error-text" id="ocr-error" hidden></p>
-            <div class="actions">
-                <button id="run-ocr">Chạy trích xuất</button>
-                <a id="open-pipeline" href="#" target="_blank" rel="noopener">Mở pipeline ↗</a>
-            </div>
+            <p class="hint" id="file-name"></p>
+            <p class="error-text" id="file-error" hidden></p>
         </article>
 
         <article class="step" id="step-source">
-            <header><span class="num">2</span><h2>Text nguồn</h2><span class="pill" id="source-origin">—</span></header>
+            <header><span class="num">2</span><h2>Text đọc được</h2><span class="pill" id="source-state">—</span></header>
             <dl class="stats">
                 <div><dt>Ký tự</dt><dd id="source-chars">0</dd></div>
                 <div><dt>Điều khoản</dt><dd id="source-sections">0</dd></div>
@@ -88,9 +85,19 @@
     </div>
     <div id="contract-prepare"></div>
     <details class="panel" id="source-panel" hidden>
-        <summary>Text OCR gửi cho model (4.000 ký tự đầu)</summary>
+        <summary>Text gửi cho model (4.000 ký tự đầu)</summary>
         <pre id="source-preview"></pre>
     </details>
+</section>
+
+<section class="tab-panel" id="tab-file" hidden>
+    <label for="lab-file">File hợp đồng (PDF, DOCX, TXT) — không lưu vào hệ thống</label>
+    <input type="file" id="lab-file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
+    <div class="actions">
+        <button class="primary" id="file-summary">Đọc và tóm tắt</button>
+        <label class="check"><input type="checkbox" id="file-force"> Bỏ qua cache</label>
+    </div>
+    <p class="hint" id="file-source"></p>
 </section>
 
 <section class="tab-panel" id="tab-text" hidden>

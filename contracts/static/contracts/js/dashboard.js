@@ -170,6 +170,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('stat-pending').innerText = pendingCount;
     }
 
+    let activeDetailTab = {contractId: null, name: 'summary'};
+
     // Load single contract details
     async function showContractDetail(id, versionId = null) {
         currentContractId = id;
@@ -433,12 +435,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="tabs-header">
-                    <button class="tab-btn active" id="btn-tab-analysis"><i class="fa-solid fa-chart-line"></i> Risk Assessment</button>
+                    <button class="tab-btn active" id="btn-tab-summary"><i class="fa-solid fa-wand-magic-sparkles"></i> Tóm tắt</button>
+                    <button class="tab-btn" id="btn-tab-analysis"><i class="fa-solid fa-chart-line"></i> Risk Assessment</button>
                     <button class="tab-btn" id="btn-tab-clauses"><i class="fa-solid fa-file-invoice"></i> Original Clauses (${data.clauses ? data.clauses.length : 0})</button>
                     <button class="tab-btn" id="btn-tab-fulltext"><i class="fa-solid fa-file-lines"></i> Full Document</button>
                 </div>
 
-                <div id="tab-analysis" class="tab-content active">
+                <div id="tab-summary" class="tab-content active">
+                    <div id="dashboard-summary-panel"></div>
+                </div>
+
+                <div id="tab-analysis" class="tab-content">
                     ${analysisHTML}
                 </div>
 
@@ -453,7 +460,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
 
+            SummaryPanel.mount(document.getElementById('dashboard-summary-panel'),
+                               {contractId: data.id, versionId: data.active_version_id});
+
             // Bind Tab Navigation Events
+            const tabSummaryBtn = document.getElementById('btn-tab-summary');
+            const tabSummaryContent = document.getElementById('tab-summary');
             const tabAnalysisBtn = document.getElementById('btn-tab-analysis');
             const tabClausesBtn = document.getElementById('btn-tab-clauses');
             const tabFulltextBtn = document.getElementById('btn-tab-fulltext');
@@ -462,7 +474,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const tabClausesContent = document.getElementById('tab-clauses');
             const tabFulltextContent = document.getElementById('tab-fulltext');
 
+            function rememberTab(name) {
+                activeDetailTab = {contractId: data.id, name};
+            }
+
             function deactivateAllTabs() {
+                tabSummaryBtn.classList.remove('active');
+                tabSummaryContent.classList.remove('active');
                 tabAnalysisBtn.classList.remove('active');
                 tabClausesBtn.classList.remove('active');
                 tabFulltextBtn.classList.remove('active');
@@ -472,23 +490,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 tabFulltextContent.classList.remove('active');
             }
 
+            tabSummaryBtn.addEventListener('click', () => {
+                deactivateAllTabs();
+                tabSummaryBtn.classList.add('active');
+                tabSummaryContent.classList.add('active');
+                rememberTab('summary');
+            });
+
             tabAnalysisBtn.addEventListener('click', () => {
                 deactivateAllTabs();
                 tabAnalysisBtn.classList.add('active');
                 tabAnalysisContent.classList.add('active');
+                rememberTab('analysis');
             });
 
             tabClausesBtn.addEventListener('click', () => {
                 deactivateAllTabs();
                 tabClausesBtn.classList.add('active');
                 tabClausesContent.classList.add('active');
+                rememberTab('clauses');
             });
 
             tabFulltextBtn.addEventListener('click', () => {
                 deactivateAllTabs();
                 tabFulltextBtn.classList.add('active');
                 tabFulltextContent.classList.add('active');
+                rememberTab('fulltext');
             });
+
+            if (activeDetailTab.contractId === data.id && activeDetailTab.name !== 'summary') {
+                document.getElementById(`btn-tab-${activeDetailTab.name}`).click();
+            }
 
 
             // Bind Run AI Analysis Event if present
@@ -499,6 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     e.stopPropagation();
 
                     const targetContractId = btn.dataset.contractId || data.id;
+                    rememberTab('analysis');
 
                     // 1. Ensure Risk Assessment tab is active
                     const tabAnalysisBtn = document.getElementById('btn-tab-analysis');
@@ -752,12 +785,66 @@ document.addEventListener('DOMContentLoaded', () => {
     openUploadBtn.addEventListener('click', () => {
         uploadForm.reset();
         fileDropText.innerHTML = 'Drag and drop file here, or click to choose file';
+        inputChanged();
+        document.getElementById('upload-file-hint').hidden = true;
         uploadModal.classList.add('active');
     });
 
     function closeModal() {
         uploadModal.classList.remove('active');
+        SummaryPanel.clearQuick(document.getElementById('upload-quick-summary'));
     }
+
+    const quickSummaryBtn = document.getElementById('btn-quick-summary');
+    const quickSummaryBox = document.getElementById('upload-quick-summary');
+    const fileWarning = document.getElementById('upload-file-warning');
+
+    function inputChanged() {
+        SummaryPanel.clearQuick(quickSummaryBox);
+        const problem = SummaryPanel.fileProblem(fileInput.files[0]);
+        fileWarning.textContent = problem;
+        fileWarning.hidden = !problem;
+    }
+
+    // Prefill only what the person has not typed; they review it before saving.
+    async function prefillFromFile() {
+        const file = fileInput.files[0];
+        const hint = document.getElementById('upload-file-hint');
+        hint.hidden = true;
+        if (!file || SummaryPanel.fileProblem(file)) return;
+        try {
+            const values = await SummaryPanel.suggest(file);
+            if (fileInput.files[0] !== file) return;
+            const filled = Object.entries(values).filter(([name, value]) => {
+                const input = uploadForm.elements[name];
+                if (!input || !value || input.value) return false;
+                input.value = value;
+                return true;
+            });
+            hint.textContent = filled.length ? `Đã gợi ý ${filled.length} ô từ nội dung file. Hãy kiểm tra lại trước khi lưu.` : '';
+            hint.hidden = !filled.length;
+        } catch (error) {
+            console.warn('upload prefill:', error.message);  // the form still works by hand
+        }
+    }
+
+    fileInput.addEventListener('change', inputChanged);
+    fileInput.addEventListener('change', prefillFromFile);
+    uploadForm.raw_content.addEventListener('input', inputChanged);
+    quickSummaryBtn.addEventListener('click', async () => {
+        const file = fileInput.files[0];
+        const text = uploadForm.raw_content.value.trim();
+        if (!file && !text) {
+            alert("Chọn file hoặc dán nội dung hợp đồng trước.");
+            return;
+        }
+        quickSummaryBtn.disabled = true;
+        try {
+            await SummaryPanel.quick(quickSummaryBox, file ? {file} : {text});
+        } finally {
+            quickSummaryBtn.disabled = false;
+        }
+    });
 
     closeUploadBtn.addEventListener('click', closeModal);
     cancelUploadBtn.addEventListener('click', closeModal);
@@ -784,6 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.dataTransfer.files.length > 0) {
             fileInput.files = e.dataTransfer.files;
             fileDropText.innerHTML = `<strong>Selected file:</strong> ${fileInput.files[0].name}`;
+            fileInput.dispatchEvent(new Event('change'));
         }
     });
 
@@ -800,7 +888,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const formData = new FormData(uploadForm);
-        
+        // An unchecked box is not sent at all; say no explicitly so the server default does not apply.
+        formData.set('summarize', uploadForm.summarize && uploadForm.summarize.checked ? 'true' : 'false');
         // Show AI Scanner loader
         scannerLoader.classList.add('active');
         

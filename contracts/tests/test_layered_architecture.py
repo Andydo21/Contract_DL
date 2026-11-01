@@ -112,7 +112,7 @@ class LayeredEndpointTests(TestCase):
         response = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['summary'], 'Stored summary')
-        with patch('ai_extract.services.extraction_service.SummarizeService') as model:
+        with patch('ai_extract.services.summary_service.SummarizeService') as model:
             response = self.client.post(f'/api/ai/contracts/{self.foreign.pk}/summarize/', '{}', content_type='application/json')
         self.assertEqual(response.status_code, 404)
         model.assert_not_called()

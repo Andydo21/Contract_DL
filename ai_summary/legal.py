@@ -4,8 +4,23 @@ Checks are keyword matches with the matching clause cited, not legal advice: a "
 wording for it was found in the text, which the reader should confirm.
 """
 import re
+import unicodedata
 
-LABOR_CONTRACT = re.compile(r'hợp đồng lao động|người sử dụng lao động', re.I)
+LABOR_CONTRACT = r'hợp đồng lao động|người sử dụng lao động'
+
+
+def fold(text):
+    """Lowercase without Vietnamese marks: OCR reads 'LAO ĐỘNG' as 'LAO DONG' or 'bảo hiểm' as 'bao hiem'."""
+    marks = unicodedata.normalize('NFD', text.replace('đ', 'd').replace('Đ', 'D'))
+    return ''.join(c for c in marks if unicodedata.category(c) != 'Mn').lower()
+
+
+def tolerant_search(pattern, text, exact_only=False):
+    """Exact wording first, then ignoring marks and lost spaces ('sửdụng'), so a scan is not reported as missing clauses."""
+    if re.search(pattern, text, re.I):
+        return True
+    return not exact_only and bool(re.search(fold(pattern).replace(' ', r'\s*'), fold(text)))
+
 
 # Bộ luật Lao động 2019, Điều 21 khoản 1: nội dung chủ yếu của hợp đồng lao động.
 # Each item: (point, label, [(part, pattern)]). An item is found when every part matches.
@@ -41,8 +56,8 @@ LABOR_ARTICLE_21 = [
 
 
 def is_labor_contract(title, text):
-    return bool(LABOR_CONTRACT.search(title or '') or
-                (re.search(r'người lao động', text, re.I) and re.search(r'người sử dụng lao động', text, re.I)))
+    return bool(tolerant_search(LABOR_CONTRACT, title or '') or
+                (tolerant_search(r'người lao động', text) and tolerant_search(r'người sử dụng lao động', text)))
 
 
 def labor_checklist(sections):
@@ -51,7 +66,8 @@ def labor_checklist(sections):
     for point, label, parts in LABOR_ARTICLE_21:
         found, missing, cited = [], [], []
         for part, pattern in parts:
-            section = next((s for s in sections if re.search(pattern, s['text'], re.I)), None)
+            # Without marks 'nam' (male) would match every 'năm' (year).
+            section = next((s for s in sections if tolerant_search(pattern, s['text'], exact_only=part == 'giới tính')), None)
             (found if section else missing).append(part)
             if section and section['label'] not in cited:
                 cited.append(section['label'])

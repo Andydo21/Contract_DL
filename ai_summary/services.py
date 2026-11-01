@@ -12,7 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
 
+import insights
 import legal
+import reader
 import llm
 from schemas import SUMMARY_SCHEMA
 from text_tools import (chunk_sections, dates_in, durations_in, effective_dates, extract_facts, money, normalize,
@@ -20,9 +22,10 @@ from text_tools import (chunk_sections, dates_in, durations_in, effective_dates,
 
 logger = logging.getLogger('ai_summary.services')
 
-PROMPT_VERSION = 'summary-v11'
-CHUNK_CHARS = int(os.getenv('SUMMARY_CHUNK_CHARS', '18000'))
-MAX_CHUNKS = int(os.getenv('SUMMARY_MAX_CHUNKS', '8'))
+PROMPT_VERSION = 'summary-v12'
+# The fine-tuned model was trained on samples up to 4096 tokens (prompt + answer); ~2.6 characters per token.
+CHUNK_CHARS = int(os.getenv('SUMMARY_CHUNK_CHARS', '9000'))
+MAX_CHUNKS = int(os.getenv('SUMMARY_MAX_CHUNKS', '16'))
 WORKERS = int(os.getenv('SUMMARY_PARALLEL', '4'))
 MAX_TOKENS = int(os.getenv('SUMMARY_MAX_TOKENS', '1500'))
 CACHE_DIR = Path(os.getenv('SUMMARY_CACHE_DIR') or Path(tempfile.gettempdir()) / 'ai_summary_cache')
@@ -73,6 +76,7 @@ PLACEHOLDER = re.compile(r'^(không có|không rõ|không nêu|không được n
 LOW_TOKEN_PROB = float(os.getenv('SUMMARY_LOW_TOKEN_PROB', '0.3'))
 LOW_MEAN_PROB = float(os.getenv('SUMMARY_LOW_MEAN_PROB', '0.7'))
 
+READER_VERSION = '1'
 _memory = OrderedDict()
 _memory_lock = Lock()
 
@@ -431,6 +435,24 @@ def render(analysis, perspective='general', length='detailed', explain=False):
     return '\n'.join(legal.explain_terms(lines) if explain else lines)
 
 
+def read_document(data, filename=''):
+    """reader.read cached by content: changing perspective or length must not OCR a scan again."""
+    key = f"read-{READER_VERSION}-{hashlib.sha256(data).hexdigest()}"
+    document = _cache_get(key)
+    if document is None:
+        document = reader.read(data, filename)
+        if not document['unreadable_pages']:  # OCR may become available or succeed on a later try
+            _cache_put(key, document)
+    return document
+
+
+def sections_by_label(text):
+    found = {}
+    for section in split_sections(normalize(text)):
+        found[section['label']] = f"{found[section['label']]}\n{section['text']}" if section['label'] in found else section['text']
+    return found
+
+
 def prepare(text):
     """What summarize would send, without calling the model."""
     source = normalize(text)
@@ -479,6 +501,7 @@ def summarize(text, metadata=None, force=False, model=None, perspective='general
     analysis = analyze(text, metadata, force, model)
     summary = render(analysis, perspective, length, explain)
     return dict({k: v for k, v in analysis.items() if k not in ('labels', 'section_texts')}, summary=summary,
+                key_dates=insights.key_dates(analysis['structured'], normalize(text)),
                 elapsed_ms=int((time.monotonic() - started) * 1000))
 
 

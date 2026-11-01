@@ -1,8 +1,29 @@
 # ai_summary
 
-Standalone contract summary service. Django (`POST /api/ai/contracts/<id>/summarize/`) sends the version's
-OCR text from `ai_extract` and stores the returned text in `ContractSummary`; all prompts, model choice and
-caching live here. `/ai-extract/summary-lab/` is the test screen.
+Standalone contract summary service. The source is the contract text in the database (`ContractContext` rows
+with `context_type='raw_text'`, one per page or manual entry); a version with no text yet falls back to its uploaded
+file, which this service reads itself. Either way, extraction never has to run first.
+
+Flow: the text or a file arrives → `manage.py retry_summaries --watch` (service `summary-worker`) picks up text
+without a summary, and an upload starts a background summary right away → the result is stored in `ContractSummary`
+(text, `result` JSON, run state). Runs that fail while the model is offline are retried when it returns.
+`AI_SUMMARY_AUTO=0` turns the automatic runs off; `POST /api/ai/contracts/<id>/summarize/` runs one on demand.
+
+## Reading files (`reader.py`)
+
+- PDF: PyMuPDF text layer in reading order; pages with no text layer (scans) are OCR'd with Tesseract
+  `vie+eng` at 300 dpi (installed in the Docker image; `/health` reports `ocr_available`).
+- DOCX: paragraphs and tables in document order, table cells joined with ` | `.
+- TXT: UTF-8 (or UTF-16 with BOM; otherwise Windows-1258).
+- The content decides the format, not the file name. Old `.doc`, password-protected or empty files get a
+  clear 422 message. Limits: `SUMMARY_MAX_FILE_MB` (25), `SUMMARY_MAX_OCR_PAGES` (60).
+
+| Endpoint | |
+| --- | --- |
+| `POST /api/v1/summarize-file` | multipart `file` + `perspective`, `length`, `explain_terms`, `force`, `model`, `contract_metadata` (JSON); result + `source` (kind, pages, OCR'd pages, warnings) |
+| `POST /api/v1/compare-files` | `old_file`, `new_file` + the same options |
+| `POST /api/v1/read` | text read from a file and its chunk plan; no model call |
+| `POST /api/v1/summarize`, `/compare`, `/prepare` | the same on plain text (JSON) |
 
 ## Pipeline
 
@@ -36,9 +57,14 @@ clause actually changed, with amounts and durations computed in code ("tăng t�
 | --- | --- |
 | `SUMMARY_LLM_URL` (falls back to `VLLM_BASE_URL`) | — |
 | `SUMMARY_MODEL_ID` | `phamthanhfd/contract-summary-qwen3-1.7b` |
-| `SUMMARY_CHUNK_CHARS` / `SUMMARY_MAX_CHUNKS` | `18000` / `8` |
+| `SUMMARY_CHUNK_CHARS` / `SUMMARY_MAX_CHUNKS` | `9000` / `16` |
 | `SUMMARY_PARALLEL` / `SUMMARY_MAX_TOKENS` / `SUMMARY_LLM_TIMEOUT` | `4` / `1500` / `180` |
 | `SUMMARY_LOGPROBS` / `SUMMARY_LOW_TOKEN_PROB` / `SUMMARY_LOW_MEAN_PROB` | `1` / `0.3` / `0.7` |
+| `SUMMARY_MAX_FILE_MB` / `SUMMARY_MAX_OCR_PAGES` / `SUMMARY_OCR_LANGUAGES` | `25` / `60` / `vie+eng` |
+| Django: `AI_SUMMARY_URL` / `AI_SUMMARY_TIMEOUT` / `AI_SUMMARY_AUTO` | `http://ai-summary:8000` / `600` / `1` |
+
+Run as a container: `docker compose up -d --build ai-summary` (port 8004; reads `SUMMARY_*` and `SECRET_KEY`
+from the root `.env`).
 
 `kaggle_notebook.py` Cell 2 starts the main model (GPU 0) and an optional candidate (GPU 1) in parallel
 behind one proxy and URL; requests choose a model by `model`. Cell 4 swaps only the candidate.
@@ -47,7 +73,7 @@ behind one proxy and URL; requests choose a model by `model`. Cell 4 swaps only 
 
 ```
 cd ai_summary
-python -m unittest test_summary test_features
+python -m unittest test_summary test_features test_reader test_insights
 python eval_summary.py                      # golden set against the running service
 python eval_summary.py --model <served id>  # same set against a candidate model
 ```

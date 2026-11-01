@@ -12,12 +12,24 @@ class ContractSummary(models.Model):
         related_name="ai_summary",
         verbose_name="Contract Version",
     )
-    summary = models.TextField(verbose_name="AI-Generated Summary")
+    # Empty while the first run is queued or running: the row then only carries the run state below.
+    summary = models.TextField(blank=True, default="", verbose_name="AI-Generated Summary")
     model_id = models.CharField(
         max_length=200,
         default="phamthanhfd/contract-analysis-qwen2.5-3b",
         verbose_name="Model ID",
     )
+    run_status = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        choices=[("queued", "Queued"), ("running", "Running"), ("done", "Done"), ("failed", "Failed")],
+        verbose_name="Run Status",
+    )
+    run_error = models.TextField(blank=True, default="", verbose_name="Run Error")
+    # Everything behind the text: structured values, checklist, confidence, dropped values, key dates, file info.
+    result = models.JSONField(blank=True, default=dict, verbose_name="Structured Result")
+    run_status_at = models.DateTimeField(blank=True, null=True, verbose_name="Run Status Changed At")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Generated At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
 

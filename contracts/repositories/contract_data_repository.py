@@ -59,7 +59,7 @@ def latest_analysis_for_listed_version(v):
 
 
 def first_contract_summary_for_get_contract_details(version):
-    return ContractSummary.objects.filter(version=version).first()
+    return ContractSummary.objects.filter(version=version).exclude(summary='').first()
 
 
 def create_contract_version_for_create_and_analyze_contract(contract):
