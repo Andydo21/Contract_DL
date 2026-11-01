@@ -23,10 +23,10 @@
 #     subprocess.run('pip uninstall -y -q torchaudio', shell=True)
 # print('vllm', importlib.metadata.version('vllm'))
 
-# Cell 2 — start the main model (GPU 0) and, optionally, a candidate (GPU 1) IN PARALLEL, behind one URL.
+# Cell 2 — start the main model on GPU 0 and, on GPU 1, a candidate or a second copy IN PARALLEL, behind one URL.
 # Startup is a one-off per session: weight download, then vLLM compile + CUDA graph capture (1-3 min per
 # model on T4). Both models load at the same time, so the wait is the slower one, not the sum.
-# Set CANDIDATE_ID = None to serve only the main model.
+# CANDIDATE_ID = None runs a second copy of the main model, which about doubles what can be processed at once.
 import json
 import os
 import subprocess
@@ -54,11 +54,14 @@ try:
 except Exception:
     HF_TOKEN = None
 
-# model id -> (port, GPU index)
-SERVERS = {MODEL_ID: (8001, '0')}
-if CANDIDATE_ID:
-    SERVERS[CANDIDATE_ID] = (8002, '1')
+# name -> (model id, port, GPU index). A candidate takes the second GPU; otherwise it runs a second copy of the
+# main model, and the proxy sends each request to the copy with the fewest requests in progress.
+GPU_COUNT = len(subprocess.run(['nvidia-smi', '-L'], capture_output=True, text=True).stdout.splitlines())
+SERVERS = {'main': (MODEL_ID, 8001, '0')}
+if GPU_COUNT > 1:
+    SERVERS['second'] = (CANDIDATE_ID or MODEL_ID, 8002, '1')
 processes = globals().get('processes', {})
+in_flight = globals().get('in_flight', {})
 
 
 def served_models(port):
@@ -68,26 +71,26 @@ def served_models(port):
         return []
 
 
-def log_path(model_id):
-    return f"/kaggle/working/vllm_{model_id.replace('/', '_')}.log"
+def log_path(name):
+    return f'/kaggle/working/vllm_{name}.log'
 
 
-def start(model_id):
-    """Download (with a progress bar) then launch vLLM on its own GPU; reuse it if already serving."""
-    port, gpu = SERVERS[model_id]
-    if model_id in served_models(port) or (model_id in processes and processes[model_id].poll() is None):
+def start(name):
+    """Download then launch vLLM on its own GPU; reuse it if already serving."""
+    model_id, port, gpu = SERVERS[name]
+    if model_id in served_models(port) or (name in processes and processes[name].poll() is None):
         return
     from huggingface_hub import snapshot_download
     snapshot_download(model_id, token=HF_TOKEN)
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, **({'HF_TOKEN': HF_TOKEN} if HF_TOKEN else {}))
-    processes[model_id] = subprocess.Popen([
+    processes[name] = subprocess.Popen([
         'python', '-m', 'vllm.entrypoints.openai.api_server', '--model', model_id, '--port', str(port),
         '--dtype', 'half',                    # T4 has no bfloat16
-        '--max-model-len', '16384',           # one 18k-character chunk + schema output fits comfortably
+        '--max-model-len', '16384',           # one chunk + schema output fits comfortably
         '--gpu-memory-utilization', '0.92',
         '--enable-prefix-caching',            # chunks share the system prompt
         '--max-num-seqs', '8',                # parallel chunks are batched together
-    ], env=env, start_new_session=True, stdout=open(log_path(model_id), 'w'), stderr=subprocess.STDOUT)
+    ], env=env, start_new_session=True, stdout=open(log_path(name), 'w'), stderr=subprocess.STDOUT)
 
 
 with ThreadPoolExecutor(max_workers=len(SERVERS)) as pool:
@@ -95,50 +98,57 @@ with ThreadPoolExecutor(max_workers=len(SERVERS)) as pool:
 
 started = time.time()
 while True:
-    pending = [m for m, (port, _) in SERVERS.items() if m not in served_models(port)]
+    pending = [name for name, (model_id, port, _) in SERVERS.items() if model_id not in served_models(port)]
     if not pending:
         break
-    for model_id in pending:
-        process = processes.get(model_id)
+    for name in pending:
+        process = processes.get(name)
         if process is not None and process.poll() is not None:
-            raise RuntimeError(f'{model_id} exited:\n' + open(log_path(model_id)).read()[-4000:])
+            raise RuntimeError(f'{name} exited:\n' + open(log_path(name)).read()[-4000:])
     if time.time() - started > 1200:
         raise RuntimeError(f'not ready after 20 min: {pending}; see the vllm_*.log files in /kaggle/working')
-    for model_id in pending:  # last log line tells the stage: load weights / compile / graph capture
-        lines = [l for l in open(log_path(model_id), errors='replace').read().splitlines() if l.strip()]
-        print(f'[{time.time() - started:>5.0f}s] {model_id}: {lines[-1][-140:] if lines else "starting..."}', flush=True)
+    for name in pending:  # last log line tells the stage: load weights / compile / graph capture
+        lines = [l for l in open(log_path(name), errors='replace').read().splitlines() if l.strip()]
+        print(f'[{time.time() - started:>5.0f}s] {name}: {lines[-1][-140:] if lines else "starting..."}', flush=True)
     time.sleep(30)
 
-# One proxy routes each request to the server that serves its "model"; unknown models go to MODEL_ID.
-BACKENDS = {port: served_models(port) for port, _ in SERVERS.values()}
+
+def backend_ports(model):
+    """Ports serving this model, asked fresh so a swapped or dead server is noticed; the main model if unknown."""
+    ports = [port for model_id, port, _ in SERVERS.values() if model_id == model and model in served_models(port)]
+    return ports or [SERVERS['main'][1]]
+
+
 if not served_models(PROXY_PORT):
     proxy = FastAPI()
 
     @proxy.get('/v1/models')
     async def list_models():
-        data = []
+        data = {}
         async with httpx.AsyncClient() as client:
-            for port in BACKENDS:
+            for _, port, _ in SERVERS.values():
                 try:
-                    data += (await client.get(f'http://127.0.0.1:{port}/v1/models', timeout=5)).json()['data']
+                    for entry in (await client.get(f'http://127.0.0.1:{port}/v1/models', timeout=5)).json()['data']:
+                        data[entry['id']] = entry
                 except (httpx.HTTPError, ValueError, KeyError):
                     pass
-        return {'object': 'list', 'data': data}
+        return {'object': 'list', 'data': list(data.values())}
 
     @proxy.post('/v1/{path:path}')
     async def forward(path: str, request: Request):
         body = await request.body()
         model = json.loads(body or b'{}').get('model')
-        if not any(model in ids for ids in BACKENDS.values()):  # a server was swapped since the last lookup
-            BACKENDS.update({p: served_models(p) for p in BACKENDS})
-        port = next((p for p, ids in BACKENDS.items() if model in ids), SERVERS[MODEL_ID][0])
-        async with httpx.AsyncClient(timeout=None) as client:
-            try:
+        port = min(backend_ports(model), key=lambda p: in_flight.get(p, 0))
+        in_flight[port] = in_flight.get(port, 0) + 1
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
                 reply = await client.post(f'http://127.0.0.1:{port}/v1/{path}', content=body,
                                           headers={'content-type': 'application/json'})
-            except httpx.ConnectError:  # the vLLM process behind this port died; its log says why
-                return Response(json.dumps({'error': f'{model} is not running on port {port}'}), 503,
-                                media_type='application/json')
+        except httpx.ConnectError:  # the vLLM process behind this port died; its log says why
+            return Response(json.dumps({'error': f'{model} is not running on port {port}'}), 503,
+                            media_type='application/json')
+        finally:
+            in_flight[port] -= 1
         return Response(reply.content, reply.status_code, media_type=reply.headers.get('content-type'))
 
     threading.Thread(target=uvicorn.run, args=(proxy,), daemon=True,
@@ -168,28 +178,61 @@ def open_tunnel(port):
 
 if not any(NGROK_DOMAIN in t.public_url for t in ngrok.get_tunnels()):
     open_tunnel(PROXY_PORT)
+
+
+def watch_tunnel():
+    """ngrok sessions drop without warning; reopen the tunnel after two failed checks in a row."""
+    failures = 0
+    while True:
+        time.sleep(60)
+        try:
+            ok = requests.get(f'https://{NGROK_DOMAIN}/v1/models', timeout=20,
+                              headers={'ngrok-skip-browser-warning': '1'}).status_code == 200
+        except requests.RequestException:
+            ok = False
+        failures = 0 if ok else failures + 1
+        if failures >= 2:
+            print('tunnel down, reopening', flush=True)
+            try:
+                ngrok.kill()
+                open_tunnel(PROXY_PORT)
+                failures = 0
+            except Exception as error:  # keep watching: the next round tries again
+                print('tunnel reopen failed:', error, flush=True)
+
+
+if not any(t.name == 'watch-tunnel' and t.is_alive() for t in threading.enumerate()):
+    threading.Thread(target=watch_tunnel, daemon=True, name='watch-tunnel').start()
 print('=' * 60)
 print(f'Ready in {time.time() - started:.0f}s. Serving https://{NGROK_DOMAIN}/v1 ->', served_models(PROXY_PORT))
 print(f'.env: SUMMARY_LLM_URL=https://{NGROK_DOMAIN}/v1   SUMMARY_MODEL_ID={MODEL_ID}')
 print('=' * 60)
 
-# Cell 3 — keep the notebook alive while serving (only needed for "Save & Run All")
-# while served_models(PROXY_PORT): time.sleep(60)
+# Cell 3 — keep the session running and restart a vLLM server that died. It never returns: to run another cell,
+# interrupt it (the servers, proxy and tunnel keep running) and run it again afterwards.
+# With "Save Version -> Save & Run All" the notebook runs without an open browser tab, until Kaggle's session limit.
+# while True:
+#     for name, (model_id, port, _) in SERVERS.items():
+#         if model_id not in served_models(port) and name in processes and processes[name].poll() is not None:
+#             print(f'{name} stopped (exit {processes[name].poll()}), restarting', flush=True)
+#             start(name)
+#     print(time.strftime('%H:%M:%S'), {name: bool(served_models(port)) for name, (_, port, _) in SERVERS.items()}, flush=True)
+#     time.sleep(300)
 
 # Diagnose — a model missing from /v1/models: is its process alive, and what did it log last?
-# for m, (port, gpu) in SERVERS.items():
-#     p = processes.get(m)
-#     print(m, 'port', port, 'GPU', gpu, '| exit code:', None if p is None else p.poll(), '| serving:', served_models(port))
-#     print('\n'.join(open(log_path(m), errors='replace').read().splitlines()[-25:]), '\n' + '-' * 60)
+# for name, (model_id, port, gpu) in SERVERS.items():
+#     p = processes.get(name)
+#     print(name, model_id, 'port', port, 'GPU', gpu, '| exit code:', None if p is None else p.poll(), '| serving:', served_models(port))
+#     print('\n'.join(open(log_path(name), errors='replace').read().splitlines()[-25:]), '\n' + '-' * 60)
 # !nvidia-smi --query-gpu=index,memory.used,memory.total --format=csv
 
-# Cell 4 (optional) — swap only the candidate, e.g. to your fine-tuned repo; the main model keeps running.
+# Cell 4 (optional) — put another model on the second GPU, e.g. a new fine-tune; the main model keeps running.
+# The proxy looks up who serves a model on each request, so nothing else needs updating.
 # import signal
 # NEW_CANDIDATE = 'phamthanhfd/contract-summary-qwen3-1.7b'
-# if CANDIDATE_ID in processes and processes[CANDIDATE_ID].poll() is None:
-#     os.killpg(processes[CANDIDATE_ID].pid, signal.SIGTERM); processes[CANDIDATE_ID].wait(120); time.sleep(5)
-# SERVERS.pop(CANDIDATE_ID, None); CANDIDATE_ID = NEW_CANDIDATE; SERVERS[CANDIDATE_ID] = (8002, '1')
-# start(CANDIDATE_ID)
-# while CANDIDATE_ID not in served_models(8002): time.sleep(15)
-# BACKENDS[8002] = served_models(8002)   # the running proxy reads BACKENDS on every request
-# print('candidate ready:', BACKENDS[8002])
+# if 'second' in processes and processes['second'].poll() is None:
+#     os.killpg(processes['second'].pid, signal.SIGTERM); processes['second'].wait(120); time.sleep(5)
+# SERVERS['second'] = (NEW_CANDIDATE, 8002, '1')
+# start('second')
+# while NEW_CANDIDATE not in served_models(8002): time.sleep(15)
+# print('candidate ready:', served_models(8002))
