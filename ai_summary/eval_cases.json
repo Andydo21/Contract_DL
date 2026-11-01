@@ -247,5 +247,29 @@
         "value"
       ]
     }
+  },
+  {
+    "id": "lao_dong_dai",
+    "note": "Hợp đồng lao động dài có điều khoản lặp: giữ bảo hiểm ở đoạn cuối, không liệt kê trùng",
+    "filler": {
+      "start": 3,
+      "count": 24
+    },
+    "text": "HỢP ĐỒNG LAO ĐỘNG\nSố: 21/2025/HĐLĐ\nNGƯỜI SỬ DỤNG LAO ĐỘNG: Công ty TNHH Phần mềm Bình Minh\nĐịa chỉ: Số 20 Lê Lợi, Hà Nội\nĐại diện: Bà Trần Thị Hoa – Chức vụ: Giám đốc\nNGƯỜI LAO ĐỘNG: Ông Nguyễn Văn Nam\nSinh ngày: 12/05/1995, Giới tính: Nam\nThường trú: Cầu Giấy, Hà Nội\nSố CCCD: 001095012345\nĐiều 1. Công việc\nChức danh: Lập trình viên. Địa điểm làm việc: văn phòng công ty tại Hà Nội.\nĐiều 2. Thời hạn hợp đồng\nHợp đồng lao động xác định thời hạn 12 tháng, từ ngày 01/03/2025 đến ngày 28/02/2026.\nĐiều 3. Tiền lương\nMức lương: 15.000.000 đồng/tháng, trả bằng chuyển khoản vào ngày 05 hằng tháng.\n{{FILLER}}\nĐiều 90. Bảo hiểm\nNgười sử dụng lao động đóng bảo hiểm xã hội cho người lao động theo quy định.\nĐiều 91. Chấm dứt hợp đồng\nNgười lao động đơn phương chấm dứt hợp đồng phải báo trước 30 ngày.",
+    "expect": {
+      "salary": [
+        "15.000.000"
+      ],
+      "insurance": [
+        "bảo hiểm xã hội"
+      ],
+      "term": [
+        "12 tháng"
+      ],
+      "termination": [
+        "30 ngày"
+      ],
+      "min_chunks": 2
+    }
   }
 ]

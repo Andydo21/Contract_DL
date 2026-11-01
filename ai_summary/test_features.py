@@ -162,6 +162,103 @@ class InjectionValueTests(Isolated):
         self.assertIn('không phải số tiền', [r['reason'] for r in result['unverified']])
 
 
+class VerificationTests(Isolated):
+    @patch('services.llm.chat_json')
+    def test_empty_insurance_is_read_from_the_source_for_labour_contracts(self, chat):
+        chat.return_value = LABOR_REPLY | dict(insurance='')
+        result = services.summarize(LABOR)
+        self.assertEqual(result['structured']['insurance'], 'Người sử dụng lao động đóng bảo hiểm xã hội cho người lao động theo quy định')
+        self.assertIn('Bảo hiểm: Người sử dụng', result['summary'])
+
+    @patch('services.llm.chat_json')
+    def test_insurance_is_not_invented_when_the_source_has_none(self, chat):
+        chat.return_value = LABOR_REPLY | dict(insurance='')
+        text = LABOR.replace('Người sử dụng lao động đóng bảo hiểm xã hội cho người lao động theo quy định.', 'Theo quy định.')
+        self.assertEqual(services.summarize(text)['structured']['insurance'], '')
+
+    @patch('services.llm.chat_json')
+    def test_termination_clause_the_model_skipped_is_copied_from_the_source(self, chat):
+        chat.return_value = LABOR_REPLY | dict(termination=[])
+        items = services.summarize(LABOR)['structured']['termination']
+        self.assertEqual([(i['text'], i['section']) for i in items],
+                         [('Người lao động đơn phương chấm dứt hợp đồng phải báo trước 30 ngày', 'S6')])
+
+    @patch('services.llm.chat_json')
+    def test_termination_stays_empty_without_such_a_clause(self, chat):
+        chat.return_value = LABOR_REPLY | dict(termination=[])
+        text = LABOR.replace('Điều 6. Chấm dứt hợp đồng\nNgười lao động đơn phương chấm dứt hợp đồng phải báo trước 30 ngày.', '')
+        self.assertEqual(services.summarize(text)['structured']['termination'], [])
+
+    @patch('services.llm.chat_json')
+    def test_a_clause_stated_twice_is_listed_once_but_other_numbers_stay(self, chat):
+        repeat = 'thực hiện đúng quy định về hồ sơ biểu mẫu và thủ tục hành chính của công ty theo từng thời kỳ'
+        text = LABOR + f'\nĐiều 7. Chung\nHai bên {repeat}. Phạt 10% giá trị khi vi phạm hợp đồng này. Phạt 20% giá trị khi vi phạm hợp đồng này.'
+        chat.return_value = LABOR_REPLY | dict(
+            obligations=[dict(party='Người lao động', text=f'Hai bên {repeat}', section='S7'), dict(party='Hai bên', text=repeat.capitalize(), section='S7')],
+            penalties=[dict(text='Phạt 10% giá trị khi vi phạm hợp đồng này', section='S7'), dict(text='Phạt 20% giá trị khi vi phạm hợp đồng này', section='S7')])
+        structured = services.summarize(text)['structured']
+        self.assertEqual(len(structured['obligations']), 1)
+        self.assertEqual(len(structured['penalties']), 2)
+
+
+class MisfiledTests(Isolated):
+    @patch('services.llm.chat_json')
+    def test_termination_filed_under_penalties_is_moved(self, chat):
+        text = 'Người lao động đơn phương chấm dứt hợp đồng phải báo trước 30 ngày'
+        chat.return_value = LABOR_REPLY | dict(termination=[], penalties=[dict(text=text, section='S6')])
+        structured = services.summarize(LABOR)['structured']
+        self.assertEqual(structured['penalties'], [])
+        self.assertEqual([i['text'] for i in structured['termination']], [text])
+
+    @patch('services.llm.chat_json')
+    def test_losing_the_deposit_counts_as_a_penalty(self, chat):
+        source = LABOR + '\nĐiều 7. Đặt cọc\nNếu chấm dứt hợp đồng trước thời hạn, người lao động mất tiền đặt cọc.'
+        text = 'Nếu chấm dứt hợp đồng trước thời hạn, người lao động mất tiền đặt cọc'
+        chat.return_value = LABOR_REPLY | dict(penalties=[dict(text=text, section='S7')])
+        self.assertEqual([i['text'] for i in services.summarize(source)['structured']['penalties']], [text])
+
+    @patch('services.llm.chat_json')
+    def test_a_real_penalty_for_terminating_stays_a_penalty(self, chat):
+        source = LABOR + '\nĐiều 7. Phạt\nĐơn phương chấm dứt trái luật phải bồi thường 2 tháng lương.'
+        text = 'Đơn phương chấm dứt trái luật phải bồi thường 2 tháng lương'
+        chat.return_value = LABOR_REPLY | dict(penalties=[dict(text=text, section='S7')])
+        self.assertEqual([i['text'] for i in services.summarize(source)['structured']['penalties']], [text])
+
+
+class CoverageTests(Isolated):
+    @patch('services.llm.chat_json')
+    def test_a_clause_the_model_skipped_gets_a_second_look_on_its_own(self, chat):
+        def answer(system, prompt, schema, tokens, model=None):
+            alone = 'Điều 5' in prompt and 'Điều 4' not in prompt
+            return LABOR_REPLY | dict(insurance='Công ty đóng bảo hiểm xã hội theo quy định' if alone else '')
+        chat.side_effect = answer
+        result = services.summarize(LABOR)
+        self.assertEqual(result['second_look'], ['Điều 5'])
+        self.assertEqual(chat.call_count, 2)
+        self.assertEqual(result['structured']['insurance'], 'Công ty đóng bảo hiểm xã hội theo quy định')
+
+    @patch('services.llm.chat_json')
+    def test_no_extra_call_when_every_named_clause_is_covered(self, chat):
+        chat.return_value = LABOR_REPLY
+        result = services.summarize(LABOR)
+        self.assertEqual((result['second_look'], chat.call_count), ([], 1))
+
+    def test_labour_headings_do_not_apply_to_other_contracts(self):
+        sections = [dict(id='S1', label='Điều 1', text='Điều 1. Bảo hiểm hàng hóa\nBên B mua bảo hiểm cho lô hàng.')]
+        part = {f: [] if f in services.LIST_FIELDS else '' for f in services.SCALAR_FIELDS + services.LIST_FIELDS}
+        self.assertEqual(services._uncovered_sections(sections, [part], False), [])
+        self.assertEqual(services._uncovered_sections(sections, [part], True), sections)
+
+    def test_placeholder_answer_counts_as_not_covered(self):
+        sections = [dict(id='S1', label='Điều 1', text='Điều 1. Tiền lương\nLương 10.000.000 đồng.')]
+        self.assertEqual(services._uncovered_sections(sections, [dict(salary='Không có')], True), sections)
+
+    @patch.object(services, 'MAX_FOCUSED', 2)
+    def test_second_looks_are_capped(self):
+        sections = [dict(id=f'S{n}', label=f'Điều {n}', text=f'Điều {n}. Thanh toán đợt {n}\nNội dung.') for n in range(1, 6)]
+        self.assertEqual(len(services._uncovered_sections(sections, [dict(payment=[])], False)), 2)
+
+
 class ChunkCacheTests(Isolated):
     @patch.object(services, 'CHUNK_CHARS', 300)
     @patch('services.llm.chat_json')

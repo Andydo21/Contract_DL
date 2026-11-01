@@ -186,6 +186,31 @@ def stated_term(source):
     return ''
 
 
+INSURANCE_SENTENCE = re.compile(r'bảo hiểm (?:xã hội|y tế|thất nghiệp)|\bBH(?:XH|YT|TN)\b', re.I)
+
+
+def stated_insurance(source):
+    """The sentence stating social insurance, or ''; a clause heading alone says nothing."""
+    for sentence in re.split(r'(?<=[.;])\s+|\n', source):
+        if INSURANCE_SENTENCE.search(sentence) and len(sentence.split()) >= 6:
+            return sentence.strip().rstrip('.;')[:200]
+    return ''
+
+
+TERMINATION_HEADING = re.compile(r'chấm dứt|thanh lý hợp đồng|termination', re.I)
+
+
+def stated_termination(sections, limit=3):
+    """[{'text', 'section'}] copied from the clause whose heading is about ending the contract; [] if there is none."""
+    for section in sections:
+        lines = section['text'].splitlines()
+        if section['id'] != 'S0' and lines and TERMINATION_HEADING.search(lines[0]):
+            body = ' '.join(lines[1:])
+            sentences = [s.strip().rstrip('.;') for s in re.split(r'(?<=[.;])\s+', body) if s.strip()]
+            return [dict(text=s, section=section['id']) for s in sentences[:limit]]
+    return []
+
+
 def money(value):
     return f'{value:,}'.replace(',', '.')
 
