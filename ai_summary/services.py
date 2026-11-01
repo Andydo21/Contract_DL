@@ -98,6 +98,30 @@ def _cache_get(key):
     return value
 
 
+def analysis_version(model=None):
+    """Changes when a stored summary should be regenerated even though its text did not change."""
+    return f'{PROMPT_VERSION}|{model or llm.model_id()}'
+
+
+def _chunk_key(chunk, model=None):
+    # Only the chunk's own clauses: the facts anchors repeat values from the whole contract, so including them
+    # would make one changed salary re-run every chunk. Every value is still verified against the current source.
+    clauses = '\n'.join(f"{s['id']}|{s['label']}|{s['text']}" for s in chunk)
+    return 'chunk-' + hashlib.sha256(f'{analysis_version(model)}|{clauses}'.encode()).hexdigest()
+
+
+def _extract_chunk(chunk, prompt, force, model):
+    """One model call, reused while the chunk's clauses are unchanged: a new version only pays for what it edits."""
+    key = _chunk_key(chunk, model)
+    cached = None if force else _cache_get(key)
+    if cached:
+        return dict(json.loads(json.dumps(cached)), _tokens=[(token.encode('latin-1'), lp) for token, lp in cached['_tokens']])
+    part = llm.chat_json(SYSTEM, prompt, SUMMARY_SCHEMA, MAX_TOKENS, model)
+    # A JSON copy: merging later writes into the returned part, which must not reach the cache.
+    _cache_put(key, json.loads(json.dumps(dict(part, _tokens=[(token.decode('latin-1'), lp) for token, lp in part.get('_tokens', [])]))))
+    return part
+
+
 def _cache_put(key, value, disk=True):
     with _memory_lock:
         _memory[key] = value
@@ -482,7 +506,7 @@ def analyze(text, metadata=None, force=False, model=None):
     prompts = [_user_prompt(chunk, facts, metadata or {}) for chunk in chunks]
     # Chunks share the system prompt prefix, so vLLM prefix caching and batching serve them together.
     with ThreadPoolExecutor(max_workers=max(1, min(WORKERS, len(prompts)))) as pool:
-        parts = list(pool.map(lambda prompt: llm.chat_json(SYSTEM, prompt, SUMMARY_SCHEMA, MAX_TOKENS, model), prompts))
+        parts = list(pool.map(lambda pair: _extract_chunk(pair[0], pair[1], force, model), zip(chunks, prompts)))
     labels = {s['id']: s['label'] for s in sections}
     structured, rejected = _verify(_merge(parts), source, set(labels))
     structured = _confidence(structured, source)
@@ -502,6 +526,7 @@ def summarize(text, metadata=None, force=False, model=None, perspective='general
     summary = render(analysis, perspective, length, explain)
     return dict({k: v for k, v in analysis.items() if k not in ('labels', 'section_texts')}, summary=summary,
                 key_dates=insights.key_dates(analysis['structured'], normalize(text)),
+                analysis_version=analysis_version(model),
                 elapsed_ms=int((time.monotonic() - started) * 1000))
 
 

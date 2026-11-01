@@ -162,6 +162,27 @@ class InjectionValueTests(Isolated):
         self.assertIn('không phải số tiền', [r['reason'] for r in result['unverified']])
 
 
+class ChunkCacheTests(Isolated):
+    @patch.object(services, 'CHUNK_CHARS', 300)
+    @patch('services.llm.chat_json')
+    def test_editing_one_clause_only_calls_the_model_for_its_chunk(self, chat):
+        clauses = [f'Điều {n}. Nội dung {n}\n' + f'Quy định số {n}. ' * 30 for n in range(1, 5)]
+        data = reply(contract_type='HỢP ĐỒNG')
+        content = json.dumps(data, ensure_ascii=False)
+        chat.side_effect = lambda *a, **k: dict(data, _content=content, _tokens=[(content.encode(), -0.01)])
+        first = services.summarize('\n'.join(clauses))
+        calls = chat.call_count
+        self.assertGreater(calls, 1)
+        clauses[2] = clauses[2].replace('Nội dung 3', 'Nội dung đã sửa')
+        services.summarize('\n'.join(clauses))
+        self.assertEqual(chat.call_count, calls + 1)
+        self.assertEqual(first['structured']['contract_type'], 'HỢP ĐỒNG')
+        services._memory.clear()  # from the disk cache too, and tokens survive the JSON round trip
+        services.summarize('\n'.join(clauses) + ' ')
+        services.summarize('\n'.join(clauses), force=True)
+        self.assertEqual(chat.call_count, calls + 1 + calls)
+
+
 class CompareTests(Isolated):
     @patch('services.llm.chat_json')
     def test_salary_raise_and_extension_are_described(self, chat):

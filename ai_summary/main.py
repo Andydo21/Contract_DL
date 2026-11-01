@@ -135,6 +135,7 @@ def health_check():
         'status': 'healthy' if connected else 'degraded',
         'llm_url': llm.base_url() or None,
         'model': llm.model_id(),
+        'analysis_version': services.analysis_version(),
         'llm_connected': connected,
         'ocr_available': reader.ocr_available(),
     }, status_code=200 if connected else 503)
