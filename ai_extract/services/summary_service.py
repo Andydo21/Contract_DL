@@ -10,7 +10,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import date, timedelta
 
 import requests
 from django.conf import settings
@@ -21,6 +21,7 @@ from ai_extract.repositories import ContractSummaryRepository, extraction_reposi
 from ai_extract.services.extraction_service import ExtractionError
 
 logger = logging.getLogger('ai_extract')
+EXPIRY_WINDOW_DAYS = 90
 QUEUED_LEASE = 3600  # seconds a run may wait for a slot before it is considered lost
 AUTO_SLOTS = threading.BoundedSemaphore(int(os.environ.get('AI_SUMMARY_AUTO_PARALLEL', '2')))
 
@@ -150,9 +151,16 @@ def set_status(version_id, state, error=''):
     ContractSummaryRepository.set_run_status(version_id, state, error)
 
 
+def _row_state(row):
+    return (_status_of(row) or {}).get('state') if row and row.get('run_status') else None
+
+
 def get_status(version_id):
+    return _status_of(ContractSummaryRepository.run_status(version_id))
+
+
+def _status_of(row):
     """The stored run state; one left in progress past its lease died with its process and is reported as failed."""
-    row = ContractSummaryRepository.run_status(version_id)
     if not row:
         return None
     state = row['run_status']
@@ -265,6 +273,7 @@ def summary(user, contract_id, version_id=None):
                 version_number=version.version_number, summary=obj.summary if obj else None,
                 result=stored if obj else None, preliminary=stored.get('preliminary', '') if not obj else '',
                 has_previous=ContractSummaryRepository.previous_version(version) is not None,
+                versions=[dict(id=v.id, number=v.version_number) for v in ContractSummaryRepository.versions_of(contract)],
                 stale=bool(obj and fingerprint and obj.source_fingerprint != fingerprint),
                 model_id=obj.model_id if obj else '', created_at=obj.created_at.isoformat() if obj else None,
                 updated_at=obj.updated_at.isoformat() if obj else None, status=get_status(version.id),
@@ -272,16 +281,47 @@ def summary(user, contract_id, version_id=None):
                 has_text=bool(fingerprint))
 
 
-def changes_from_previous(user, contract_id, version_id=None):
-    """What changed since the version before this one; each side's analysis comes from ai_summary's cache when it can."""
+def changes_from_previous(user, contract_id, version_id=None, against_id=None):
+    """What changed since the previous version, or since against_id; analyses come from ai_summary's cache when they can."""
     _, version = select_version(user, contract_id, version_id)
-    previous = ContractSummaryRepository.previous_version(version)
-    if previous is None:
+    previous = select_version(user, contract_id, against_id)[1] if against_id else ContractSummaryRepository.previous_version(version)
+    if previous is None or previous.id == version.id:
         return dict(previous_number=None, changes=[], summary='')
-    old, new = version_file(previous), version_file(version)
+    first, second = sorted((previous, version), key=lambda v: v.version_number)  # always described oldest to newest
+    old, new = version_file(first), version_file(second)
     data = call_summary('/api/v1/compare-files', files={'old_file': (old['name'], old['data']), 'new_file': (new['name'], new['data'])},
                         form=form_fields(None))
     return dict(previous_number=previous.version_number, changes=data['changes'], summary=data['summary'])
+
+
+def summary_overview(user):
+    """For the contract list: each visible contract's summary state and missing clauses, and what expires soon."""
+    contracts = extraction_repository.visible_contract_rows(user)
+    latest = ContractSummaryRepository.latest_versions([c['id'] for c in contracts])
+    rows = ContractSummaryRepository.summary_rows(latest.values())
+    fingerprints = ContractSummaryRepository.text_fingerprints(latest.values())
+    today = timezone.localdate()
+    items, expiring = {}, []
+    for contract in contracts:
+        version_id = latest.get(contract['id'])
+        row = rows.get(version_id, {})
+        result = row.get('result') or {}
+        fingerprint = fingerprints.get(version_id)
+        state = _row_state(row)
+        if state in (None, 'done') and row.get('summary') and fingerprint and row.get('source_fingerprint') != fingerprint:
+            state = 'stale'
+        elif state is None and fingerprint:
+            state = 'queued'
+        elif state == 'done' and not row.get('summary'):
+            state = None
+        gaps = sum(item['status'] != 'found' for item in (result.get('checklist') or {}).get('items', []))
+        end = next((d['date'] for d in result.get('key_dates', []) if d.get('kind') == 'end' and d.get('date')), None)
+        days_left = (date.fromisoformat(end) - today).days if end else None
+        items[contract['id']] = dict(state=state, has_summary=bool(row.get('summary')), gaps=gaps, end_date=end, days_left=days_left)
+        if days_left is not None and days_left <= EXPIRY_WINDOW_DAYS:
+            expiring.append(dict(contract_id=contract['id'], code=contract['contract_code'], title=contract['title'],
+                                 end_date=end, days_left=days_left))
+    return dict(contracts=items, expiring=sorted(expiring, key=lambda e: e['days_left']))
 
 
 def clause_sections(user, contract_id, version_id=None):

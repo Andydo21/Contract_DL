@@ -114,6 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
             listContainer.appendChild(card);
         });
 
+        SummaryPanel.decorateCards(summaryOverview);
+
         // Auto-select active if set
         if (selectedId) {
             const activeCard = listContainer.querySelector(`[data-id="${selectedId}"]`);
@@ -155,7 +157,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Stats calculator
+    async function refreshSummaryOverview() {
+        try {
+            summaryOverview = await SummaryPanel.overview();
+            SummaryPanel.decorateCards(summaryOverview);
+            SummaryPanel.renderExpiring(document.getElementById('expiring-strip'), summaryOverview, id => {
+                document.querySelectorAll('.contract-card').forEach(card => card.classList.toggle('active', card.dataset.id == id));
+                showContractDetail(id);
+            });
+        } catch (error) {
+            console.warn('summary overview:', error.message);  // the list itself still works
+        }
+    }
+    setInterval(refreshSummaryOverview, 30000);
+
     function renderStats(contracts) {
+        refreshSummaryOverview();
         const total = contracts.length;
         let highRiskCount = 0;
         let pendingCount = 0;
@@ -171,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let activeDetailTab = {contractId: null, name: 'summary'};
+    let summaryOverview = {contracts: {}, expiring: []};
 
     // Load single contract details
     async function showContractDetail(id, versionId = null) {

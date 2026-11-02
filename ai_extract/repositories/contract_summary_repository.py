@@ -80,6 +80,20 @@ class ContractSummaryRepository:
         return needed
 
     @staticmethod
+    def latest_versions(contracts) -> dict:
+        """contract id -> id of its highest version."""
+        latest = {}
+        for contract_id, version_id in ContractVersion.objects.filter(contract__in=contracts).order_by(
+                "contract_id", "version_number").values_list("contract_id", "id"):
+            latest[contract_id] = version_id
+        return latest
+
+    @staticmethod
+    def summary_rows(version_ids) -> dict:
+        return {row["version_id"]: row for row in ContractSummary.objects.filter(version_id__in=version_ids).values(
+            "version_id", "summary", "result", "run_status", "run_error", "run_status_at", "source_fingerprint")}
+
+    @staticmethod
     def set_run_status(version_id, state, error=""):
         """Uses update() so a state change does not move updated_at, the time the summary text was generated."""
         if not ContractVersion.objects.filter(pk=version_id).exists():

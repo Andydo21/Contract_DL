@@ -79,7 +79,11 @@ def api_summary_lab_text(request):
 
 @extraction_api('GET')
 def api_summary_changes(request, contract_id):
-    return summary_service.changes_from_previous(request.user, contract_id, request.GET.get('version_id'))
+    return summary_service.changes_from_previous(request.user, contract_id, request.GET.get('version_id'), request.GET.get('against'))
+
+@extraction_api('GET')
+def api_summary_overview(request):
+    return summary_service.summary_overview(request.user)
 
 @extraction_api('GET')
 def api_summary_sections(request, contract_id):

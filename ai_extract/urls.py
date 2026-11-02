@@ -22,6 +22,7 @@ urlpatterns = [
         name="ai_get_summary",
     ),
 
+    path("summaries/overview/", views.api_summary_overview, name="ai_summary_overview"),
     path("contracts/<int:contract_id>/summary/changes/", views.api_summary_changes, name="ai_summary_changes"),
     path("contracts/<int:contract_id>/summary/sections/", views.api_summary_sections, name="ai_summary_sections"),
     path("contracts/<int:contract_id>/summary/export/", views.api_summary_export, name="ai_summary_export"),

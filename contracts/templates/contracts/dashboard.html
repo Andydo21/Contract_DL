@@ -16,7 +16,7 @@
     
     <!-- External CSS -->
     <link rel="stylesheet" href="{% static 'contracts/css/dashboard.css' %}?v=1.0.1">
-    <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.2.0">
+    <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.4.0">
 </head>
 <body>
 
@@ -95,6 +95,8 @@
                     </div>
                 </div>
                 
+                <div id="expiring-strip" hidden></div>
+
                 <div class="search-container">
                     <div class="search-wrapper">
                         <input type="text" id="contract-search-input" class="search-input" placeholder="Search by code, title, status...">
@@ -262,7 +264,7 @@
     </div>
 
     <!-- External JavaScript -->
-    <script src="{% static 'contracts/js/summary_panel.js' %}?v=1.3.0"></script>
-    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.2.1"></script>
+    <script src="{% static 'contracts/js/summary_panel.js' %}?v=1.4.0"></script>
+    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.3.0"></script>
 </body>
 </html>

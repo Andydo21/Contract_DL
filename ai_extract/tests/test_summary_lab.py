@@ -374,6 +374,28 @@ class SummaryLabTests(TestCase):
             self.assertEqual(summary_service.retry_failed_runs(), 2)
         self.assertEqual([c.kwargs['files']['file'][1] for c in post.call_args_list], ['Hai'.encode(), 'Một'.encode()])
 
+    def test_overview_reports_states_gaps_and_what_expires_scoped_to_company(self):
+        soon = (timezone.localdate() + timedelta(days=10)).isoformat()
+        ContractSummary.objects.create(version=self.new_version, summary='Có', source_fingerprint='x', run_status='done', result=dict(
+            key_dates=[dict(kind='end', date=soon)], checklist=dict(items=[dict(status='found'), dict(status='missing'), dict(status='partial')])))
+        ContractSummary.objects.create(version=self.foreign_version, summary='Khác', result=dict(key_dates=[dict(kind='end', date=soon)]))
+        data = self.client.get('/api/ai/summaries/overview/').json()
+        item = data['contracts'][str(self.contract.pk)]
+        self.assertEqual((item['state'], item['gaps'], item['days_left'], item['has_summary']), ('done', 2, 10, True))
+        self.assertEqual([e['code'] for e in data['expiring']], ['HD-001'])
+        self.assertNotIn(str(self.foreign.pk), data['contracts'])
+        self.add_text(self.new_version, 'Text đổi')
+        self.assertEqual(self.client.get('/api/ai/summaries/overview/').json()['contracts'][str(self.contract.pk)]['state'], 'stale')
+
+    @patch(POST)
+    def test_changes_can_compare_any_two_versions_oldest_first(self, post):
+        post.return_value = reply(dict(changes=[], summary='x'))
+        self.add_file(self.version, 'v1.txt', b'one')
+        self.add_file(self.new_version, 'v2.txt', b'two')
+        url = f'/api/ai/contracts/{self.contract.pk}/summary/changes/?version_id={self.version.pk}&against={self.new_version.pk}'
+        self.assertEqual(self.client.get(url).json()['previous_number'], 2)
+        self.assertEqual(self.sent_file(post, 'old_file')[1], b'one')
+
     def test_vietnamese_file_name_is_shown_decoded(self):
         ContractFile.objects.create(version=self.version, file_name='h%E1%BB%A3p%20%C4%91%E1%BB%93ng.pdf', file_path='/media/contracts/x.pdf')
         data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/?version_id={self.version.pk}').json()
