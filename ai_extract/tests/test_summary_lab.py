@@ -20,6 +20,7 @@ SUMMARY = dict(summary='Giá trị hợp đồng: 100.000 đồng', structured={
 PREPARE = dict(chars=10, facts={}, chunk_chars=18000, max_chunks=8, sections=[], chunks=[], cached=False)
 READ = dict(source=SUMMARY['source'], text='Điều 1. Giá trị 100.000 đồng', prepare=PREPARE)
 POST = 'ai_extract.services.summary_service.requests.post'
+INFO = dict(llm_connected=True, analysis_version='v1|m')
 
 
 def reply(data, status=200):
@@ -200,11 +201,11 @@ class SummaryLabTests(TestCase):
         data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
         self.assertEqual((data['summary'], data['preliminary'], data['status']['state']), (None, 'Số tiền: 100.000 đồng', 'failed'))
 
-        with patch('ai_extract.services.summary_service.model_connected', return_value=False):
+        with patch('ai_extract.services.summary_service.model_info', return_value=None):
             self.assertEqual(summary_service.retry_failed_runs(), 0)
         post.side_effect = None
         post.return_value = reply(SUMMARY)
-        with patch('ai_extract.services.summary_service.model_connected', return_value=True):
+        with patch('ai_extract.services.summary_service.model_info', return_value=INFO):
             self.assertEqual(summary_service.retry_failed_runs(), 1)
             self.assertEqual(summary_service.retry_failed_runs(), 0)
         data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
@@ -215,7 +216,7 @@ class SummaryLabTests(TestCase):
         post.return_value = reply({'detail': 'PDF có mật khẩu'}, status=422)
         self.add_file(self.new_version, 'locked.pdf', b'%PDF')
         self.client.post(f'/api/ai/contracts/{self.contract.pk}/summarize/', '{}', content_type='application/json')
-        with patch('ai_extract.services.summary_service.model_connected', return_value=True):
+        with patch('ai_extract.services.summary_service.model_info', return_value=INFO):
             self.assertEqual(summary_service.retry_failed_runs(), 0)
 
     @patch(POST)
@@ -286,7 +287,7 @@ class SummaryLabTests(TestCase):
         post.return_value = reply(SUMMARY)
         self.add_text(self.new_version, 'Trang 1', '   ', '', 'Trang 2')
         self.add_text(self.version, '')
-        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_connected', return_value=True):
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
             self.assertEqual(summary_service.retry_failed_runs(), 1)
             self.assertEqual(summary_service.retry_failed_runs(), 0)
         self.assertEqual(ContractSummary.objects.get(version=self.new_version).summary, SUMMARY['summary'])
@@ -295,12 +296,83 @@ class SummaryLabTests(TestCase):
     @patch(POST)
     def test_worker_leaves_text_alone_when_automatic_summaries_are_off_or_refused(self, post):
         self.add_text(self.new_version, 'Trang 1')
-        with override_settings(AI_SUMMARY_AUTO=False), patch('ai_extract.services.summary_service.model_connected', return_value=True):
+        with override_settings(AI_SUMMARY_AUTO=False), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
             self.assertEqual(summary_service.retry_failed_runs(), 0)
         summary_service.set_status(self.new_version.pk, 'failed', 'file problem')
-        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_connected', return_value=True):
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
             self.assertEqual(summary_service.retry_failed_runs(), 0)
         post.assert_not_called()
+
+    @patch(POST)
+    def test_worker_redoes_a_summary_when_its_text_changes_and_panel_sees_it_as_stale(self, post):
+        post.return_value = reply(SUMMARY)
+        self.add_text(self.new_version, 'Lương 15.000.000')
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+            self.assertEqual(summary_service.retry_failed_runs(), 1)
+            self.assertEqual(summary_service.retry_failed_runs(), 0)
+            ContractContext.objects.filter(version=self.new_version).update(content='Lương 18.000.000')  # same length
+            data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
+            self.assertTrue(data['stale'])
+            post.return_value = reply(dict(SUMMARY, summary='Bản mới'))
+            self.assertEqual(summary_service.retry_failed_runs(), 1)
+        data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
+        self.assertEqual((data['summary'], data['stale']), ('Bản mới', False))
+        self.assertEqual(self.sent_file(post)[1], 'Lương 18.000.000'.encode())
+
+    @patch(POST)
+    def test_changing_the_model_or_prompt_redoes_stored_summaries(self, post):
+        post.return_value = reply(dict(SUMMARY, analysis_version='v1|m'))
+        self.add_text(self.new_version, 'Trang 1')
+        with override_settings(AI_SUMMARY_AUTO=True):
+            with patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+                self.assertEqual(summary_service.retry_failed_runs(), 1)
+                self.assertEqual(summary_service.retry_failed_runs(), 0)
+            with patch('ai_extract.services.summary_service.model_info', return_value=dict(INFO, analysis_version='v2|m')):
+                self.assertEqual(summary_service.retry_failed_runs(), 1)
+
+    @patch(POST)
+    def test_text_refused_once_is_tried_again_only_after_it_changes(self, post):
+        post.return_value = reply({'detail': 'Không đọc được'}, status=422)
+        self.add_text(self.new_version, 'Trang 1')
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+            self.assertEqual(summary_service.retry_failed_runs(), 0)
+            calls = post.call_count
+            self.assertEqual(summary_service.retry_failed_runs(), 0)
+            self.assertEqual(post.call_count, calls)
+            ContractContext.objects.filter(version=self.new_version).update(content='Trang 1 đã sửa')
+            post.return_value = reply(SUMMARY)
+            self.assertEqual(summary_service.retry_failed_runs(), 1)
+
+    @patch(POST)
+    def test_failed_rerun_keeps_the_details_of_the_summary_on_screen(self, post):
+        post.return_value = reply(dict(SUMMARY, key_dates=[{'kind': 'end', 'date': '2026-02-28'}]))
+        self.add_text(self.new_version, 'Trang 1')
+        self.client.post(f'/api/ai/contracts/{self.contract.pk}/summarize/', '{}', content_type='application/json')
+        post.side_effect = lambda url, **kw: reply(dict(READ, preliminary='p', suggest={})) if url.endswith('/read') else reply({'detail': 'down'}, status=502)
+        self.client.post(f'/api/ai/contracts/{self.contract.pk}/summarize/', '{"force": true}', content_type='application/json')
+        data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
+        self.assertEqual(data['result']['key_dates'][0]['date'], '2026-02-28')
+        self.assertEqual(data['status']['state'], 'failed')
+
+    def test_text_waits_until_it_stops_changing(self):
+        now = [0]
+        settle = summary_service.SettleTracker(60, clock=lambda: now[0])
+        self.assertEqual(settle.ready({1: 'a', 2: 'x'}), [])
+        now[0] = 40
+        self.assertEqual(settle.ready({1: 'ab', 2: 'x'}), [])  # page 2 of version 1 arrived
+        now[0] = 70
+        self.assertEqual(settle.ready({1: 'ab', 2: 'x'}), [2])
+        now[0] = 100
+        self.assertEqual(sorted(settle.ready({1: 'ab', 2: 'x'})), [1, 2])
+
+    @patch(POST)
+    def test_worker_order_is_newest_first(self, post):
+        post.return_value = reply(SUMMARY)
+        self.add_text(self.version, 'Một')
+        self.add_text(self.new_version, 'Hai')
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+            self.assertEqual(summary_service.retry_failed_runs(), 2)
+        self.assertEqual([c.kwargs['files']['file'][1] for c in post.call_args_list], ['Hai'.encode(), 'Một'.encode()])
 
     def test_vietnamese_file_name_is_shown_decoded(self):
         ContractFile.objects.create(version=self.version, file_name='h%E1%BB%A3p%20%C4%91%E1%BB%93ng.pdf', file_path='/media/contracts/x.pdf')

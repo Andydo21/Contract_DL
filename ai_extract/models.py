@@ -29,6 +29,10 @@ class ContractSummary(models.Model):
     run_error = models.TextField(blank=True, default="", verbose_name="Run Error")
     # Everything behind the text: structured values, checklist, confidence, dropped values, key dates, file info.
     result = models.JSONField(blank=True, default=dict, verbose_name="Structured Result")
+    # What the stored text was made from, to notice when it is out of date; and what the last run tried.
+    source_fingerprint = models.CharField(max_length=80, blank=True, default="", verbose_name="Source Fingerprint")
+    analysis_version = models.CharField(max_length=250, blank=True, default="", verbose_name="Analysis Version")
+    attempted_fingerprint = models.CharField(max_length=80, blank=True, default="", verbose_name="Attempted Fingerprint")
     run_status_at = models.DateTimeField(blank=True, null=True, verbose_name="Run Status Changed At")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Generated At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")

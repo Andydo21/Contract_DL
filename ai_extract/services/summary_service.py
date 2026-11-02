@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import requests
@@ -88,22 +90,24 @@ def select_version(user, contract_id, version_id=None):
 class SummarizeService:
     """Send a version's original file to ai_summary and persist the result."""
 
-    def summarize_version(self, version, force=False, options=None) -> dict:
+    def summarize_version(self, version, force=False, options=None, refresh=False) -> dict:
+        """refresh: the stored summary is known to be out of date, so this counts as a run even without force."""
         source = version_file(version)
         metadata = {'contract_code': version.contract.contract_code, 'title': version.contract.title,
                     'version': version.version_number}
         logger.info('[summarize] ai_summary request – version_id=%s file=%s (%d bytes)', version.id, source['name'], len(source['data']))
         default_view = (options or DEFAULT_OPTIONS) == DEFAULT_OPTIONS
         # Another perspective of a stored summary only re-renders the cached analysis: no run to track or lock.
-        tracked = force or ContractSummaryRepository.get_by_version(version) is None
-        if tracked and not ContractSummaryRepository.try_start_run(version.id, run_lease()):
+        tracked = force or refresh or ContractSummaryRepository.get_by_version(version) is None
+        if tracked and not ContractSummaryRepository.try_start_run(version.id, run_lease(), source['fingerprint']):
             raise SummaryBusy('Phiên bản này đang được tóm tắt, vui lòng đợi kết quả.', 409)
         data, stored = self._run(version, source, force, options, metadata, tracked, default_view)
         saved = stored is not None
         if saved:
             obj = ContractSummaryRepository.create_or_update(
                 version=version, summary=stored['summary'], model_id=stored.get('model_id', ''),
-                result={**{k: v for k, v in stored.items() if k not in ('summary', 'facts', 'cached', 'elapsed_ms')}, 'origin': source['origin']})
+                result={**{k: v for k, v in stored.items() if k not in ('summary', 'facts', 'cached', 'elapsed_ms')}, 'origin': source['origin']},
+                fingerprint=source['fingerprint'], analysis_version=stored.get('analysis_version', ''))
             logger.info('[summarize] Saved ContractSummary id=%s cached=%s %sms', obj.id, data.get('cached'), data.get('elapsed_ms'))
         if tracked:
             set_status(version.id, 'done')
@@ -191,30 +195,58 @@ def _auto_summary_now(version_id):
         close_old_connections()
 
 
-def model_connected():
+def model_info():
+    """ai_summary's health answer when its model is reachable, else None."""
     try:
-        return bool(call_summary('/health').get('llm_connected'))
+        health = call_summary('/health')
     except RuntimeError:
+        return None
+    return health if health.get('llm_connected') else None
+
+
+class SettleTracker:
+    """Text arrives page by page, so a version is ready only once its text stayed the same for a while."""
+
+    def __init__(self, seconds, clock=time.monotonic):
+        self.seconds, self.clock, self.seen = seconds, clock, {}
+
+    def ready(self, fingerprints):
+        now = self.clock()
+        self.seen = {version_id: (fingerprint, self.seen[version_id][1] if self.seen.get(version_id, (None,))[0] == fingerprint else now)
+                     for version_id, fingerprint in fingerprints.items()}
+        return [version_id for version_id, (_, since) in self.seen.items() if now - since >= self.seconds]
+
+
+def _worker_run(version_id):
+    close_old_connections()
+    try:
+        SummarizeService().summarize_version(ContractSummaryRepository.version_by_id(version_id), refresh=True)
+        return True
+    except SummaryBusy:
         return False
+    except Exception as error:
+        logger.warning('[summarize] run for version %s failed: %s', version_id, error)
+        return False
+    finally:
+        close_old_connections()
 
 
-def retry_failed_runs():
-    """Summarize what is waiting: runs that failed while the model was down, and text that reached the database
-    without a summary. Returns the number completed; nothing happens while the model is down."""
-    lost_before = timezone.now() - timedelta(seconds=QUEUED_LEASE)
-    version_ids = ContractSummaryRepository.retryable_version_ids(lost_before)
-    if getattr(settings, 'AI_SUMMARY_AUTO', False):
-        version_ids = sorted({*version_ids, *ContractSummaryRepository.versions_awaiting_summary()})
-    if not version_ids or not model_connected():
+def retry_failed_runs(settle=None, parallel=1):
+    """Summarize what is waiting, newest first: text with no summary or an out-of-date one, and runs that failed
+    while the model was down. Returns the number completed; nothing happens while the model is down."""
+    info = model_info()
+    if not info:
         return 0
-    done = 0
-    for version_id in version_ids:
-        try:
-            SummarizeService().summarize_version(ContractSummaryRepository.version_by_id(version_id))
-            done += 1
-        except Exception as error:
-            logger.warning('[summarize] retry of version %s failed: %s', version_id, error)
-    return done
+    lost_before = timezone.now() - timedelta(seconds=QUEUED_LEASE)
+    version_ids = set(ContractSummaryRepository.retryable_version_ids(lost_before))
+    if getattr(settings, 'AI_SUMMARY_AUTO', False):
+        needed = ContractSummaryRepository.versions_needing_summary(info.get('analysis_version', ''))
+        version_ids.update(settle.ready(needed) if settle else needed)
+    ordered = sorted(version_ids, reverse=True)
+    if parallel <= 1:
+        return sum(_worker_run(version_id) for version_id in ordered)
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        return sum(pool.map(_worker_run, ordered))
 
 
 def summarize(user, contract_id, data):
@@ -228,14 +260,16 @@ def summary(user, contract_id, version_id=None):
     obj = ContractSummaryRepository.get_by_version(version)
     record = ContractSummaryRepository.latest_file(version)
     stored = ContractSummaryRepository.stored_result(version.id)
+    fingerprint = ContractSummaryRepository.text_fingerprints([version.id]).get(version.id)
     return dict(id=obj.id if obj else None, contract_id=contract.id, version_id=version.id,
                 version_number=version.version_number, summary=obj.summary if obj else None,
                 result=stored if obj else None, preliminary=stored.get('preliminary', '') if not obj else '',
                 has_previous=ContractSummaryRepository.previous_version(version) is not None,
+                stale=bool(obj and fingerprint and obj.source_fingerprint != fingerprint),
                 model_id=obj.model_id if obj else '', created_at=obj.created_at.isoformat() if obj else None,
                 updated_at=obj.updated_at.isoformat() if obj else None, status=get_status(version.id),
                 file_name=ContractSummaryRepository.display_name(record),
-                has_text=bool(ContractSummaryRepository.stored_text(version)))
+                has_text=bool(fingerprint))
 
 
 def changes_from_previous(user, contract_id, version_id=None):

@@ -7,6 +7,10 @@ file, which this service reads itself. Either way, extraction never has to run f
 Flow: the text or a file arrives → `manage.py retry_summaries --watch` (service `summary-worker`) picks up text
 without a summary, and an upload starts a background summary right away → the result is stored in `ContractSummary`
 (text, `result` JSON, run state). Runs that fail while the model is offline are retried when it returns.
+A summary is redone when its text changes (`source_fingerprint`) or when the prompt or model changes
+(`analysis_version`). The worker waits until the text has been unchanged for `AI_SUMMARY_SETTLE_SECONDS` (60), since
+pages arrive one at a time, and runs `AI_SUMMARY_AUTO_PARALLEL` (2) at once. Model output is cached per chunk, so an
+edited clause only pays for its own chunk.
 `AI_SUMMARY_AUTO=0` turns the automatic runs off; `POST /api/ai/contracts/<id>/summarize/` runs one on demand.
 
 ## Reading files (`reader.py`)
