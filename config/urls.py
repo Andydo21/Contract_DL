@@ -11,6 +11,7 @@ urlpatterns = [
     path('', include('NewIdea.urls')),
     path('', include('contracts.views.ledger_urls')),
     path('api/ai/', include('ai_extract.urls')),
+    path('api/legal/', include('legal_kb.urls')),
     path('ai-extract/', layout_views.pipeline_dashboard, name='ai_extract_pipeline'),
     path('ai-extract/summary-lab/', layout_views.summary_lab, name='ai_summary_lab'),
     path('ai-extract/contracts/<int:contract_id>/', layout_views.contract_pipeline, name='ai_extract_contract'),

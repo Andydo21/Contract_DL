@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     # Custom Apps
     "contracts.apps.ContractsConfig",
     "ai_extract.apps.AiExtractConfig",
+    "legal_kb.apps.LegalKbConfig",
 ]
 
 MIDDLEWARE = [
@@ -103,6 +104,9 @@ DATABASES = {
 
 
 # Password validation
+# Where `manage.py import_laws` keeps the vbpl dataset files (default: media/legal_kb).
+LEGAL_KB_DATA_DIR = os.getenv('LEGAL_KB_DATA_DIR', '')
+
 FABRIC_GATEWAY_URL = os.getenv('FABRIC_GATEWAY_URL', 'http://fabric-gateway:5000')
 FABRIC_GATEWAY_TOKEN = os.getenv('FABRIC_GATEWAY_TOKEN', '')
 DATABASES['workflow'] = {**DATABASES['default'], 'NAME': os.getenv('WORKFLOW_DB_NAME', 'workflow_db')}

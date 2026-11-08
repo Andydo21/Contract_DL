@@ -8,6 +8,7 @@ openpyxl>=3.1,<4
 python-pptx>=1.0,<2
 PyMuPDF>=1.23.0
 pydantic>=2.5.0
+pyarrow>=15
 
 huggingface_hub>=0.23.0
 cryptography>=42.0.0

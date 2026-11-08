@@ -1,0 +1,23 @@
+[
+  {"q": "thời gian thử việc tối đa", "expect": [["45/2019/QH14", "25"]]},
+  {"q": "lương tối thiểu vùng", "date": "2026-11-03", "expect": [["293/2025/NĐ-CP", "3"]]},
+  {"q": "luong toi thieu vung", "date": "2026-11-03", "expect": [["293/2025/NĐ-CP", "3"]]},
+  {"q": "lương tối thiểu vùng", "date": "2025-03-01", "expect": [["74/2024/NĐ-CP", "3"]]},
+  {"q": "trợ cấp thôi việc", "expect": [["45/2019/QH14", "46"], ["145/2020/NĐ-CP", "8"]]},
+  {"q": "người lao động đơn phương chấm dứt hợp đồng", "expect": [["45/2019/QH14", "35"]]},
+  {"q": "người sử dụng lao động đơn phương chấm dứt hợp đồng", "expect": [["45/2019/QH14", "36"]]},
+  {"q": "thời hạn báo trước khi nghỉ việc", "expect": [["45/2019/QH14", "35"]]},
+  {"q": "số giờ làm thêm tối đa trong năm", "expect": [["45/2019/QH14", "107"], ["145/2020/NĐ-CP", "60"]]},
+  {"q": "tiền lương làm việc ban đêm", "expect": [["45/2019/QH14", "98"]]},
+  {"q": "nghỉ phép năm bao nhiêu ngày", "expect": [["45/2019/QH14", "113"]]},
+  {"q": "nội dung chủ yếu của hợp đồng lao động", "expect": [["45/2019/QH14", "21"]]},
+  {"q": "các loại hợp đồng lao động", "expect": [["45/2019/QH14", "20"]]},
+  {"q": "nghỉ thai sản khi sinh con", "expect": [["45/2019/QH14", "139"], ["41/2024/QH15", "53"]]},
+  {"q": "tuổi nghỉ hưu", "expect": [["45/2019/QH14", "169"], ["135/2020/NĐ-CP", "4"]]},
+  {"q": "kỷ luật sa thải", "expect": [["45/2019/QH14", "125"]]},
+  {"q": "mức đóng bảo hiểm thất nghiệp", "date": "2026-11-03", "expect": [["374/2025/NĐ-CP", "4"], ["74/2025/QH15", "33"]]},
+  {"q": "mức đóng bảo hiểm thất nghiệp", "date": "2024-06-01", "expect": [["38/2013/QH13", "57"]]},
+  {"q": "phạt không giao kết hợp đồng lao động bằng văn bản", "expect": [["12/2022/NĐ-CP", "9"]]},
+  {"q": "phạt vi phạm về thử việc", "expect": [["12/2022/NĐ-CP", "10"]]},
+  {"q": "điều kiện hưởng trợ cấp thất nghiệp", "date": "2026-11-03", "expect": [["74/2025/QH15", "38"]]}
+]
