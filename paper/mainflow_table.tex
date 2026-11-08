@@ -1,0 +1,26 @@
+% From research_evaluation_20261030/KET_QUA_20261030/{mainflow_manual_grades_summary,mainflow_retrieval_citation_summary,mainflow_ranking_metrics}.csv (images off).
+\begin{table}[t]
+\centering\footnotesize
+\caption{Production main flow on the 45 answered pilot questions (text-only generator input, zero-shot, one run). Hit@1 and MRR use the rank of the first gold region among the retrieved sources; the precision@10 ceiling is 0.136 because a question has 1.36 gold regions on average (31.6 sources are sent per question). Answer labels come from manual reading against reference answers, tuples and gold evidence.}
+\label{tab:mainflow}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\multicolumn{2}{@{}l}{\emph{Retrieval}} \\
+Hit@1 & 0.84 \\
+MRR & 0.89 \\
+Evidence recall@10 & 0.92 \\
+Evidence precision@10 (ceiling 0.14) & 0.12 \\
+Required-evidence recall & 0.96 \\
+Citation precision / recall & 0.86 / 0.84 \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Answers}} \\
+Answer accuracy (partial = 0.5) & 0.82 \\
+Strict accuracy & 0.69 \\
+Correct / partial / wrong / no answer & 31 / 12 / 1 / 1 \\
+Attribute leakage rate $\downarrow$ & 0.048 \\
+Citation faithfulness & 0.92 \\
+Key-value recall (20 questions) & 0.84 \\
+\bottomrule
+\end{tabular}
+\end{table}

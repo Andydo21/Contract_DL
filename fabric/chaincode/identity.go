@@ -23,19 +23,7 @@ type UserRecord struct {
 }
 
 func (s *SmartContract) StoreCompany(ctx contractapi.TransactionContextInterface, companyID string, companyName string, taxCode string, status string) error {
-	record := CompanyRecord{
-		CompanyID:   companyID,
-		CompanyName: companyName,
-		TaxCode:     taxCode,
-		Status:      status,
-	}
-
-	recordBytes, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState("COMPANY_"+companyID, recordBytes)
+	return fmt.Errorf("legacy unsigned writes disabled; use CommitEnterpriseOperation")
 }
 
 func (s *SmartContract) GetCompany(ctx contractapi.TransactionContextInterface, companyID string) (*CompanyRecord, error) {
@@ -57,20 +45,7 @@ func (s *SmartContract) GetCompany(ctx contractapi.TransactionContextInterface, 
 }
 
 func (s *SmartContract) StoreUser(ctx contractapi.TransactionContextInterface, userID string, username string, companyID string, role string, status string) error {
-	record := UserRecord{
-		UserID:    userID,
-		Username:  username,
-		CompanyID: companyID,
-		Role:      role,
-		Status:    status,
-	}
-
-	recordBytes, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState("USER_"+userID, recordBytes)
+	return fmt.Errorf("legacy unsigned writes disabled; use CommitEnterpriseOperation")
 }
 
 func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, userID string) (*UserRecord, error) {

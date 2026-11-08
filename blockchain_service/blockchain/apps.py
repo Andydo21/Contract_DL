@@ -24,20 +24,8 @@ class BlockchainConfig(AppConfig):
                 if "blockchain_blockchainnetwork" not in tables:
                     return
             
-            if not BlockchainNetwork.objects.exists():
-                net = BlockchainNetwork.objects.create(
-                    network_name="Hyperledger Fabric Local",
-                    chain_type="Hyperledger",
-                    rpc_endpoint="http://fabric-peer:7051",
-                    status="ACTIVE"
-                )
-                SmartContract.objects.create(
-                    network=net,
-                    contract_address="cc_contract_verify_v1",
-                    contract_name="ContractVerifyChaincode",
-                    version="1.0.0",
-                    deployed_at=timezone.now()
-                )
-                print("Seeded default Hyperledger network inside blockchain microservice.")
+            # The network the ledger book files into (channel, chaincode, orderer, peer, gateway).
+            from .book import network
+            network()
         except Exception as e:
             print("Database seeding deferred:", e)

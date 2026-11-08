@@ -7,6 +7,17 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+    if (req.path === '/health') return next();
+    const expected = process.env.FABRIC_GATEWAY_TOKEN || '';
+    const supplied = req.get('X-Contract-Gateway-Token') || '';
+    if (!expected || Buffer.byteLength(expected) !== Buffer.byteLength(supplied) ||
+        !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))) {
+        return res.status(401).json({ error: 'Service authentication required' });
+    }
+    if (!req.path.startsWith('/enterprise/')) return res.status(410).json({ error: 'Legacy unsigned API retired' });
+    next();
+});
 
 const PORT = process.env.PORT || 5000;
 
@@ -260,17 +271,21 @@ app.post('/verify', async (req, res) => {
         console.log(`Evaluating GetHash for proof ${version_id}...`);
         const resultBytes = await contract.evaluateTransaction('GetHash', String(version_id));
         const record = JSON.parse(Buffer.from(resultBytes).toString());
+        const historyBytes = await contract.evaluateTransaction('GetHistory', String(version_id));
+        const history = JSON.parse(Buffer.from(historyBytes).toString()) || [];
+        const anchors = [];
+        for (const entry of history.filter(item => !item.isDelete)) {
+            const block = await getBlockInfoByTxId(entry.txId);
+            anchors.push({ network: 'Hyperledger Fabric', tx_hash: entry.txId,
+                block_number: block.blockNumber, block_hash: block.blockHash,
+                created_at: entry.timestamp });
+        }
 
         res.json({
             verified: true,
             proof_hash: record.documentHash,
             blockchain_anchored: true,
-            anchors: [{
-                network: 'Hyperledger Fabric',
-                tx_hash: '0x' + crypto.randomBytes(32).toString('hex'), // Mock tx_hash for verification query if needed
-                block_number: 120,
-                created_at: record.timestamp
-            }]
+            anchors
         });
     } catch (error) {
         console.error('Error verifying proof:', error);
@@ -467,11 +482,56 @@ app.get('/signature/:id', async (req, res) => {
     }
 });
 
-app.get('/health', (req, res) => {
-    res.json({ status: contract ? 'healthy' : 'disconnected' });
+app.get('/health', async (req, res) => {
+    try {
+        if (!contract) throw new Error('Fabric Gateway not initialized');
+        await contract.evaluateTransaction('HashExists', '__health_check__');
+        res.json({ status: 'healthy', channel: channelName, chaincode: chaincodeName });
+    } catch (error) {
+        res.status(503).json({ status: 'disconnected', error: error.message });
+    }
 });
 
 // Start Server
+async function enterpriseRecord(id) {
+    const bytes = await contract.evaluateTransaction('GetEnterpriseOperation', id);
+    const record = JSON.parse(Buffer.from(bytes).toString());
+    const block = await getBlockInfoByTxId(record.tx_id);
+    return { ...record, block_number: block.blockNumber, block_hash: block.blockHash };
+}
+
+app.get('/enterprise/operations/:id', async (req, res) => {
+    try {
+        if (!contract) return res.status(503).json({ error: 'Gateway disconnected' });
+        res.json(await enterpriseRecord(req.params.id));
+    } catch (error) {
+        res.status(error.message.includes('does not exist') ? 404 : 503).json({ error: error.message });
+    }
+});
+
+app.post('/enterprise/commit', async (req, res) => {
+    try {
+        if (!contract) return res.status(503).json({ error: 'Gateway disconnected' });
+        const raw = req.body.payload;
+        if (typeof raw !== 'string') return res.status(400).json({ error: 'Payload string required' });
+        const envelope = JSON.parse(raw);
+        const manifest = JSON.parse(envelope.manifest);
+        let existing;
+        try { existing = await enterpriseRecord(manifest.operation_id); }
+        catch (error) { if (!error.message.includes('does not exist')) throw error; }
+        if (existing) {
+            if (existing.payload !== raw) return res.status(409).json({ error: 'Idempotency payload conflict' });
+            return res.json(existing);
+        }
+        const commit = await contract.submitAsync('CommitEnterpriseOperation', { arguments: [raw] });
+        const status = await commit.getStatus();
+        if (!status.successful) throw new Error('Transaction rejected: ' + status.code);
+        res.json(await enterpriseRecord(manifest.operation_id));
+    } catch (error) {
+        res.status(503).json({ error: error.message });
+    }
+});
+
 initGateway().then(() => {
     app.listen(PORT, () => {
         console.log(`Fabric Gateway REST API listening on port ${PORT}`);

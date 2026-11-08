@@ -1,5 +1,3 @@
-import hashlib
-import uuid
 from django.utils import timezone
 from .repositories import WorkflowRepository
 from .rules import recommend_workflow
@@ -228,6 +226,8 @@ class WorkflowService:
         if workflow.status in ("COMPLETED", "REJECTED"):
             raise ValueError("Cannot delete step from a completed or rejected workflow")
             
+        if step.requires_signature:
+            raise ValueError('Mandatory signing steps cannot be deleted')
         self.repo.delete_step(step)
 
     def update_step_role(self, step_id, role_id):
@@ -235,7 +235,7 @@ class WorkflowService:
         return self.repo.update_step_role(step_id, role_id)
 
     def approve_step(self, step_id, user_id, action, comment="", company_id=None, is_manager=False):
-        """Process step approval/rejection. Auto-creates DigitalSignature on APPROVED."""
+        """Approve reviews; signing steps advance only through verified ledger operations."""
         from django.db import transaction
         from .models import StepDependency
 
@@ -255,6 +255,12 @@ class WorkflowService:
                 unmet_names = ", ".join([f"'{d.prerequisite_step.step_name}'" for d in unmet_deps])
                 raise ValueError(f"Không thể ký/duyệt bước '{step.step_name}' vì đang bị khóa bởi đường nối phụ thuộc: Bước {unmet_names} chưa hoàn thành.")
 
+        signing_step = step.requires_signature
+        if signing_step and action in ('APPROVED', 'FORCE_COMPLETE'):
+            raise ValueError('Use /contract-ledger/ to sign the exact version with an approved RSA key and Step ID.')
+        if action == 'FORCE_COMPLETE' and not is_manager:
+            raise ValueError('Manager permission required for FORCE_COMPLETE')
+
         if action == "FORCE_COMPLETE":
             with transaction.atomic():
                 self.repo.create_approval(step=step, user_id=user_id, action="APPROVED", comment=comment or "Accepted & Completed by Manager")
@@ -267,81 +273,16 @@ class WorkflowService:
                     self.repo.update_workflow_status(workflow, "IN_PROGRESS")
             return step
 
-        # Perform blockchain verification BEFORE modifying database if APPROVED
-        sig_hash = None
-        if action == "APPROVED":
-            sig_hash = hashlib.sha256(
-                f"{step_id}:{user_id}:{uuid.uuid4()}:{timezone.now().isoformat()}".encode()
-            ).hexdigest()
-            try:
-                import os
-                import requests
-                blockchain_service_url = os.environ.get("BLOCKCHAIN_SERVICE_URL", "http://localhost:8002")
-                
-                from shared.jwt_middleware import get_system_auth_header
-                system_headers = get_system_auth_header()
-
-                # 1. Fetch certificate from blockchain service, auto-issuing if missing
-                certs = []
-                try:
-                    cert_resp = requests.get(f"{blockchain_service_url}/certificate/{user_id}/", headers=system_headers, timeout=5)
-                    if cert_resp.status_code == 200:
-                        certs = cert_resp.json().get("certificates", [])
-                except Exception:
-                    pass
-
-                active_certs = [c for c in certs if c.get("status") == "ACTIVE" and not c.get("revoked")]
-                if not active_certs:
-                    create_resp = requests.post(
-                        f"{blockchain_service_url}/certificates/create/",
-                        json={
-                            "user_id": user_id,
-                            "serial_number": f"CERT-USER-{user_id}-{uuid.uuid4().hex[:8].upper()}",
-                            "issuer": "RiskDL Automated CA",
-                            "valid_days": 365
-                        },
-                        headers=system_headers,
-                        timeout=10
-                    )
-                    if create_resp.status_code in (200, 201):
-                        cert_id = create_resp.json().get("certificate_id")
-                    else:
-                        raise ValueError(f"User {user_id} has no active certificate on Blockchain Service and auto-issuance failed: {create_resp.text}")
-                else:
-                    cert_id = active_certs[0]["certificate_id"]
-                
-                # 2. Call sign endpoint on blockchain service (which verifies user & anchors to Fabric)
-                sign_resp = requests.post(f"{blockchain_service_url}/sign/", json={
-                    "step_id": step_id,
-                    "user_id": user_id,
-                    "certificate_id": cert_id,
-                    "signature_hash": sig_hash
-                }, headers=system_headers, timeout=15)
-                
-                if sign_resp.status_code != 200:
-                    error_msg = sign_resp.json().get("error", "Unknown error during anchoring")
-                    raise ValueError(f"Blockchain signature verification/anchoring failed: {error_msg}")
-                
-            except Exception as e:
-                # Strictly block the approval on any blockchain validation error or connection error
-                raise ValueError(f"Blockchain Verification Error: {str(e)}")
-
+        # Review approval is separate from a cryptographic contract signature.
         with transaction.atomic():
             self.repo.create_approval(step=step, user_id=user_id, action=action, comment=comment)
-
-            if action == "APPROVED":
-                if sig_hash:
-                    # Save locally in workflow DB
-                    KeyManagementService.create_signature_for_step(
-                        step_id=step_id,
-                        user_id=user_id,
-                        company_id=company_id,
-                        signature_hash=sig_hash
-                    )
-            elif action == "REJECTED":
-                self.repo.update_step_status(step, "REJECTED")
-                self.repo.update_workflow_status(step.workflow, "REJECTED")
-
+            self.repo.update_step_status(step, action)
+            workflow = step.workflow
+            if action == 'REJECTED':
+                self.repo.update_workflow_status(workflow, 'REJECTED')
+            else:
+                complete = not workflow.steps.exclude(status='APPROVED').exists()
+                self.repo.update_workflow_status(workflow, 'COMPLETED' if complete else 'IN_PROGRESS')
         return step
 
     def add_dependency(self, workflow_id, prerequisite_step_id, dependent_step_id):

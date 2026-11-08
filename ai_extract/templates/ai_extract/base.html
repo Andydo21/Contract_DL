@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}PlanA Extract{% endblock %}</title>
+    <title>{% block title %}AI Extract{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -13,13 +13,16 @@
 </head>
 <body>
     <header class="topbar">
-        <a class="brand" href="/ai-extract/"><span class="brand-mark">◈</span><span>PlanA Extract</span></a>
+        <a class="brand" href="/ai-extract/"><span class="brand-mark">◈</span><span>AI Extract</span></a>
         <nav>
             <a href="/">Contract Portal</a>
-            <a class="active" href="/ai-extract/">Vision Pipeline</a>
+            <a class="active" href="/ai-extract/">AI Extract</a>
             <a href="/analyses/">Analyses</a>
+            <a href="/contract-intelligence/">Hỏi đáp hợp đồng</a>
+            <a href="{% url 'newidea_workspace' %}">NewIdea — Tri thức</a>
+            <a href="/contract-ledger/">Ký và kiểm chứng</a>
         </nav>
-        <div class="pipeline-chip"><span></span>No PaddleOCR</div>
+        <div class="pipeline-chip">{{ ocr_engine_label|default:'Surya OCR' }}</div>
     </header>
     <main class="page-shell">{% block content %}{% endblock %}</main>
     {% block page_js %}{% endblock %}

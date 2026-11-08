@@ -1,6 +1,4 @@
 import hashlib
-import uuid
-import random
 import requests
 import os
 from django.utils import timezone
@@ -9,7 +7,7 @@ from .models import (
     BlockchainTransaction, BlockchainAudit, DigitalSignature, VerificationHistory
 )
 from .repositories import (
-    SignatureCertificateRepository, HashProofRepository
+    SignatureCertificateRepository
 )
 
 class CertificateService:
@@ -133,11 +131,7 @@ class BlockchainAnchorService:
             latency = data.get("latency", 1.0)
             print(f"Successfully anchored to real Hyperledger Fabric. Tx Hash: {tx_hash} | Block Hash: {block_hash}")
         except Exception as e:
-            print(f"Fabric Gateway offline or failed ({e}). Using simulated anchoring.")
-            tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:16]
-            block_hash = "0x" + uuid.uuid4().hex
-            block_number = random.randint(15_000_000, 22_000_000)
-            latency = 1.0
+            raise RuntimeError("Fabric transaction failed; no confirmation recorded") from e
 
         tx = BlockchainTransaction.objects.create(
             proof=proof,
@@ -252,23 +246,18 @@ class VerificationService:
             }, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
-                if data.get("verified"):
+                if data.get("verified") and data.get("proof_hash") == proof.document_hash:
                     blockchain_anchored = True
                     real_anchors = data.get("anchors", [])
-                    print(f"Successfully verified against real Hyperledger Fabric.")
+                    print("Successfully verified against real Hyperledger Fabric.")
             else:
                 error_msg = resp.json().get("error", "Unknown error")
                 raise RuntimeError(f"Fabric Gateway verification failed: {error_msg}")
         except Exception as e:
             print(f"Fabric Gateway offline or failed ({e}). Falling back to local database check.")
-            tx = BlockchainTransaction.objects.filter(proof=proof, status="CONFIRMED").first()
-            if tx:
-                blockchain_anchored = True
-                real_anchors = [{
-                    "tx_hash": tx.tx_hash,
-                    "block_number": tx.block_number,
-                    "timestamp": tx.created_at.isoformat()
-                }]
+            # A local transaction record cannot establish live ledger verification.
+            blockchain_anchored = False
+            real_anchors = []
 
         res = {
             "verified": True,
@@ -358,15 +347,12 @@ class SignatureService:
                 print(f"Successfully anchored Signature {sig.id} on Fabric. Tx Hash: {tx_hash} | Block Hash: {block_hash}")
             else:
                 error_msg = resp.json().get("error", "Unknown error from fabric-gateway")
-                print(f"Fabric Signature store returned error: {error_msg}. Using simulated values.")
-                tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:16]
-                block_hash = "0x" + uuid.uuid4().hex
-                block_number = random.randint(15_000_000, 22_000_000)
+                raise RuntimeError(f"Fabric Signature store returned error: {error_msg}")
         except Exception as e:
-            print(f"Fabric Gateway offline or failed ({e}). Using simulated signature anchoring.")
-            tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:16]
-            block_hash = "0x" + uuid.uuid4().hex
-            block_number = random.randint(15_000_000, 22_000_000)
+            sig.verified = False
+            sig.verified_at = None
+            sig.save(update_fields=['verified', 'verified_at'])
+            raise RuntimeError("Fabric signature anchoring failed; no confirmation recorded") from e
 
         # Update signature with blockchain data
         sig.tx_hash = tx_hash
@@ -472,11 +458,7 @@ class EnterpriseRegistryService:
             latency = data.get("latency", 1.0)
             print(f"Successfully registered Company {company_name} on Fabric. Tx Hash: {tx_hash} | Block Hash: {block_hash}")
         except Exception as e:
-            print(f"Fabric Gateway offline or failed ({e}). Using simulated registration.")
-            tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:16]
-            block_hash = "0x" + uuid.uuid4().hex
-            block_number = random.randint(15_000_000, 22_000_000)
-            latency = 1.0
+            raise RuntimeError("Fabric transaction failed; no confirmation recorded") from e
 
         tx = BlockchainTransaction.objects.create(
             proof=None,
@@ -552,11 +534,7 @@ class EnterpriseRegistryService:
             latency = data.get("latency", 1.0)
             print(f"Successfully registered User {username} on Fabric. Tx Hash: {tx_hash} | Block Hash: {block_hash}")
         except Exception as e:
-            print(f"Fabric Gateway offline or failed ({e}). Using simulated registration.")
-            tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:16]
-            block_hash = "0x" + uuid.uuid4().hex
-            block_number = random.randint(15_000_000, 22_000_000)
-            latency = 1.0
+            raise RuntimeError("Fabric transaction failed; no confirmation recorded") from e
 
         tx = BlockchainTransaction.objects.create(
             proof=None,

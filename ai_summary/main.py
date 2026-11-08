@@ -7,8 +7,8 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import logging
-import requests
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from shared.jwt_middleware import fastapi_jwt_required
 from schemas import (
     SummarizeRequest,
@@ -17,6 +17,7 @@ from schemas import (
     EntityExtractResponse,
 )
 from services import AISummaryService, get_kaggle_url
+from shared.qwen_gateway import is_connected
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,25 +56,18 @@ async def extract_entities(payload: EntityExtractRequest, jwt_payload: dict = De
     return EntityExtractResponse(**result)
 
 @app.get("/health")
-async def health_check():
+def health_check():
     """Health check – also pings the Kaggle notebook's /health endpoint."""
     kaggle_url = get_kaggle_url()
     configured = bool(kaggle_url)
-    kaggle_status = None
+    connected = is_connected(kaggle_url)
 
-    if configured:
-        try:
-            r = requests.get(f"{kaggle_url}/health", timeout=10)
-            kaggle_status = r.json() if r.ok else {"error": r.text}
-        except Exception as e:
-            kaggle_status = {"error": str(e)}
-
-    return {
-        "status": "healthy" if configured else "degraded",
+    return JSONResponse({
+        "status": "healthy" if connected else "degraded",
         "kaggle_url_configured": configured,
         "kaggle_url": kaggle_url or None,
-        "kaggle_health": kaggle_status,
-    }
+        "kaggle_connected": connected,
+    }, status_code=200 if connected else 503)
 
 @app.get("/")
 async def root():

@@ -536,7 +536,7 @@
             </div>
 
             <div style="display: flex; align-items: center; gap: 16px;">
-                <a href="/blockchain-explorer/"
+                <a href="/contract-ledger/"
                     style="background: linear-gradient(135deg, #4f46e5, #06b6d4); color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3); transition: all 0.2s ease;"
                     onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 20px rgba(99, 102, 241, 0.5)';"
                     onmouseout="this.style.transform='none'; this.style.boxShadow='0 4px 14px rgba(99, 102, 241, 0.3)';">
@@ -890,9 +890,9 @@
                                 </td>
                                 <td>
                                     ${u.tx_hash ? `
-                                        <a href="/api/blockchain/transaction/${u.tx_hash}/" target="_blank" class="tx-link">
+                                        <span class="tx-link">
                                             ${u.tx_hash.substring(0, 8)}...
-                                        </a>
+                                        </span>
                                     ` : '<span style="color: var(--text-muted);">N/A</span>'}
                                 </td>
                                 <td style="text-align: right;">

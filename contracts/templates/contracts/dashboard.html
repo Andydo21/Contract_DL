@@ -33,6 +33,8 @@
                 </div>
             </div>
             <div class="stats-summary">
+                <a href="{% url 'contract_intelligence' %}" class="btn" style="text-decoration:none;">Hỏi đáp hợp đồng</a>
+                <a href="{% url 'newidea_workspace' %}" class="btn" style="text-decoration:none;">Hỏi đáp kho kiến thức</a>
                 <div class="stat-item">
                     <div class="stat-label">Total Contracts</div>
                     <div class="stat-value" id="stat-total">0</div>
@@ -48,13 +50,13 @@
                 <a href="/analyses/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-history">
                     <i class="fa-solid fa-clock-rotate-left"></i> Analysis History
                 </a>
-                <a href="/ai-extract/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-ai-extract">
-                    <i class="fa-solid fa-layer-group"></i> PlanA Extract
+                <a href="{% url 'ai_extract_pipeline' %}" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-ai-extract">
+                    <i class="fa-solid fa-layer-group"></i> AI Extract — Trích xuất hợp đồng
                 </a>
                 <a href="/identity/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-identity">
                     <i class="fa-solid fa-building-shield"></i> Identity Registry
                 </a>
-                <a href="http://localhost:8003/board/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-workflows">
+                <a href="/board/" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease;" id="btn-goto-workflows">
                     <i class="fa-solid fa-diagram-project"></i> Workflow Board
                 </a>
                 {% if user.is_superuser or user.role.role_name.upper == 'MANAGER' or user.role.role_name.upper == 'ADMIN' %}
@@ -198,6 +200,15 @@
                     </div>
                 </div>
 
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label class="form-label" for="document-kind">Loại tài liệu</label>
+                    <select name="document_kind" id="document-kind" class="form-control">
+                        <option value="contract">Hợp đồng</option>
+                        <option value="legal">Thủ tục pháp lý</option>
+                    </select>
+                </div>
+
+
                 <div class="form-row" style="margin-bottom: 16px;">
                     <div class="form-group">
                         <label class="form-label">Contract Type</label>
@@ -226,25 +237,27 @@
                 </div>
 
                 <div class="form-group" style="margin-bottom: 24px;">
-                    <label class="form-label">Or Upload Contract File (PDF, DOCX, TXT)</label>
+                    <label class="form-label">Or Upload Contract File (PDF, DOCX, TXT) hoặc nhiều ảnh chụp các trang</label>
                     <div class="file-drop-area" id="file-drop-zone">
                         <label for="file-input" style="display: block; cursor: pointer; width: 100%; height: 100%;">
                             <i class="fa-solid fa-cloud-arrow-up file-icon"></i>
                             <p id="file-drop-text">Drag and drop file here, or click to choose file</p>
-                            <input type="file" name="file" id="file-input" style="display: none;">
+                            <input type="file" name="file" id="file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" style="display: none;">
                         </label>
                     </div>
+                    <div id="page-image-list"></div>
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 12px;">
                     <button type="button" class="btn" id="btn-cancel-upload" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none;">Cancel</button>
-                    <button type="submit" class="btn">Start AI Analysis</button>
+                    <button type="submit" class="btn">Tải hợp đồng lên</button>
                 </div>
             </form>
         </div>
     </div>
 
     <!-- External JavaScript -->
-    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.1.7"></script>
+    <script src="{% static 'contracts/js/page_images.js' %}?v=1"></script>
+    <script src="{% static 'contracts/js/dashboard.js' %}?v=1.1.9.1"></script>
 </body>
 </html>

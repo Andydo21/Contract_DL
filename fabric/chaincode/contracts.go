@@ -23,27 +23,7 @@ type HistoryQueryResult struct {
 }
 
 func (s *SmartContract) StoreHash(ctx contractapi.TransactionContextInterface, proofID string, documentHash string, merkleRoot string, timestamp string) error {
-	exists, err := s.HashExists(ctx, proofID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("the hash for proof %s already exists", proofID)
-	}
-
-	record := HashRecord{
-		ProofID:      proofID,
-		DocumentHash: documentHash,
-		MerkleRoot:   merkleRoot,
-		Timestamp:    timestamp,
-	}
-
-	recordBytes, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState(proofID, recordBytes)
+	return fmt.Errorf("legacy unsigned writes disabled; use CommitEnterpriseOperation")
 }
 
 func (s *SmartContract) GetHash(ctx contractapi.TransactionContextInterface, proofID string) (*HashRecord, error) {

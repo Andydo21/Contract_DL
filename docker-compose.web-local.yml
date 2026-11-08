@@ -1,0 +1,184 @@
+# Lightweight web runtime using the database configured in the root .env.
+services:
+  # Optional. By default start-a3-inference.ps1 serves port 8010 from Windows.
+  a3-inference:
+    profiles: [linux-runtime]
+    image: riskdl-web-local:latest
+    container_name: contract_a3_inference
+    restart: unless-stopped
+    gpus: all
+    working_dir: /app
+    command: sh /app/evaluation/start_a3_linux_runtime.sh
+    environment:
+      HF_HOME: /model-cache
+      HF_HUB_CACHE: /model-cache/hub
+      HUGGINGFACE_HUB_CACHE: /model-cache/hub
+      BGE_LOCAL_CACHE: /model-cache/hub
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      RAG_TEXT_DEVICE: cuda
+      RAG_STREAM_CHECKPOINTS: '1'
+      RAG_IDLE_UNLOAD_SECONDS: '120'
+      GLINER_MODEL_PATH: /models/a3/gliner-relex-multi-v1.0
+      GLINER_ENCODER_CACHE: /models/a3/gliner-encoder-cache
+      GLINER2_MODEL_PATH: /models/a3/gliner2-base-v1
+      NLI_MODEL_PATH: /models/a3/nli-deberta-v3-xsmall
+      BGE_MODEL_PATH: /models/a3/bge-m3
+      TABLE_COLUMN_MODEL_PATH: /models/a3/table-transformer
+      QWEN_TOKENIZER_PATH: /models/a3/qwen-tokenizer
+      A3_LLAMA_DIR: /models/a3/llama-linux-cuda128
+      SURYA_INFERENCE_BACKEND: llamacpp
+      SURYA_GGUF_LOCAL_MODEL_PATH: /models/a3/surya/surya-2.gguf
+      SURYA_GGUF_LOCAL_MMPROJ_PATH: /models/a3/surya/surya-2-mmproj.gguf
+      SURYA_INFERENCE_PARALLEL: '2'
+      SURYA_INFERENCE_CTX_SIZE: '32768'
+      SURYA_INFERENCE_KEEP_ALIVE: 'True'
+      SURYA_INFERENCE_AUTOSTART: 'False'
+      SURYA_INFERENCE_URL: http://127.0.0.1:8011/v1
+      SURYA_MANAGED_BACKEND: '1'
+      SURYA_EXCLUSIVE_GPU: '1'
+      SURYA_PAGE_GENERATION_TIMEOUT: '0'
+      SURYA_REQUEST_GENERATION_TIMEOUT: '0'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      A3_DOCKER_LOG_CONTAINER: ''
+    volumes:
+      - .:/app
+      - ${A3_HF_CACHE_DIR:-D:/hf_cache}:/model-cache
+      - ${A3_MODELS_DIR:-D:/Django_project/models/a3}:/models/a3
+    healthcheck:
+      test: ['CMD', '/app/scratch/a3-linux-runtime/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/rag/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 90s
+    networks:
+      - riskdl-net
+  # The AI service: model calls (Qwen), knowledge search, extraction / risk-analysis jobs and the AI workers
+  # (python manage.py run_ai_service). The web container hands that work here (AI_SERVICE_URL).
+  ai:
+    image: riskdl-web-local:latest
+    container_name: riskdl_ai
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py run_ai_service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AI_SERVICE_ROLE=ai
+      - A3_ENTITY_PROVIDER=gliner
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+      - RAG_INFERENCE_URL=${A3_INFERENCE_URL:-http://host.docker.internal:8010}
+      - NEO4J_URI=${NEO4J_DOCKER_URI:-}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    container_name: contract_qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6335:6333"
+    volumes:
+      - contract-a3-qdrant:/qdrant/storage
+    networks:
+      - riskdl-net
+  web:
+    restart: unless-stopped
+    command: python manage.py runserver 0.0.0.0:8000 --noreload
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - RAG_INFERENCE_URL=${A3_INFERENCE_URL:-http://host.docker.internal:8010}
+      - A3_ENTITY_PROVIDER=gliner
+      - AI_SERVICE_URL=http://ai:8000
+      - AI_SERVICE_ROLE=web
+  ai-summary:
+    restart: "no"
+    image: contract-summary-local:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ai-local
+      args:
+        BASE_IMAGE: riskdl-ai-summary:latest
+  workflow-service:
+    restart: unless-stopped  # recover from transient bind-mount errors
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8003:8000"
+  blockchain-service:
+    restart: unless-stopped  # recover from transient bind-mount errors
+    image: riskdl-web-local:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web-local
+    ports:
+      - "127.0.0.1:8002:8000"
+  fabric-init:
+    container_name: contract_fabric_init
+  orderer.example.com:
+    container_name: contract_orderer
+    restart: unless-stopped  # recover from transient bind-mount errors
+    volumes:
+      - contract-orderer-ledger:/var/hyperledger/production/orderer
+  peer0.org1.example.com:
+    container_name: contract_peer
+    restart: unless-stopped  # recover from transient bind-mount errors
+    volumes:
+      - contract-peer-ledger:/var/hyperledger/production
+  fabric-cli:
+    container_name: contract_fabric_cli
+  fabric-chaincode:
+    container_name: contract_chaincode
+    restart: unless-stopped  # recover from transient bind-mount errors
+    volumes:
+      - contract-go-cache:/go/pkg/mod
+      - contract-go-build:/root/.cache/go-build
+      - ./fabric/crypto-config/peerOrganizations/org1.example.com/users/User1@org1.example.com/msp/signcerts/User1@org1.example.com-cert.pem:/gateway-cert.pem:ro
+    environment:
+      ENTERPRISE_GATEWAY_CERT_PATH: /gateway-cert.pem
+  fabric-gateway:
+    container_name: contract_fabric_gateway
+    restart: unless-stopped  # recover from transient bind-mount errors
+    entrypoint: /bin/sh -c "npm ci --omit=dev && npm start"
+  ledger-worker:
+    image: riskdl-web-local:latest
+    container_name: contract_ledger_worker
+    restart: unless-stopped  # recover from transient bind-mount errors
+    working_dir: /app
+    command: python manage.py ledger_worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The .env value points at the host port for runs outside Docker; inside, the service is reached by name.
+      - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+  gateway:
+    restart: "no"
+volumes:
+  contract-a3-qdrant:
+  contract-orderer-ledger:
+  contract-peer-ledger:
+  contract-go-cache:
+  contract-go-build:

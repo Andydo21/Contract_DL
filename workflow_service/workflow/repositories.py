@@ -23,7 +23,7 @@ class WorkflowRepository:
                 version_ids = [row[0] for row in cursor.fetchall()]
                 return Workflow.objects.filter(version_id__in=version_ids).order_by("-id").prefetch_related("steps", "steps__approvals")
         except Exception:
-            return Workflow.objects.all().order_by("-id").prefetch_related("steps", "steps__approvals")
+            return Workflow.objects.none()
 
     @staticmethod
     def get_contract_info_by_version_ids(version_ids):
@@ -82,13 +82,15 @@ class WorkflowRepository:
     @staticmethod
     def create_step(workflow, step_order, step_name, role_id=None, status="PENDING", description=None):
         """Create a step associated with a workflow."""
+        import re
         return WorkflowStep.objects.create(
             workflow=workflow,
             step_order=step_order,
             step_name=step_name,
             role_id=role_id,
             status=status,
-            description=description
+            description=description,
+            requires_signature=bool(re.search(r'ký kết|chữ ký|\bsign(?:ing)?\b', step_name, re.I))
         )
 
     @staticmethod

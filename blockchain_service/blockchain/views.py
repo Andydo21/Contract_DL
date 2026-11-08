@@ -7,12 +7,31 @@ from .services import (
 from .models import HashProof, BlockchainTransaction, SignatureCertificate, BlockchainAudit
 
 def health_check(request):
-    return JsonResponse({"status": "healthy", "service": "blockchain-django-service"})
+    import os
+    import requests
+    from django.db import connection
+    database_ok = False
+    fabric_ok = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        database_ok = True
+    except Exception:
+        pass
+    try:
+        response = requests.get(os.getenv('FABRIC_GATEWAY_URL', 'http://localhost:5000') + '/health', timeout=7)
+        fabric_ok = response.ok and response.json().get('status') == 'healthy'
+    except (requests.RequestException, ValueError):
+        pass
+    healthy = database_ok and fabric_ok
+    return JsonResponse({"status": "healthy" if healthy else "degraded",
+        "service": "blockchain-django-service", "database_connected": database_ok,
+        "fabric_connected": fabric_ok}, status=200 if healthy else 503)
 
 
 def get_stats(request):
     """GET: Aggregate stats + recent transactions for the blockchain explorer UI."""
-    from .models import BlockchainTransaction, HashProof, SignatureCertificate, DigitalSignature, BlockchainNetwork
+    from .models import BlockchainTransaction, HashProof, SignatureCertificate, DigitalSignature
     try:
         total_txs = BlockchainTransaction.objects.count()
         total_proofs = HashProof.objects.count()

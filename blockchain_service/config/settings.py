@@ -30,6 +30,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'shared.jwt_middleware.JWTMiddleware',
+    'blockchain.legacy_guard.LegacyBlockchainGuard',
 ]
 
 ROOT_URLCONF = 'config.urls'

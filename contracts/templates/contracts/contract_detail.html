@@ -50,6 +50,10 @@
         </header>
 
         <!-- Main Workspace Split Screen -->
+        <a href="{% url 'ai_extract_contract' contract.id %}?version_id={{ contract.active_version_id }}" class="btn" style="display:inline-block;margin:12px 0;text-decoration:none;">AI Extract — Trích xuất hợp đồng</a>
+        <a href="{% url 'contract_intelligence_detail' contract.id %}" class="btn" style="display:inline-block;margin:12px 0;text-decoration:none;">Tra cứu bằng chứng và kinh nghiệm hợp đồng</a>
+        <a href="{% url 'newidea_contract' contract.id %}" class="btn" style="display:inline-block;margin:12px 0;text-decoration:none;">Hỏi đáp tài liệu này</a>
+        <a href="{% url 'contract_ledger' %}?version_id={{ contract.active_version_id }}" class="btn">Ký và kiểm chứng hợp đồng</a>
         <div class="detail-grid">
             
             <!-- Left Side: Full Document Reader -->
@@ -71,9 +75,18 @@
             <div class="analysis-panel">
                 <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 class="panel-title" style="margin: 0;"><i class="fa-solid fa-chart-line"></i> Risk Analysis & Actions</h3>
-                    <button class="btn" id="btn-detail-reanalyze" data-contract-id="{{ contract.id }}" style="padding: 7px 14px; font-size: 12.5px; border-radius: 8px; margin: 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(99,102,241,0.3);">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
+                    <button class="btn" id="btn-detail-reanalyze" data-contract-id="{{ contract.id }}" disabled title="Chờ trích xuất xong" style="padding: 7px 14px; font-size: 12.5px; border-radius: 8px; margin: 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; box-shadow: 0 4px 12px rgba(99,102,241,0.3); opacity: .55;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích rủi ro hợp đồng
                     </button>
+                </div>
+                <div id="extraction-progress" data-contract-id="{{ contract.id }}" aria-live="polite" style="margin: 12px 0 4px; padding: 12px 14px; border: 1px solid rgba(99,102,241,0.2); border-radius: 12px; background: rgba(99,102,241,0.04);">
+                    <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--text-secondary);">
+                        <span id="extraction-progress-label">Đang kiểm tra trạng thái trích xuất…</span>
+                        <span id="extraction-progress-percent"></span>
+                    </div>
+                    <div role="progressbar" aria-valuemin="0" aria-valuemax="100" id="extraction-progress-bar" style="height: 8px; margin-top: 8px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden;">
+                        <div id="extraction-progress-fill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #6366f1, #22d3ee); transition: width .6s ease;"></div>
+                    </div>
                 </div>
                 
                 <div class="panel-body">
@@ -149,7 +162,7 @@
                                 <div class="gauge-circle">
                                     <svg>
                                         <circle class="bg-circle" cx="40" cy="40" r="36"></circle>
-                                        <circle class="val-circle" id="gauge-val" cx="40" cy="40" r="36" data-score="{{ contract.analysis.overall_score }}"></circle>
+                                        <circle class="val-circle" id="gauge-val" cx="40" cy="40" r="36" data-score="{{ contract.analysis.overall_score }}" data-level="{{ contract.analysis.risk_level }}"></circle>
                                     </svg>
                                     <div class="gauge-text">{{ contract.analysis.overall_score|floatformat:0 }}%</div>
                                 </div>
@@ -168,18 +181,19 @@
                             <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Risks</h4>
                             <div class="findings-list" style="margin-bottom: 24px;">
                                 {% for f in contract.findings %}
+                                {% if f.is_suggestion %}{% ifchanged f.is_suggestion %}<h5 class="section-title" style="margin-top: 18px; font-size: 14px;"><i class="fa-solid fa-pen-to-square"></i> Gợi ý soạn thảo <span style="font-weight: 400; color: var(--text-muted);">(không có điều luật làm căn cứ, không tính vào điểm rủi ro)</span></h5>{% endifchanged %}{% endif %}
                                 <div class="finding-item">
                                     <div class="finding-header" onclick="toggleFinding(this)">
                                         <div class="finding-left">
-                                            <span class="risk-badge badge-{{ f.risk_level|lower }}">{{ f.risk_level }}</span>
+                                            {% if f.is_suggestion %}<span class="risk-badge badge-low">GỢI Ý</span>{% else %}<span class="risk-badge badge-{{ f.risk_level|lower }}">{{ f.risk_level }}</span>{% endif %}
                                             <span>{{ f.risk_name }}</span>
                                         </div>
                                         <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
                                     </div>
                                     <div class="finding-body" style="display: none;">
                                         <div class="finding-block">
-                                            <div class="block-label">Violated Clause</div>
-                                            <div class="block-text" style="font-weight: 500; color: #ffffff;">{{ f.clause_title }}</div>
+                                            <div class="block-label">Điều khoản liên quan</div>
+                                            <div class="block-text" style="font-weight: 500; color: #ffffff;">{{ f.clause_title|default:'Toàn bộ hợp đồng' }}</div>
                                         </div>
                                         <div class="finding-block">
                                             <div class="block-label">Risk Explanation</div>
@@ -206,17 +220,17 @@
                             {% else %}
                             <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
                                 <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 36px; color: var(--accent-primary);"></i>
-                                <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">Run AI Risk Scanner</h3>
-                                <p style="max-width: 320px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin: 0;">Click below to run the AI risk scanner to extract clauses and detect risk violations for this version.</p>
-                                <button class="btn" id="btn-detail-trigger-analysis" data-contract-id="{{ contract.id }}" style="margin-top: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
-                                    <i class="fa-solid fa-play"></i> Run AI Analysis
+                                <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">Phân tích rủi ro hợp đồng</h3>
+                                <p style="max-width: 360px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin: 0;">Mỗi điều khoản đã trích xuất được đối chiếu với văn bản pháp luật trong kho và với các điều khoản khác, rồi đánh giá rủi ro chung của toàn hợp đồng. Nút mở khi trích xuất xong.</p>
+                                <button class="btn" id="btn-detail-trigger-analysis" data-contract-id="{{ contract.id }}" disabled title="Chờ trích xuất xong" style="margin-top: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; opacity: .55;">
+                                    <i class="fa-solid fa-play"></i> Phân tích rủi ro hợp đồng
                                 </button>
                             </div>
                             {% endif %}
 
                             <!-- 2. Legal Expert Review Section (Always shown at the bottom) -->
                             <div class="reviews-section">
-                                <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
+                                <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Nhận xét kết quả phân tích AI</h4>
                                 {% for r in contract.reviews %}
                                 <div class="review-card">
                                     <div class="review-header">
@@ -224,34 +238,34 @@
                                             <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
                                             <span>{{ r.reviewer }}</span>
                                         </div>
-                                        <span class="risk-badge badge-{{ r.final_risk_level|lower }}">{{ r.final_risk_level }} Decision</span>
+                                        <span class="risk-badge badge-{{ r.final_risk_level|lower }}">Kết luận: {{ r.final_risk_level }}</span>
                                     </div>
                                     <div class="review-comment">"{{ r.comment }}"</div>
                                 </div>
                                 {% endfor %}
 
-                                {% if not contract.reviews and contract.status != 'APPROVED' %}
+                                {% if contract.analysis and not contract.reviews and contract.status != 'APPROVED' %}
                                 <form class="review-form" id="detail-review-form" data-analysis-id="{{ contract.analysis.id }}">
                                     <div class="form-group">
-                                        <label class="form-label">Review Verdict *</label>
+                                        <label class="form-label">Kết luận về mức rủi ro *</label>
                                         <select class="form-control" name="final_risk_level" required>
-                                            <option value="LOW">LOW RISK - Approved</option>
-                                            <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
-                                            <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
+                                            <option value="LOW">Rủi ro thấp — chấp thuận hợp đồng</option>
+                                            <option value="MEDIUM" selected>Rủi ro trung bình — cần sửa trước khi ký</option>
+                                            <option value="HIGH">Rủi ro cao — từ chối hoặc đàm phán lại</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
-                                        <label class="form-label">Expert Commentary *</label>
-                                        <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
+                                        <label class="form-label">Nhận xét về toàn bộ lần phân tích *</label>
+                                        <textarea class="form-control" name="comment" placeholder="Kết quả AI có đúng không, thiếu rủi ro nào, cần làm gì tiếp…" required></textarea>
                                     </div>
                                     <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
-                                        <i class="fa-solid fa-signature"></i> Sign & Submit Review
+                                        <i class="fa-solid fa-signature"></i> Gửi nhận xét
                                     </button>
                                 </form>
-                                {% elif contract.reviews or contract.status == 'APPROVED' %}
+                                {% elif contract.reviews %}
                                 <div style="display: flex; gap: 8px; align-items: center; color: var(--risk-low); font-size: 13.5px; background: rgba(16,185,129,0.05); padding: 12px; border-radius: 8px; border: 1px dashed rgba(16,185,129,0.2); margin-top: 12px;">
                                     <i class="fa-solid fa-circle-check"></i>
-                                    <span>Expert review has been successfully submitted and the contract status has been marked as <strong>Approved</strong>.</span>
+                                    <span>Đã có nhận xét cho lần phân tích này.</span>
                                 </div>
                                 {% endif %}
                             </div>
@@ -286,11 +300,46 @@
                         <div class="tab-pane" id="clauses-tab" style="display: none;">
                             <div style="display: flex; gap: 12px; margin-bottom: 20px;">
                                 <button class="btn btn-secondary" id="btn-manual-extract" data-contract-id="{{ contract.id }}" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #ffffff;">
-                                    <i class="fa-solid fa-gears"></i> Trích xuất Thủ công
+                                    <i class="fa-solid fa-gears"></i> Trích xuất AI
                                 </button>
-                                <button class="btn" id="btn-ai-extract" data-contract-id="{{ contract.id }}" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
-                                    <i class="fa-solid fa-wand-magic-sparkles"></i> Trích xuất AI
-                                </button>
+                            </div>
+
+                            <div id="contract-parties" data-contract-id="{{ contract.id }}" style="margin-bottom: 18px; padding: 14px; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; background: rgba(255,255,255,0.02);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h4 class="section-title" style="margin: 0;"><i class="fa-solid fa-handshake"></i> Các bên của hợp đồng</h4>
+                                    <button type="button" class="btn btn-secondary" id="party-add" style="padding: 5px 10px; font-size: 12px;">+ Thêm bên</button>
+                                </div>
+                                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 10px;">Người dùng tự điền các bên; thông tin này được gửi cho AI khi phân tích rủi ro.</p>
+                                <div id="party-rows" style="display: flex; flex-direction: column; gap: 8px;">
+                                    {% for party in contract.parties %}
+                                    <div class="party-row" style="display: grid; grid-template-columns: 110px 1.6fr 1fr 1fr 1fr 32px; gap: 6px;">
+                                        <select class="form-control" name="party_type" aria-label="Vai trò">
+                                            <option {% if party.party_type == 'Bên A' %}selected{% endif %}>Bên A</option>
+                                            <option {% if party.party_type == 'Bên B' %}selected{% endif %}>Bên B</option>
+                                            <option {% if party.party_type == 'Bên khác' %}selected{% endif %}>Bên khác</option>
+                                        </select>
+                                        <input class="form-control" name="party_name" value="{{ party.party_name }}" placeholder="Tên tổ chức / cá nhân" aria-label="Tên">
+                                        <input class="form-control" name="tax_code" value="{{ party.tax_code }}" placeholder="Mã số thuế" aria-label="Mã số thuế">
+                                        <input class="form-control" name="email" value="{{ party.email }}" placeholder="Email" aria-label="Email">
+                                        <input class="form-control" name="phone" value="{{ party.phone }}" placeholder="Điện thoại" aria-label="Điện thoại">
+                                        <button type="button" class="btn btn-secondary party-remove" aria-label="Xóa bên" style="padding: 0;">×</button>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <h4 class="section-title" style="margin: 14px 0 8px;"><i class="fa-solid fa-tags"></i> Tag</h4>
+                                <div id="tag-list" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                    {% for tag in contract.tags %}
+                                    <label style="display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; padding: 4px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; cursor: pointer;">
+                                        <input type="checkbox" class="tag-pick" value="{{ tag.id }}" {% if tag.selected %}checked{% endif %}> {{ tag.name }}
+                                    </label>
+                                    {% empty %}
+                                    <span style="font-size: 12px; color: var(--text-muted);">Chưa có tag nào; quản trị viên tạo tag trong trang quản trị.</span>
+                                    {% endfor %}
+                                </div>
+                                <div style="display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-top: 12px;">
+                                    <span id="party-status" style="font-size: 12px; color: var(--text-muted);"></span>
+                                    <button type="button" class="btn" id="party-save" style="padding: 7px 14px; font-size: 12.5px;">Lưu các bên và tag</button>
+                                </div>
                             </div>
 
                             <div class="clauses-list" style="display: flex; flex-direction: column; gap: 12px;">
@@ -313,7 +362,7 @@
                                                 {% for ee in cl.entities %}
                                                 <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                                        <span class="entity-type-badge entity-type-{{ ee.entity_type|lower }}">{{ ee.entity_type }}</span>
+                                                        <span class="entity-type-badge entity-type-{{ ee.entity_type|lower }}">{% if ee.entity_type == 'PARTY_A' %}Bên A{% elif ee.entity_type == 'PARTY_B' %}Bên B{% elif ee.entity_type == 'PARTY' %}Bên ký kết{% elif ee.entity_type == 'ENTITY' %}Thực thể{% else %}{{ ee.entity_type }}{% endif %}</span>
                                                         <span style="font-size: 12.5px; color: #ffffff; font-weight: 500;">{{ ee.entity_value }}</span>
                                                     </div>
                                                     <span style="font-size: 11px; color: var(--text-muted);">Conf: {{ ee.confidence_score|floatformat:2 }}</span>
@@ -322,7 +371,7 @@
                                             </div>
                                         </div>
                                         {% else %}
-                                        <p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;">No entities extracted for this clause.</p>
+                                        <p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;">Thực thể khác được lưu trong Neo4j.</p>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -401,10 +450,11 @@
                         <label class="file-upload-zone" id="file-upload-zone" for="version_file_input" style="display: block; border: 2px dashed rgba(99, 102, 241, 0.3); border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: rgba(99, 102, 241, 0.02);">
                             <i class="fa-solid fa-cloud-arrow-up" style="font-size: 32px; color: var(--accent-primary); margin-bottom: 8px;"></i>
                             <p style="font-weight: 500; font-size: 13.5px; margin: 0; color: #ffffff;">Click to select file or drag & drop</p>
-                            <p style="font-size: 11.5px; color: var(--text-muted); margin: 4px 0 0 0;">Supports .pdf, .txt, .docx (Max 10MB)</p>
-                            <input type="file" id="version_file_input" name="file" style="display: none;" accept=".pdf,.txt,.docx,.doc">
+                            <p style="font-size: 11.5px; color: var(--text-muted); margin: 4px 0 0 0;">Supports .pdf, .txt, .docx (Max 10MB), hoặc nhiều ảnh chụp các trang</p>
+                            <input type="file" id="version_file_input" name="file" multiple style="display: none;" accept=".pdf,.txt,.docx,.doc,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff">
                             <div class="selected-file-name" id="selected-file-name" style="margin-top: 12px; font-weight: 600; color: #10b981; display: none;"></div>
                         </label>
+                        <div id="version-page-image-list"></div>
                     </div>
                     
                     <!-- Text Tab -->
@@ -427,6 +477,7 @@
     </div>
 
     <!-- External JS -->
-    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.8"></script>
+    <script src="{% static 'contracts/js/page_images.js' %}?v=1"></script>
+    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.9.3"></script>
 </body>
 </html>

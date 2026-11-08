@@ -1,0 +1,33 @@
+% Pilot questions referred to by ID, with gold reference answers and the main-flow label (text-only, manual grading).
+% Source: research_evaluation_20261030/frozen_20261030/gold_questions.jsonl and KET_QUA_20261030/mainflow_manual_grades.csv.
+\begin{table*}[t]
+\centering\footnotesize
+\caption{Pilot questions referred to by ID in this paper (asked in Vietnamese; English translation), with the gold reference answer. ``System answer'' is how the answer of the production main flow (text-only input) was graded against the reference: correct, partial (a requested detail missing or one claim wrong), wrong, no answer, or none (no completed answer).}
+\label{tab:questions}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lp{0.43\textwidth}p{0.38\textwidth}l@{}}
+\toprule
+ID & Question & Reference answer & System answer \\
+\midrule
+P002 & Which interfaces and connections does realvirtual.io Professional support for simulating equipment? & TwinCAT and OPC UA interfaces, PLC connections and software wiring. & Correct \\
+P003 & Which platform is realvirtual.io Professional an add-on for, and which example equipment does its library contain? & An add-on for Unity; conveyors and motors. & Partial \\
+P005 & In which cases must the original RC8 Controller Protective Box be used instead of the Light version? & VM Series; VS068/087 with an additional axis; MC8 with total motor capacity of 2,000\,W or more. & Correct \\
+P007 & When adjusting the gap of an Iridium Power spark plug, which parts must the tool not touch, and what must the gap be re-checked with? & Not the iridium centre electrode or the porcelain; re-check with a calibrated gapping tool. & none \\
+P009 & If the spark-plug threads are lubricated, how must the tightening torque be adjusted, and why? & Reduce it by about one third, to avoid over-tightening. & No answer \\
+P010 & In the Iridium Racing diagram and legend, which two electrodes do labels A and G denote, and with what material and diameter? & A: 100\% platinum ground electrode, 0.8\,mm; G: ultra-fine iridium centre electrode, 0.4\,mm. & Partial \\
+P013 & Compare IU01* and IXU01*: what are the thread diameter and plug height of each? & IU01*: 10\,mm thread, 50\,mm high; IXU01*: 12\,mm thread, 51\,mm high. & Correct \\
+P018 & In the dual A/C poor-cooling case, how were the compressor and the front expansion valve checked or treated before the rear cause was identified? & The compressor was confirmed to be OK; the front expansion valve had recently been replaced. & Partial \\
+P022 & Which way must the bevelled edge of the snap ring face when it is installed on the compressor, and what must be ensured? & Away from the compressor; the ring must be fully seated and hold the stator and rotor securely. & Correct \\
+P023 & When the compressor clutch does not engage and the A/C light flashes in the described case, which part disengages and causes both symptoms? & The magnetic clutch relay. & Correct \\
+P027 & When installing the A/C water-temperature switch, which tool is allowed and which actions or materials are prohibited? & Hand tools with a deep socket; no over-torque, no air tools, no dropping or striking, no sealing tape. & Correct \\
+P028 & Which components does the COBOTTA Camera Built-in Set list? & AF Camera (N10-W02), end-effector EtherNet cable and camera stay. & Correct \\
+P029 & Does the COBOTTA vacuum suction option need an external air compressor? & No. & Correct \\
+P034 & Which robot series and controller does Dual-arm Control support, and how many robot arms can one controller control? & HSR and HS-A1 series with the RC8A controller; two arms per controller. & Partial \\
+P037 & With what payload, distance between two points and height is the 0.45\,s cycle time of the LPH measured? & 2\,kg payload, two points 300\,mm apart, at a height of 25\,mm. & Partial \\
+P038 & Through what does the LPH command-slave function let a PLC control the robot, how many command types does it support, and is robot-side programming needed? & Through a Function Block (FB); 130 command types; no robot-side program is needed. & Correct \\
+P039 & Which robots and controllers is the food-processing protective jacket compatible with, and which configurations are excluded? & VS068/VS087 robots with RC8A and RC8 controllers; not for Communication Interface Flange-A, UL specifications or cleanroom type. & Wrong \\
+P040 & When the protective jacket is fitted, how does the maximum payload of the VS068 and VS087 change compared with the standard configuration? & Both drop from 7\,kg (standard) to 6\,kg (with jacket). & Partial \\
+P044 & When electric gripper connection flange specification-A is selected, what does the J5 motion range of the VS-050S2 change to, compared with the standard? & From $\pm$115$^\circ$ (standard) to +110$^\circ$ / $-$102$^\circ$. & Correct \\
+\bottomrule
+\end{tabular}
+\end{table*}

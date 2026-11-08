@@ -3,10 +3,10 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     User, Contract, ContractVersion, ContractFile, RiskRule, 
     AIAnalysis, RiskFinding, Review, AuditLog, Company, Permission, 
-    Role, Tag, ContractContext, ContextEmbedding, 
+    Role, Tag, ContractContext, 
     ContractParty, Notification
 )
-from ai_extract.models import Clause as AIClause, ExtractedEntity as AIExtractedEntity
+from ai_extract.models import Clause as AIClause
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -116,9 +116,6 @@ class ContractContextAdmin(admin.ModelAdmin):
     list_filter = ('context_type',)
 
 
-@admin.register(ContextEmbedding)
-class ContextEmbeddingAdmin(admin.ModelAdmin):
-    list_display = ('context', 'vector_id', 'embedding_model')
 
 
 

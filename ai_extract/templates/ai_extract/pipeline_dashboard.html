@@ -1,20 +1,36 @@
 {% extends 'ai_extract/base.html' %}
 {% load static %}
-{% block title %}Vision Pipeline · PlanA Extract{% endblock %}
+{% block title %}AI Extract{% endblock %}
 {% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/pipeline_dashboard.css' %}">{% endblock %}
 {% block content %}
 <section class="hero">
     <div>
         <p class="eyebrow">DOCUMENT INTELLIGENCE</p>
-        <h1>PlanA Vision extraction</h1>
-        <p class="lede">Surya đọc layout/text và ColPali đọc trực tiếp ảnh trang; kết quả được lưu vào hai collection PlanA. Không dùng PaddleOCR.</p>
+        <h1>AI Extract — Trích xuất tài liệu</h1>
+        <p class="lede">Tải hợp đồng lên, chọn phiên bản và chạy trích xuất để phần Hỏi đáp có thể tìm kiếm và trả lời từ tài liệu đã lưu.</p>
+        <a class="upload-link" href="{% url 'dashboard' %}?upload=1&amp;from=a3">Tải hợp đồng lên</a>
     </div>
     <div class="hero-metric"><strong>{{ cards|length }}</strong><span>contracts</span></div>
 </section>
 
+{% csrf_token %}
+<section class="bulk-panel" aria-label="Xử lý hàng loạt">
+    <form id="bulk-upload" class="bulk-row">
+        <label class="bulk-file">Tải nhiều văn bản (mỗi tệp một văn bản)
+            <input type="file" id="bulk-files" multiple accept=".pdf,.docx,.doc,.txt"></label>
+        <select id="bulk-kind" aria-label="Loại văn bản">
+            <option value="legal">Văn bản pháp luật</option>
+            <option value="contract">Hợp đồng</option>
+        </select>
+        <button type="submit" class="bulk-button">Tải lên và trích xuất</button>
+    </form>
+    <p class="bulk-hint">Các tệp được trích xuất lần lượt. Chạy lại hàng loạt văn bản pháp luật nằm ở trang quản trị (Admin › Legal documents › chọn văn bản › "Chạy lại hàng loạt").</p>
+    <div id="bulk-progress" class="bulk-progress" aria-live="polite" hidden></div>
+</section>
+
 <section class="contract-grid">
     {% for card in cards %}
-    <article class="contract-card">
+    <article class="contract-card" data-contract-id="{{ card.contract.id }}">
         <div class="card-head">
             <span class="code">{{ card.contract.contract_code }}</span>
             {% if card.run %}<span class="status status-{{ card.run.status|lower }}">{{ card.run.status }}</span>{% else %}<span class="status status-new">NOT EXTRACTED</span>{% endif %}
@@ -27,6 +43,7 @@
         </div>
         {% if card.run %}<p class="branch-status">Dense: {{ card.run.dense_index_status }} · ColPali: {{ card.run.colpali_index_status }}</p>{% endif %}
         <a class="card-link" href="/ai-extract/contracts/{{ card.contract.id }}/">Mở pipeline <span>→</span></a>
+        {% if card.version %}<a class="card-link" href="{% url 'newidea_contract' card.contract.id %}?version_id={{ card.version.id }}">Hỏi đáp <span>→</span></a>{% endif %}
     </article>
     {% empty %}
     <div class="empty-state">Chưa có hợp đồng để trích xuất.</div>

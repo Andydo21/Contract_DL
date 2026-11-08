@@ -1,8 +1,16 @@
 from django.urls import path
 from . import views
-from . import layout_views
+from .views import layout_views
 
 urlpatterns = [
+    path('bulk/',layout_views.api_start_bulk,name='bulk_start'),
+    path('bulk/status/',layout_views.api_bulk_status,name='bulk_latest'),
+    path('bulk/<str:job_id>/',layout_views.api_bulk_status,name='bulk_status'),
+    path('contracts/<int:contract_id>/reset-graph/',layout_views.api_reset_graph,name='reset_document_graph'),
+    path('contracts/<int:contract_id>/extraction-status/',
+         layout_views.api_extraction_status,name='extraction_status'),
+    path('contracts/<int:contract_id>/resolve-entities/',
+         layout_views.api_resolve_entities,name='resolve_document_entities'),
     path(
         "contracts/<int:contract_id>/layout-extract/",
         layout_views.api_run_layout_extraction,

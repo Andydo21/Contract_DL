@@ -1,0 +1,16 @@
+% Screenshots of the deployed page inspector (ai_extract page_inspector), taken by the authors.
+\begin{figure*}[t]
+\centering
+\begin{minipage}[t]{0.54\textwidth}\vspace{0pt}
+\centering\textbf{\footnotesize (a) Source regions on a rendered page}\\[3pt]
+\includegraphics[width=\linewidth]{figures/ui_vs050_regions.png}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.42\textwidth}\vspace{0pt}
+\centering\textbf{\footnotesize (b) Source blocks of a page}\\[3pt]
+\includegraphics[width=\linewidth]{figures/ui_block_panel.png}\\[4pt]
+\raggedright\footnotesize
+Each card is one source region: Surya label and rank (\texttt{PAGE\_HEADER}, \texttt{TITLE}), confidence, the OCR text from Surya, its bounding box, and the structure link taken from the Surya source parent (interface labels are in Vietnamese).
+\end{minipage}
+\caption{The page inspector of the deployed system, which lets a reader check every extracted region against the page. (a) Page 2 of the VS-050S2 datasheet used in Fig.~\ref{fig:p044}: titles, paragraphs, the specification table, figures and their inner text regions, footnotes and contact blocks are each a separate source with its own box (three strips of one screen; parts omitted). The selected figure shows its Surya label; its eight inner text regions are listed by the interface as separate child sources. (b) The block panel beside the page, shown for another document of the corpus; the interface is in Vietnamese.}
+\label{fig:ui}
+\end{figure*}

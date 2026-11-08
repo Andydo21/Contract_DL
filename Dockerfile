@@ -5,8 +5,8 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt /app/
-COPY document_processor/requirements.txt /app/document_processor/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt -r document_processor/requirements.txt
+COPY ai_extract/requirements-vision.txt /app/ai_extract/requirements-vision.txt
+RUN pip install --no-cache-dir -r ai_extract/requirements-vision.txt
 
 # Copy project files
 COPY . /app/

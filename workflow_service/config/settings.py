@@ -48,6 +48,8 @@ STATIC_URL = '/static/'
 MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'shared.jwt_middleware.JWTMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'workflow.tenant_guard.WorkflowTenantGuard',
 ]
 
 ROOT_URLCONF = 'config.urls'

@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 # Reuse the dual Kaggle gateway configuration from the bundled PlanA reference
 # when Contract_DL has not overridden those values in its own .env.
-load_dotenv(BASE_DIR / "PlanAProject" / ".env")
+load_dotenv(BASE_DIR / "legacy" / "a3" / ".env")
 
 # Make shared/ importable (especially inside Docker)
 shared_path = str(BASE_DIR / "shared")
@@ -22,15 +22,31 @@ if shared_path not in sys.path:
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-default-change-me")
+# Keep document encryption independent of session/JWT signing-key rotation.
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
-    if h.strip()
+# SECURITY WARNING: makes every anonymous visitor a superuser. Demo use only.
+DEMO_AUTO_LOGIN = os.getenv("DEMO_AUTO_LOGIN", "False") == "True"
+
+# Allow any host when deploying via tunnel or set via env
+_env_hosts = [h.strip().strip("'\"") for h in os.getenv("ALLOWED_HOSTS", "*").split(",") if h.strip()]
+ALLOWED_HOSTS = _env_hosts if _env_hosts else ["*"]
+if "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.extend([".trycloudflare.com", ".ngrok-free.app", ".ngrok-free.dev"])
+    ALLOWED_HOSTS.append("ai")  # the AI service as the web container calls it on the compose network
+
+# Trusted origins for CSRF protection when accessed over HTTPS tunnels
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.trycloudflare.com",
+    "https://*.ngrok-free.app",
+    "https://*.ngrok-free.dev",
+    "http://127.0.0.1",
+    "http://localhost",
 ]
+
 
 
 # Application definition
@@ -55,6 +71,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "shared.jwt_middleware.JWTUserMiddleware",
+    "contracts.middleware.AutoDemoLoginMiddleware",
     "contracts.middleware.UserActionAuditMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -73,6 +90,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "ai_extract.context_processors.ocr_engine",
             ],
         },
     },
@@ -94,12 +112,17 @@ DATABASES = {
         "PORT": os.getenv("DB_PORT", "5432"),
         "OPTIONS": {
             "sslmode": os.getenv("DB_SSLMODE", "disable"),
+            "connect_timeout": max(3, min(20, int(os.getenv("DB_CONNECT_TIMEOUT", "5")))),
         },
     }
 }
 
 
 # Password validation
+FABRIC_GATEWAY_URL = os.getenv('FABRIC_GATEWAY_URL', 'http://fabric-gateway:5000')
+FABRIC_GATEWAY_TOKEN = os.getenv('FABRIC_GATEWAY_TOKEN', '')
+DATABASES['workflow'] = {**DATABASES['default'], 'NAME': os.getenv('WORKFLOW_DB_NAME', 'workflow_db')}
+
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -135,6 +158,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [
+    BASE_DIR / "workflow_service" / "workflow" / "static",
+]
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -147,11 +173,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Custom Auth User Model
 AUTH_USER_MODEL = "contracts.User"
 
-# AI Inference Service Configuration
-AI_SERVICE_URL = os.environ.get(
-    "AI_SERVICE_URL", "https://rummage-triangle-figurine.ngrok-free.dev"
-)
-
 # Kaggle Qwen AI Extract & Summarize Service
 # Points to the kaggle-qwen-service Docker container (or ngrok URL when Kaggle notebook is running)
 KAGGLE_QWEN_SERVICE_URL = os.environ.get(
@@ -161,12 +182,72 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
 
 # PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
 COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")
+COLPALI_ENABLED = os.environ.get('COLPALI_ENABLED', 'True').lower() == 'true'
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "")
+A3_RELATED_PASSAGES_ENABLED = os.environ.get('A3_RELATED_PASSAGES_ENABLED','True').lower()=='true'
+A3_DOCUMENT_REFERENCES_ENABLED = os.environ.get('A3_DOCUMENT_REFERENCES_ENABLED','True').lower()=='true'
+# Described references ("điều khoản giao hàng") linked "điều kiện", "điều lệ" and "một phần" on two codes; off by default.
+A3_DESCRIBED_REFERENCES_ENABLED = os.environ.get('A3_DESCRIBED_REFERENCES_ENABLED','False').lower()=='true'
+# Citation edges between documents of one company, rebuilt both ways whenever a document is extracted.
+A3_CROSS_DOCUMENT_LINKS_ENABLED = os.environ.get('A3_CROSS_DOCUMENT_LINKS_ENABLED','True').lower()=='true'
+# An uploaded document starts extracting in the background job queue; never under the test runner, where an upload
+# must not start a real extraction process.
+import sys as _sys
+AI_EXTRACT_ON_UPLOAD = (os.environ.get('AI_EXTRACT_ON_UPLOAD','True').lower()=='true'
+                        and not (len(_sys.argv) > 1 and _sys.argv[1] == 'test'))
+A3_RELATED_PASSAGE_CANDIDATES = int(os.environ.get('A3_RELATED_PASSAGE_CANDIDATES','5'))
+A3_RELATED_PASSAGE_LIMIT = int(os.environ.get('A3_RELATED_PASSAGE_LIMIT','2'))
+A3_RELATED_PASSAGE_MIN_LOGIT = float(os.environ.get('A3_RELATED_PASSAGE_MIN_LOGIT','0'))
 QWEN_MODEL_ID = os.environ.get("QWEN_MODEL_ID", "Qwen/Qwen2.5-VL-7B-Instruct-AWQ")
+# False for a text-only model (e.g. Qwen3-14B-AWQ): page images are then not sent with questions.
+QWEN_ACCEPTS_IMAGES = os.environ.get("QWEN_ACCEPTS_IMAGES", "True").lower() == "true"
+# 0 = greedy decoding: repeated runs on the same input agree (the serving batch can still shift a token rarely).
+QWEN_TEMPERATURE = float(os.environ.get("QWEN_TEMPERATURE", "0"))
+# The served name of a LoRA adapter trained for contract risk reading (training/risk_skill); empty = the base model.
+QWEN_RISK_MODEL_ID = os.environ.get("QWEN_RISK_MODEL_ID", "")
+# The AI service (container riskdl_ai) runs the model calls and the background jobs. The web container sets
+# AI_SERVICE_URL and hands that work to it; the AI container itself runs with AI_SERVICE_ROLE=ai.
+# Tests run every call in their own process.
+AI_SERVICE_URL = "" if (len(_sys.argv) > 1 and _sys.argv[1] == "test") else os.environ.get("AI_SERVICE_URL", "").rstrip("/")
+AI_SERVICE_ROLE = os.environ.get("AI_SERVICE_ROLE", "web")
+AI_SERVICE_TOKEN = os.environ.get("AI_SERVICE_TOKEN", "")
+AI_SERVICE_TIMEOUT = max(30, int(os.environ.get("AI_SERVICE_TIMEOUT", "900")))
+# The blockchain service keeps the ledger book (what Fabric confirmed) and issues users' certificates.
+BLOCKCHAIN_SERVICE_URL = os.environ.get("BLOCKCHAIN_SERVICE_URL", "http://blockchain-service:8000")
+# Tests never write to the running ledger book (they patch the client where they need it).
+LEDGER_BOOK_TOKEN = "" if (len(_sys.argv) > 1 and _sys.argv[1] == "test") else os.environ.get("LEDGER_BOOK_TOKEN", "")
+# Output budgets do not change the serving engine's context window. Re-run
+# the Kaggle model cell after changing QWEN_MAX_MODEL_LEN there.
+# Answers ran 186-455 tokens. At 8192 a repeating answer generated at ~28 tokens/s on the Kaggle T4 until the
+# gateway timed out (~150 s) and returned HTTP 500, three times for one question; the length-limit recovery
+# ("remove repetition, finish") never ran. 3072 ends within ~110 s, so that recovery takes over instead.
+QWEN_ANSWER_MAX_TOKENS = max(256, int(os.environ.get("QWEN_ANSWER_MAX_TOKENS", "3072")))
+QWEN_ANSWER_MAX_CLAIMS = max(8, int(os.environ.get("QWEN_ANSWER_MAX_CLAIMS", "96")))
+QWEN_REQUEST_TIMEOUT = max(30, int(os.environ.get("QWEN_REQUEST_TIMEOUT", "600")))
+QWEN_VERIFY_TIMEOUT = max(30, int(os.environ.get("QWEN_VERIFY_TIMEOUT", "180")))
+A2_ANSWER_SOURCE_LIMIT = max(4, int(os.environ.get("A2_ANSWER_SOURCE_LIMIT", "24")))
+A2_BATCH_RERANK = os.environ.get('A2_BATCH_RERANK', 'True').lower() == 'true'
+A2_RERANK_CANDIDATES = int(os.environ.get('A2_RERANK_CANDIDATES', '20'))
+A2_MAP_WORKERS = int(os.environ.get('A2_MAP_WORKERS', '2'))
+A2_MAP_REDUCE_ENABLED = os.environ.get('A2_MAP_REDUCE_ENABLED', 'False').lower() == 'true'
+# Qwen checks each answer paragraph against the passages it cites; unsupported content gets one repair, then
+# the answer is replaced by the law itself. On 51 evaluation questions 9 answers were wrong without this check.
+A2_VERIFY_CLAIMS = os.environ.get('A2_VERIFY_CLAIMS', 'True').lower() == 'true'
+A2_INFERENCE_CACHE_ENABLED = False  # Enable only after cross-request caching is requested.
+A2_INFERENCE_CACHE_VERSION = os.environ.get('A2_INFERENCE_CACHE_VERSION', '1')
+A2_SOURCES_PER_DOCUMENT = max(2, int(os.environ.get("A2_SOURCES_PER_DOCUMENT", "6")))
 QDRANT_URL = os.environ.get("QDRANT_URL", "")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
+RAG_INFERENCE_URL = os.environ.get("RAG_INFERENCE_URL", "")
+SURYA_PAGE_READ_TIMEOUT = max(0, int(os.environ.get("SURYA_PAGE_READ_TIMEOUT", "0")))
+# Who reads body text inside Surya's layout blocks: vietocr (main flow) or surya.
+OCR_TEXT_ENGINE = os.environ.get("OCR_TEXT_ENGINE", "auto").lower()
+A3_PAGE_CACHE_ROOT = BASE_DIR / 'scratch' / 'a3-page-cache'
+RAG_LOCAL_MODELS = os.environ.get("RAG_LOCAL_MODELS", "False").lower() == "true"
+A3_HYBRID_ENABLED = os.environ.get("A3_HYBRID_ENABLED", "True").lower() == "true"
 
 # Workflow Service URL
+WORKFLOW_SERVICE_TOKEN = os.environ.get('WORKFLOW_SERVICE_TOKEN', '')
 WORKFLOW_SERVICE_URL = os.environ.get(
     "WORKFLOW_SERVICE_URL", "http://localhost:8003"
 )
@@ -175,3 +256,19 @@ WORKFLOW_SERVICE_URL = os.environ.get(
 LOGIN_URL = '/login/'
 
 
+
+# Structure provider is independent of the Qwen answer-generation model.
+A3_ENTITY_PROVIDER = os.environ.get('A3_ENTITY_PROVIDER','gliner')
+
+# Source structure and typed entity mentions are separate inference stages.
+A3_GRAPH_ENABLED = os.environ.get("A3_GRAPH_ENABLED", "True").lower() == "true"
+A3_KNOWLEDGE_ENABLED = os.environ.get("A3_KNOWLEDGE_ENABLED", "True").lower() == "true"
+NEO4J_URI = os.environ.get("NEO4J_URI", "")
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
+NEO4J_DATABASE = os.environ.get("NEO4J_DATABASE", "neo4j")
+A3_VISUAL_NEAR_DISTANCE = float(os.environ.get("A3_VISUAL_NEAR_DISTANCE", "80"))
+
+A2_SEARCH_WORKERS = int(os.environ.get("A2_SEARCH_WORKERS", "2"))
+
+QWEN_TOKEN_PREFLIGHT = os.environ.get("QWEN_TOKEN_PREFLIGHT", "True").lower() == "true"

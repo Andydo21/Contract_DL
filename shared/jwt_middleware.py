@@ -61,7 +61,6 @@ class JWTMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        from django.http import JsonResponse
         from django.apps import apps
 
         token = extract_bearer(request.headers.get("Authorization", ""))
@@ -74,12 +73,14 @@ class JWTMiddleware:
             try:
                 payload = decode_token(token)
                 request.jwt_payload      = payload
-                request.jwt_user_id      = payload.get("user_id") or payload.get("id")
+                # The system identity is user 0, so a missing ID must not be tested by truthiness.
+                request.jwt_user_id      = payload.get("user_id", payload.get("id"))
                 request.jwt_username     = payload.get("username", "")
                 request.jwt_role         = payload.get("role", "USER")
                 request.jwt_company_id   = payload.get("company_id")
                 request.jwt_is_superuser = payload.get("is_superuser", False)
-                request._dont_enforce_csrf_checks = True
+                # Cookie authentication must retain CSRF protection.
+                request._dont_enforce_csrf_checks = bool(extract_bearer(request.headers.get('Authorization', '')))
 
                 if apps.is_installed("contracts"):
                     from django.contrib.auth import get_user_model
@@ -189,33 +190,6 @@ class JWTUserMiddleware:
         return self.get_response(request)
 
 
-def jwt_required(view_func):
-    """Django view decorator — returns 401 if no valid JWT present."""
-    @wraps(view_func)
-    def wrapper(request, *args, **kwargs):
-        if not getattr(request, "jwt_user_id", None):
-            from django.http import JsonResponse
-            return JsonResponse({"error": "Authentication required."}, status=401)
-        return view_func(request, *args, **kwargs)
-    return wrapper
-
-
-def jwt_role_required(*roles):
-    """Django view decorator — returns 403 if JWT role not in allowed list."""
-    def decorator(view_func):
-        @wraps(view_func)
-        def wrapper(request, *args, **kwargs):
-            from django.http import JsonResponse
-            if not getattr(request, "jwt_user_id", None):
-                return JsonResponse({"error": "Authentication required."}, status=401)
-            if request.jwt_role not in roles:
-                return JsonResponse(
-                    {"error": f"Forbidden. Required roles: {list(roles)}"},
-                    status=403,
-                )
-            return view_func(request, *args, **kwargs)
-        return wrapper
-    return decorator
 try:
     from fastapi import Header
 except ImportError:
@@ -261,6 +235,20 @@ def get_auth_header(user_id, username: str, role: str) -> dict:
     """Get request headers with JWT Bearer authorization."""
     token = generate_token(user_id, username, role)
     return {"Authorization": f"Bearer {token}"}
+
+def get_user_auth_header(user) -> dict:
+    """Short-lived token carrying one signed-in user's real identity to another service."""
+    payload = {
+        "user_id": user.pk,
+        "username": user.username,
+        "role": user.role.role_name if user.role else "USER",
+        "company_id": user.company_id,
+        "is_superuser": user.is_superuser,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=5),
+        "iat": datetime.datetime.utcnow(),
+    }
+    return {"Authorization": "Bearer " + pyjwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)}
+
 
 def get_system_auth_header() -> dict:
     """Get system-level authorization header."""

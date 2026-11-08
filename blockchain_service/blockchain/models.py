@@ -55,6 +55,23 @@ class BlockchainNetwork(models.Model):
         return self.network_name
 
 
+class BlockchainNode(models.Model):
+    """A node of the Fabric network the contract web writes to (orderer, peer, gateway)."""
+    network = models.ForeignKey(BlockchainNetwork, on_delete=models.CASCADE, related_name='nodes', verbose_name="Blockchain Network")
+    node_name = models.CharField(max_length=100, verbose_name="Node Name")
+    endpoint = models.CharField(max_length=255, verbose_name="Endpoint")
+    organization = models.CharField(max_length=100, verbose_name="Organization")
+    status = models.CharField(max_length=50, default='ACTIVE', verbose_name="Status")
+
+    class Meta:
+        verbose_name = 'Blockchain Node'
+        verbose_name_plural = 'Blockchain Nodes'
+        unique_together = ('network', 'node_name')
+
+    def __str__(self):
+        return f"{self.node_name} ({self.organization})"
+
+
 class SmartContract(models.Model):
     network = models.ForeignKey(BlockchainNetwork, on_delete=models.CASCADE, related_name='smart_contracts', verbose_name="Blockchain Network")
     contract_address = models.CharField(max_length=255, verbose_name="Contract Address")
@@ -99,7 +116,8 @@ class BlockchainTransaction(models.Model):
 
 
 class BlockchainAudit(models.Model):
-    transaction = models.ForeignKey(BlockchainTransaction, on_delete=models.CASCADE, related_name='audits', verbose_name="Blockchain Transaction")
+    # Empty for an event that is not a ledger transaction (a user's registration and certificate).
+    transaction = models.ForeignKey(BlockchainTransaction, on_delete=models.CASCADE, null=True, blank=True, related_name='audits', verbose_name="Blockchain Transaction")
     user_id = models.BigIntegerField(null=True, blank=True, verbose_name="User ID")
     company_id = models.BigIntegerField(null=True, blank=True, verbose_name="Company ID")
     ip = models.CharField(max_length=45, blank=True, null=True, verbose_name="IP Address")

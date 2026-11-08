@@ -1,0 +1,55 @@
+% Worked example P044 and the questions referenced by ID. Pod and answer are verbatim system output
+% (pod abridged; answer translated from Vietnamese). Source: research_evaluation_20261030/frozen_20261030/production_pods.json
+% and KET_QUA_20261030/mainflow_answers_images_off.jsonl.
+\begin{figure*}[t]
+\centering
+\begin{minipage}[t]{0.35\textwidth}\vspace{0pt}
+\centering\textbf{\footnotesize (a) Input page region (excerpt)}\\[3pt]
+\includegraphics[width=\linewidth]{figures/p044_input_focus.png}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.36\textwidth}\vspace{0pt}
+\centering\textbf{\footnotesize (b) Evidence pod (abridged)}\\[3pt]
+\raggedright\ttfamily\scriptsize
+\#\# Source scope 1 | Document/version 1: VS050S2\_E\\
+Heading: VS050S2\_E > Medical and Pharmaceutical Robot VS-050S2 Series > Dimensions / Motion range > Specifications\\[2pt]
+\#\#\# [a3:v1000017:r1000081:block:1003483]\\
+Item / Specifications / Model / VS-050S2 / Axes / 6 / \ldots\\
+Motion range / J1 (1st axis) / ±180° (*3) / \ldots\\
+J5 (5th axis) / ±115° (*4) / J6 (6th axis) / ±360° / \ldots\\
+Maximum payload / 4kg / \ldots / Weight / Approx. 34 kg\\[2pt]
+\#\#\# [a3:v1000017:r1000081:block:1003487]\\
+*4: When electric gripper connection flange specification-A is selected, the J5 motion range is +110, -102.\\[2pt]
+Outgoing source links (proposals; source text takes precedence):\\
+- [\ldots:block:1003487] --RELATED\_PASSAGE--> [\ldots:block:1003483]; \{"review\_status":"candidate", "relation\_semantics": "content\_similarity\_navigation\_only", \ldots\}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.26\textwidth}\vspace{0pt}
+\centering\textbf{\footnotesize (c) Question and answer}\\[3pt]
+\raggedright\footnotesize
+\textbf{Q (P044):} When electric gripper connection flange specification-A is selected, what does the J5 motion range of the VS-050S2 change to, compared with the standard?\\[4pt]
+\textbf{Generated answer:} When electric gripper connection flange specification-A is selected, the J5 range of the VS-050S2 changes to +110, $-$102 from the standard [E1].\\[4pt]
+\textbf{Cited source:} E1 = \texttt{block:1003487}, the *4 footnote.\\[4pt]
+\textbf{Reference:} standard J5 $\pm$115°; with flange specification-A, +110° to $-$102°. \textbf{Label:} correct.
+\end{minipage}
+\caption{A worked example from the production main flow (text-only generator input). (a) Excerpt of the source specification table and its footnote *4, read by Surya (other rows, footnotes and the blank space between the two columns omitted; dashed line marks the column cut). (b) The evidence pod given to the generator: the table and the footnote that qualifies its J5 row share one heading scope, and the graph's similarity link between them is shown as a proposal. (c) The generator cites the footnote and states the conditional value. The question and answer were in Vietnamese and are translated; the example illustrates the mechanism, and aggregate results are in Table~\ref{tab:mainflow}.}
+\label{fig:p044}
+\end{figure*}
+
+\begin{table*}[t]
+\centering\footnotesize
+\caption{Answers of the production main flow (text-only input, one run) for five pilot questions, chosen to show a correct, partial, leaking and abstaining answer. Answers were in Vietnamese and are translated; ``cited'' is the source the answer's citation points to.}
+\label{tab:answers}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lp{0.27\textwidth}p{0.34\textwidth}p{0.27\textwidth}@{}}
+\toprule
+ID & Question & Generated answer & Cited source; label \\
+\midrule
+P013 & Compare IU01* and IXU01*: thread diameter and plug height of each? & IU01* has a 10\,mm thread, IXU01* a 12\,mm thread; plug height is 50\,mm for IU01* and 51\,mm for IXU01*. & the plug-model table (cell-aware grid); \textbf{correct} \\
+P038 & Through what does the LPH command-slave function let a PLC control the robot, how many command types, and is robot-side programming needed? & Through a Function Block (FB); 130 robot command types programmable from the PLC; no programming on the robot side is needed. & the command-slave paragraph; \textbf{correct} \\
+P034 & Which robot series and controller does Dual-arm Control support, and how many arms per controller? & It supports the HSR and HS-A1 series; one controller controls two robot arms. & the compatibility table (which also lists RC8A) and the controller paragraph; \textbf{partial}: the RC8A controller is omitted \\
+P010 & In the Iridium Racing diagram, which electrodes do labels A and G denote, with what material and diameter? & ``Labels A and G'' denote 100\% platinum electrodes of 0.8\,mm; label G denotes an iridium electrode of 0.4\,mm. & label A text and an iridium-alloy paragraph; \textbf{partial}, one leaking claim: A's material is also given to G \\
+P009 & If the spark-plug threads are lubricated, how must the tightening torque be adjusted, and why? & The documents do not mention adjusting the torque for lubricated threads. & an unrelated reference list; \textbf{no answer}: the footnote with the answer (reduce by about one third) was not retrieved, and the citation is not supporting \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\input{questions_table}

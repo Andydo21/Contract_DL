@@ -9,10 +9,17 @@ def JsonResponse(data, status=200, **kwargs):
 workflow_service = WorkflowService()
 
 
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render
 
 def index(request):
-    return JsonResponse({"status": "healthy", "service": "workflow_service"})
+    from django.db import connections
+    try:
+        for alias in ['default', 'contract_db']:
+            with connections[alias].cursor() as cursor:
+                cursor.execute('SELECT 1')
+        return JsonResponse({"status": "healthy", "service": "workflow_service", "database_connected": True})
+    except Exception:
+        return JsonResponse({"status": "degraded", "service": "workflow_service", "database_connected": False}, status=503)
 
 
 def workflow_board_page(request):

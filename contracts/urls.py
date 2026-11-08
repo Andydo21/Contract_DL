@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import contract_views
 from . import views
 
 urlpatterns = [
@@ -14,25 +15,13 @@ urlpatterns = [
     path('api/contracts/<int:contract_id>/workflow/', views.api_push_to_workflow, name='api_push_to_workflow'),
     path('api/contracts/<int:contract_id>/workflow/status/', views.api_workflow_status, name='api_workflow_status'),
     path('api/contracts/<int:contract_id>/versions/', views.api_contract_versions, name='api_contract_versions'),
-    # Blockchain endpoints
-    path('api/contracts/<int:contract_id>/blockchain/proof/', views.api_blockchain_generate_proof, name='api_blockchain_generate_proof'),
-    path('api/contracts/<int:contract_id>/blockchain/anchor/', views.api_blockchain_anchor_proof, name='api_blockchain_anchor_proof'),
-    path('api/contracts/<int:contract_id>/blockchain/verify/', views.api_blockchain_verify_proof, name='api_blockchain_verify_proof'),
-    path('api/contracts/<int:contract_id>/blockchain/status/', views.api_blockchain_status, name='api_blockchain_status'),
-    path('api/blockchain/certificates/', views.api_blockchain_create_certificate, name='api_blockchain_create_certificate'),
-    path('api/blockchain/sign/', views.api_blockchain_sign_step, name='api_blockchain_sign_step'),
-    path('api/blockchain/history/<int:version_id>/', views.api_blockchain_history, name='api_blockchain_history'),
-    path('api/blockchain/transaction/<str:tx_hash>/', views.api_blockchain_transaction, name='api_blockchain_transaction'),
-    path('api/blockchain/proof/<int:version_id>/', views.api_blockchain_proof, name='api_blockchain_proof'),
-    path('api/blockchain/certificate/<int:user_id>/', views.api_blockchain_certificate, name='api_blockchain_certificate'),
-    path('api/blockchain/user/<int:user_id>/', views.api_blockchain_user, name='api_blockchain_user'),
+    path('api/contracts/<int:contract_id>/parties/', contract_views.api_contract_parties, name='api_contract_parties'),
+    path('api/contracts/<int:contract_id>/tags/', contract_views.api_contract_tags, name='api_contract_tags'),
     path('api/contracts/files/<int:file_id>/download/', views.api_download_file, name='api_download_file'),
     path('api/contracts/<int:contract_id>/download-pdf/', views.api_download_contract_pdf, name='api_download_contract_pdf'),
     path('api/analyses/', views.api_analyses_list, name='api_analyses_list'),
     path('api/analyses/<int:analysis_id>/review/', views.api_submit_review, name='api_submit_review'),
     path('api/risks/', views.api_risks_list, name='api_risks_list'),
-    path('developer-test/', views.developer_test, name='developer_test'),
-    path('api/developer-test/run/', views.api_run_developer_test, name='api_run_developer_test'),
     # Identity Registry
     path('identity/', views.identity_registry, name='identity_registry'),
     path('api/identity/companies/', views.api_companies_list, name='api_companies_list'),
@@ -50,6 +39,4 @@ urlpatterns = [
     path('api/admin/users/<int:user_id>/retry/', views.api_admin_retry_user, name='api_admin_retry_user'),
     path('api/admin/config/ocr/', views.api_admin_toggle_ocr, name='api_admin_toggle_ocr'),
     path('api/token/', views.api_obtain_token, name='api_obtain_token'),
-    path('blockchain-explorer/', views.blockchain_explorer, name='blockchain_explorer'),
-    path('api/blockchain/explorer/stats/', views.api_blockchain_stats, name='api_blockchain_stats'),
 ]

@@ -37,6 +37,7 @@ class Workflow(models.Model):
 
 
 class WorkflowStep(models.Model):
+    requires_signature = models.BooleanField(default=False)
     workflow = models.ForeignKey(Workflow, on_delete=models.CASCADE, related_name='steps', verbose_name="Workflow")
     role_id = models.BigIntegerField(blank=True, null=True, verbose_name="Required Role ID")
     step_order = models.IntegerField(verbose_name="Step Order")

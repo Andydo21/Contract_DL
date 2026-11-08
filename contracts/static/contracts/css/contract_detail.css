@@ -800,6 +800,7 @@ textarea.form-control {
 .entity-type-contract_value { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
 .entity-type-date_effective { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
 .entity-type-date_expire { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+.entity-type-party_a, .entity-type-party_b, .entity-type-party { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
 .entity-type-party { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
 .entity-type-action { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
 

@@ -1,5 +1,63 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
+import uuid
+from .ledger_models import ContractSigningCredential, ContractLedgerOperation
+from django.core.exceptions import ValidationError
+
+
+class ContractKnowledgeCase(models.Model):
+    """A2 expert knowledge, bound to a source version and its company."""
+    case_id = models.UUIDField(default=uuid.uuid4, editable=False, db_index=True)
+    revision = models.PositiveIntegerField(default=1)
+    version = models.ForeignKey('ContractVersion', on_delete=models.PROTECT, related_name='knowledge_cases')
+    title = models.CharField(max_length=255)
+    clause_type = models.CharField(max_length=100, blank=True)
+    issue = models.TextField()
+    reasoning = models.TextField(blank=True)
+    resolution = models.TextField(blank=True)
+    verification = models.TextField(blank=True)
+    applicability = models.TextField(blank=True)
+    source_reference = models.CharField(max_length=255, blank=True)
+    evidence_snapshot = models.JSONField(default=dict, blank=True)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='contract_knowledge_authored')
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+                                 related_name='contract_knowledge_reviewed')
+    status = models.CharField(max_length=20, default='draft', db_index=True,
+                              choices=[('draft', 'Nháp'), ('approved', 'Đã duyệt'), ('deprecated', 'Ngừng sử dụng')])
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+        constraints = [models.UniqueConstraint(fields=['case_id', 'revision'], name='unique_contract_case_revision')]
+
+
+class KnowledgeSearchLog(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    version = models.ForeignKey('ContractVersion', null=True, on_delete=models.PROTECT)
+    query = models.TextField()
+    scope = models.CharField(max_length=20, default='version')
+    generated = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, default='RUNNING')
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class ContractKnowledgeInquiry(models.Model):
+    version = models.ForeignKey('ContractVersion', on_delete=models.PROTECT)
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='knowledge_inquiries')
+    assignee = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='assigned_knowledge_inquiries')
+    search = models.ForeignKey(KnowledgeSearchLog, on_delete=models.PROTECT)
+    case = models.ForeignKey(ContractKnowledgeCase, null=True, blank=True, on_delete=models.PROTECT, related_name='inquiries')
+    question = models.TextField()
+    status = models.CharField(max_length=20, default='OPEN', choices=[(s, s) for s in ('OPEN', 'ASSIGNED', 'ANSWERED', 'RESOLVED', 'CANCELLED')])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['search'], name='one_inquiry_per_search')]
 
 class Company(models.Model):
     company_name = models.CharField(max_length=255, verbose_name="Company Name")
@@ -93,6 +151,13 @@ class Contract(models.Model):
     def __str__(self):
         return f"{self.contract_code} - {self.title}"
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = type(self).objects.filter(pk=self.pk).values('company_id').first()
+            if old and old['company_id'] != self.company_id and ContractLedgerOperation.objects.filter(version__contract_id=self.pk, accepted_at__isnull=False).exists():
+                raise ValidationError('Không đổi công ty của hợp đồng đã có yêu cầu ledger. Cần quy trình chuyển giao riêng.')
+        return super().save(*args, **kwargs)
+
     @property
     def latest_version(self):
         if hasattr(self, '_prefetched_objects_cache') and 'versions' in self._prefetched_objects_cache:
@@ -146,6 +211,13 @@ class ContractVersion(models.Model):
     def __str__(self):
         return f"{self.contract.contract_code} - v{self.version_number}"
 
+    def save(self, *args, **kwargs):
+        if self.pk:
+            old = type(self).objects.filter(pk=self.pk).values('contract_id', 'version_number').first()
+            if old and (old['contract_id'], old['version_number']) != (self.contract_id, self.version_number) and self.ledger_operations.filter(accepted_at__isnull=False).exists():
+                raise ValidationError('Phiên bản đã gửi ledger không được đổi hợp đồng hoặc số phiên bản.')
+        return super().save(*args, **kwargs)
+
 
 class ContractFile(models.Model):
     version = models.ForeignKey(ContractVersion, on_delete=models.CASCADE, related_name='files', verbose_name="Contract Version")
@@ -154,6 +226,13 @@ class ContractFile(models.Model):
     file_size = models.BigIntegerField(blank=True, null=True, verbose_name="File Size")
     mime_type = models.CharField(max_length=100, blank=True, null=True, verbose_name="MIME Type")
     uploaded_at = models.DateTimeField(auto_now_add=True, verbose_name="Uploaded At")
+
+    def save(self, *args, **kwargs):
+        old = type(self).objects.filter(pk=self.pk).values('version_id', 'file_path').first() if self.pk else None
+        affected = {self.version_id, old['version_id'] if old else self.version_id}
+        if (not old or (old['version_id'], old['file_path']) != (self.version_id, self.file_path)) and ContractLedgerOperation.objects.filter(version_id__in=affected, accepted_at__isnull=False).exists():
+            raise ValidationError('Không thay file của phiên bản đã gửi ledger. Hãy tạo phiên bản mới.')
+        return super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = 'Contract File'
@@ -180,22 +259,6 @@ class ContractContext(models.Model):
 
     def __str__(self):
         return f"Context {self.context_type} (v{self.version.version_number})"
-
-
-class ContextEmbedding(models.Model):
-    context = models.OneToOneField(ContractContext, on_delete=models.CASCADE, related_name='embedding', verbose_name="Contract Context")
-    vector_id = models.CharField(max_length=255, verbose_name="Vector ID")
-    embedding_model = models.CharField(max_length=100, verbose_name="Embedding Model")
-
-    class Meta:
-        verbose_name = 'Context Embedding'
-        verbose_name_plural = 'Context Embeddings'
-
-    def __str__(self):
-        return f"Embedding for context {self.context_id}"
-
-
-
 
 
 class RiskRule(models.Model):
@@ -254,6 +317,8 @@ class RiskFinding(models.Model):
     explanation = models.TextField(verbose_name="Explanation")
     recommendation = models.TextField(blank=True, null=True, verbose_name="Recommendation")
     disadvantaged_party = models.CharField(max_length=255, blank=True, null=True, verbose_name="Disadvantaged Party")
+    # A drafting point no supplied law makes a risk: shown apart from the risks and not counted in the score.
+    is_suggestion = models.BooleanField(default=False, verbose_name="Drafting Suggestion")
 
     class Meta:
         verbose_name = 'Risk Finding'

@@ -5,10 +5,15 @@ echo "=== Phase 1: Generating Crypto Materials and Genesis Block ==="
 
 cd /fabric
 
-# Clean up any old configurations
-rm -rf crypto-config
-rm -f contracts-channel.block
-rm -f chaincode/package_id.txt
+# Never regenerate identities for an existing ledger.
+if [ -d crypto-config ] || [ -f contracts-channel.block ]; then
+  if [ -f contracts-channel.block ] && [ -f crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt ]; then
+    echo "Existing Fabric identities and channel block retained."
+    exit 0
+  fi
+  echo "Incomplete Fabric identity configuration; restore matching materials before starting." >&2
+  exit 1
+fi
 
 # 1. Generate crypto materials
 cryptogen generate --config=crypto-config.yaml --output=crypto-config

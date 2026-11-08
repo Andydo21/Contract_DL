@@ -1,20 +1,42 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: contract_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-contract_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the root .env}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - contract-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - riskdl-net
   web:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: riskdl_web
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      - DB_NAME=contract_db
+      - SECRET_KEY=${SECRET_KEY}
+      - DB_NAME=${DB_NAME:-contract_db}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_SSLMODE=${DB_SSLMODE}
-      - AI_SERVICE_URL=http://ai-service:8000
-      - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
       - WORKFLOW_SERVICE_URL=http://workflow-service:8000
+      - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
       # Unified Kaggle/ngrok endpoint: summarize + entities + clauses.
       - KAGGLE_QWEN_SERVICE_URL=${KAGGLE_QWEN_SERVICE_URL}
       - COLPALI_BASE_URL=${COLPALI_BASE_URL:-}
@@ -22,25 +44,12 @@ services:
       - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
       - QDRANT_URL=${QDRANT_URL:-}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - NEO4J_URI=${NEO4J_DOCKER_URI:-}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
     volumes:
       - .:/app
-    networks:
-      - riskdl-net
-
-  ai-service:
-    build:
-      context: ./ai_service
-      dockerfile: Dockerfile
-    container_name: riskdl_ai
-    restart: always
-    environment:
-      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
-      - HF_TOKEN=${HF_TOKEN}
-    ports:
-      - "8001:8000"
-    volumes:
-      - ./ai_service:/app
-      - ./shared:/app/shared
     networks:
       - riskdl-net
 
@@ -51,7 +60,10 @@ services:
     container_name: riskdl_ai_summary
     restart: always
     environment:
+      - SECRET_KEY=${SECRET_KEY}
       - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
+      - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
     ports:
       - "8004:8000"
     volumes:
@@ -60,19 +72,27 @@ services:
     networks:
       - riskdl-net
 
+  # The ledger book: the contract web writes version-bound operations to Fabric itself (ledger_service.py) and files
+  # what Fabric confirmed here (hash proofs, transactions, audits, certificates, signatures, verifications).
   blockchain-service:
     build:
       context: ./blockchain_service
       dockerfile: Dockerfile
     container_name: blockchain_service
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      - DB_NAME=blockchain_db
+      - SECRET_KEY=${SECRET_KEY}
+      - FABRIC_GATEWAY_URL=http://fabric-gateway:5000
+      - LEDGER_BOOK_TOKEN=${LEDGER_BOOK_TOKEN}
+      - DB_NAME=${BLOCKCHAIN_DB_NAME:-blockchain_db}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_SSLMODE=${DB_SSLMODE}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
     volumes:
       - ./blockchain_service:/app
       - ./shared:/app/shared
@@ -85,15 +105,19 @@ services:
       dockerfile: Dockerfile
     container_name: workflow_service
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
-      - DB_NAME=workflow_db
+      - SECRET_KEY=${SECRET_KEY}
+      - WORKFLOW_SERVICE_TOKEN=${WORKFLOW_SERVICE_TOKEN}
+      - DB_NAME=${WORKFLOW_DB_NAME:-workflow_db}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_SSLMODE=${DB_SSLMODE}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
       - KAGGLE_AI_URL=${KAGGLE_AI_URL}
-      - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai-service:8000}
     volumes:
       - ./workflow_service:/app
       - ./shared:/app/shared
@@ -110,8 +134,6 @@ services:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - web
-      - ai-service
-      - blockchain-service
       - workflow-service
     networks:
       - riskdl-net
@@ -235,6 +257,7 @@ services:
       - PEER_ENDPOINT=peer0.org1.example.com:7051
       - CHANNEL_NAME=contracts-channel
       - CHAINCODE_NAME=ContractVerifyChaincode
+      - FABRIC_GATEWAY_TOKEN=${FABRIC_GATEWAY_TOKEN}
     entrypoint: /bin/sh -c "npm install && npm start"
     depends_on:
       fabric-cli:
@@ -279,3 +302,6 @@ services:
 networks:
   riskdl-net:
     name: riskdl-net
+
+volumes:
+  contract-postgres-data:

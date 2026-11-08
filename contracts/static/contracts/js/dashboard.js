@@ -1,3 +1,31 @@
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+const ENTITY_LABELS = {PARTY_A: 'Bên A', PARTY_B: 'Bên B', PARTY: 'Bên ký kết'};
+
+// OCR can misread a digit silently, so numbers stay visibly tied to the original page.
+function ocrNumbersHTML(text) {
+    return String(text ?? '').split(/(\p{Nd}[\p{Nd}.,]*)/u).map((part, index) => index % 2
+        ? `<mark title="Số do OCR đọc, hãy đối chiếu với ảnh gốc" style="background: rgba(245,158,11,0.22); color: inherit; border-radius: 3px; padding: 0 2px;">${escapeHtml(part)}</mark>`
+        : escapeHtml(part)).join('');
+}
+
+function sourcePagesHTML(contractId, versionId, pages) {
+    if (!pages || !pages.length) return '';
+    return `<div class="clause-source-pages" style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Số tô vàng do OCR đọc, hãy đối chiếu ảnh gốc: ${pages.map(page =>
+        `<a href="/ai-extract/contracts/${encodeURIComponent(contractId)}/pages/${encodeURIComponent(page)}/?version_id=${encodeURIComponent(versionId)}" target="_blank" rel="noopener" style="color: #a5b4fc;">Trang ${escapeHtml(page)}</a>`).join(', ')}</div>`;
+}
+
+function partiesHTML(parties) {
+    if (!parties || !parties.length) return '';
+    return `<div class="contract-parties" style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">${parties.map(p => `
+        <div style="flex: 1; min-width: 200px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px;">
+            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;">${escapeHtml(p.label)}</div>
+            <div style="font-size: 13.5px; color: #ffffff; font-weight: 600;">${escapeHtml(p.name)}</div>
+        </div>`).join('')}</div>`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const listContainer = document.getElementById('contracts-list-container');
     const detailPanel = document.getElementById('analysis-detail-panel');
@@ -68,11 +96,12 @@ document.addEventListener('DOMContentLoaded', () => {
             let riskLabel = 'Low Risk';
             
             if (c.risk_score !== null) {
-                if (c.risk_score >= 80) {
+                const level = ['HIGH', 'MEDIUM', 'LOW'].includes(c.risk_level) ? c.risk_level : c.risk_score >= 80 ? 'HIGH' : c.risk_score >= 50 ? 'MEDIUM' : 'LOW';
+                if (level === 'HIGH') {
                     riskClass = 'score-high';
                     indicatorClass = 'bg-high';
                     riskLabel = `Score: ${c.risk_score}% (High)`;
-                } else if (c.risk_score >= 50) {
+                } else if (level === 'MEDIUM') {
                     riskClass = 'score-medium';
                     indicatorClass = 'bg-medium';
                     riskLabel = `Score: ${c.risk_score}% (Medium)`;
@@ -95,7 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="card-code">${c.contract_code}</span>
                     <span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span>
                 </div>
-                <div class="card-title">${c.title}</div>
+                <div class="card-title">${escapeHtml(c.title)}</div>
                 <div class="card-footer">
                     <span>$${c.contract_value !== null && c.contract_value !== undefined ? c.contract_value.toLocaleString() : '0'}</span>
                     <div class="card-score ${riskClass}">
@@ -161,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let pendingCount = 0;
 
         contracts.forEach(c => {
-            if (c.risk_score && c.risk_score >= 80) highRiskCount++;
+            if (c.risk_level === 'HIGH' || (!c.risk_level && c.risk_score >= 80)) highRiskCount++;
             if (c.status === 'ANALYZED') pendingCount++;
         });
 
@@ -206,11 +235,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 let scoreStatus = 'Low Risk';
                 let scoreStatusClass = 'score-low';
                 
-                if (score >= 80) {
+                const level = ['HIGH', 'MEDIUM', 'LOW'].includes(data.analysis.risk_level) ? data.analysis.risk_level : score >= 80 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW';
+                if (level === 'HIGH') {
                     strokeColor = '#ef4444';
                     scoreStatus = 'High Risk';
                     scoreStatusClass = 'score-high';
-                } else if (score >= 50) {
+                } else if (level === 'MEDIUM') {
                     strokeColor = '#f97316';
                     scoreStatus = 'Medium Risk';
                     scoreStatusClass = 'score-medium';
@@ -222,34 +252,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let findingsHTML = '';
                 if (data.findings && data.findings.length > 0) {
-                    data.findings.forEach(f => {
+                    data.findings.forEach((f, i, all) => {
                         findingsHTML += `
+                            ${f.is_suggestion && !(i > 0 && all[i - 1].is_suggestion) ? '<h5 class="section-title" style="margin-top: 18px; font-size: 14px;"><i class="fa-solid fa-pen-to-square"></i> Gợi ý soạn thảo <span style="font-weight: 400; color: var(--text-muted);">(không có điều luật làm căn cứ, không tính vào điểm rủi ro)</span></h5>' : ''}
                             <div class="finding-item">
                                 <div class="finding-header" onclick="toggleFinding(this)">
                                     <div class="finding-left">
-                                        <span class="risk-badge badge-${f.risk_level.toLowerCase()}">${f.risk_level}</span>
-                                        <span>${f.risk_name}</span>
+                                        ${f.is_suggestion ? '<span class="risk-badge badge-low">GỢI Ý</span>' : `<span class="risk-badge badge-${escapeHtml(f.risk_level.toLowerCase())}">${escapeHtml(f.risk_level)}</span>`}
+                                        <span>${escapeHtml(f.risk_name)}</span>
                                     </div>
                                     <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
                                 </div>
                                 <div class="finding-body" style="display: none;">
                                     <div class="finding-block">
-                                        <div class="block-label">Violated Clause</div>
-                                        <div class="block-text" style="font-weight: 500; color: #ffffff;">${f.clause_title}</div>
+                                        <div class="block-label">Điều khoản liên quan</div>
+                                        <div class="block-text" style="font-weight: 500; color: #ffffff;">${escapeHtml(f.clause_title || 'Toàn bộ hợp đồng')}</div>
                                     </div>
                                     <div class="finding-block">
                                         <div class="block-label">Risk Explanation</div>
-                                        <div class="block-text">${f.explanation}</div>
+                                        <div class="block-text">${escapeHtml(f.explanation)}</div>
                                     </div>
                                     ${f.disadvantaged_party ? `
                                     <div class="finding-block" style="margin-top: 8px;">
                                         <div class="block-label" style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Bên gặp bất lợi / Disadvantaged Party</div>
-                                        <div class="block-text" style="font-weight: 600; color: #f87171;">${f.disadvantaged_party}</div>
+                                        <div class="block-text" style="font-weight: 600; color: #f87171;">${escapeHtml(f.disadvantaged_party)}</div>
                                     </div>` : ''}
                                     ${f.recommendation ? `
                                     <div class="rec-box">
                                         <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
-                                        <div class="block-text">${f.recommendation}</div>
+                                        <div class="block-text">${escapeHtml(f.recommendation)}</div>
                                     </div>` : ''}
                                 </div>
                             </div>
@@ -276,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
 
                     <div class="summary-box">
-                        ${data.analysis.summary}
+                        ${escapeHtml(data.analysis.summary)}
                     </div>
 
                     <h4 class="section-title"><i class="fa-solid fa-magnifying-glass-warning"></i> Detected Clause Violations</h4>
@@ -291,7 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 16px; margin: 0;">Run AI Risk Scanner</h3>
                         <p style="max-width: 320px; font-size: 13px; line-height: 1.4; color: var(--text-secondary); margin: 0;">Click below to run the AI risk scanner to extract clauses and flag violations.</p>
                         <button class="btn btn-trigger-analysis" style="margin-top: 4px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none;">
-                            <i class="fa-solid fa-play"></i> Run AI Analysis
+                            <i class="fa-solid fa-play"></i> Phân tích rủi ro hợp đồng
                         </button>
                     </div>
                 `;
@@ -308,39 +339,39 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="review-header">
                                 <div class="reviewer-info">
                                     <i class="fa-solid fa-user-tie" style="color: var(--accent-primary);"></i>
-                                    <span>${r.reviewer}</span>
+                                    <span>${escapeHtml(r.reviewer)}</span>
                                 </div>
-                                <span class="risk-badge badge-${r.final_risk_level.toLowerCase()}">${r.final_risk_level} Decision</span>
+                                <span class="risk-badge badge-${escapeHtml(String(r.final_risk_level).toLowerCase())}">Kết luận: ${escapeHtml(r.final_risk_level)}</span>
                             </div>
-                            <div class="review-comment">"${r.comment}"</div>
+                            <div class="review-comment">"${escapeHtml(r.comment)}"</div>
                         </div>
                     `;
                 });
             }
 
-            const showReviewForm = (!data.reviews || data.reviews.length === 0) && data.status !== 'APPROVED';
+            const showReviewForm = Boolean(data.analysis) && (!data.reviews || data.reviews.length === 0) && data.status !== 'APPROVED';
 
             analysisHTML += `
                 <div class="reviews-section">
-                    <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Legal Expert Review</h4>
+                    <h4 class="section-title"><i class="fa-solid fa-user-shield"></i> Nhận xét kết quả phân tích AI</h4>
                     ${reviewsHTML}
                     
                     ${showReviewForm ? `
                     <form class="review-form" id="submit-review-form">
                         <div class="form-group">
-                            <label class="form-label">Review Verdict *</label>
+                            <label class="form-label">Kết luận về mức rủi ro *</label>
                             <select class="form-control" name="final_risk_level" required>
-                                <option value="LOW">LOW RISK - Approved</option>
-                                <option value="MEDIUM" selected>MEDIUM RISK - Mitigation Required</option>
-                                <option value="HIGH">HIGH RISK - Rejection/Renegotiate</option>
+                                <option value="LOW">Rủi ro thấp — chấp thuận hợp đồng</option>
+                                <option value="MEDIUM" selected>Rủi ro trung bình — cần sửa trước khi ký</option>
+                                <option value="HIGH">Rủi ro cao — từ chối hoặc đàm phán lại</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Expert Commentary *</label>
-                            <textarea class="form-control" name="comment" placeholder="Provide legal reasoning and next action steps..." required></textarea>
+                            <label class="form-label">Nhận xét về toàn bộ lần phân tích *</label>
+                            <textarea class="form-control" name="comment" placeholder="Kết quả AI có đúng không, thiếu rủi ro nào, cần làm gì tiếp…" required></textarea>
                         </div>
                         <button type="submit" class="btn" style="align-self: flex-end; margin-top: 8px;">
-                            <i class="fa-solid fa-signature"></i> Sign & Submit Review
+                            <i class="fa-solid fa-signature"></i> Gửi nhận xét
                         </button>
                     </form>
                     ` : `
@@ -360,7 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                 ${data.has_workflow && data.workflow_id ? `
-                                <a href="http://localhost:8003/board/${data.workflow_id}/" target="_blank" style="color: #a5b4fc; text-decoration: none; font-size: 12.5px; font-weight: 600; background: rgba(99,102,241,0.12); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.3); display: inline-flex; align-items: center; gap: 6px;" title="Mở trang chi tiết quy trình phê duyệt">
+                                <a href="/board/${data.workflow_id}/" target="_blank" style="color: #a5b4fc; text-decoration: none; font-size: 12.5px; font-weight: 600; background: rgba(99,102,241,0.12); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.3); display: inline-flex; align-items: center; gap: 6px;" title="Mở trang chi tiết quy trình phê duyệt">
                                     <i class="fa-solid fa-route"></i> Xem chi tiết Workflow <i class="fa-solid fa-up-right-from-square" style="font-size: 11px;"></i>
                                 </a>` : ''}
                                 <button class="btn btn-push-workflow" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border: none; font-weight: 600; padding: 10px 22px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(16,185,129,0.3); cursor: pointer; white-space: nowrap; border-radius: 8px;">
@@ -376,12 +407,10 @@ document.addEventListener('DOMContentLoaded', () => {
             let clausesHTML = `
                 <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
                     <button class="btn btn-manual-extract-dash" data-contract-id="${data.id}" data-version-id="${data.active_version_id || ''}" style="flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); color: #ffffff; font-weight: 500; padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
-                        <i class="fa-solid fa-gears" style="color: #a5b4fc;"></i> Trích xuất Thủ công
-                    </button>
-                    <button class="btn btn-ai-extract-dash" data-contract-id="${data.id}" data-version-id="${data.active_version_id || ''}" style="flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; color: #ffffff; font-weight: 600; padding: 10px 16px; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(99,102,241,0.3);">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Trích xuất AI
+                        <i class="fa-solid fa-gears" style="color: #a5b4fc;"></i> Trích xuất AI
                     </button>
                 </div>
+                ${partiesHTML(data.parties)}
             `;
 
             if (data.clauses && data.clauses.length > 0) {
@@ -390,9 +419,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="clause-item">
                             <div class="clause-title-text">
                                 <i class="fa-solid fa-paragraph" style="color: var(--accent-primary);"></i>
-                                <span>${cl.title}</span>
+                                <span>${escapeHtml(cl.title)}</span>
                             </div>
-                            <div class="clause-body-text">${cl.content.replace(/\n/g, '<br>')}</div>
+                            <div class="clause-body-text">${ocrNumbersHTML(cl.content).replace(/\n/g, '<br>')}</div>
+                            ${sourcePagesHTML(data.id, data.active_version_id, cl.source_pages)}
                         </div>
                     `;
                 });
@@ -401,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="text-align: center; padding: 40px 24px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
                         <i class="fa-solid fa-file-circle-exclamation" style="font-size: 36px; color: var(--text-muted);"></i>
                         <h4 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 15px; margin: 0;">Chưa tìm thấy điều khoản (No Clauses Extracted)</h4>
-                        <p style="max-width: 440px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Vui lòng bấm <strong>Trích xuất Thủ công</strong> hoặc <strong>Trích xuất AI</strong> ở trên để bóc tách thông tin điều khoản cho hợp đồng này.</p>
+                        <p style="max-width: 440px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Bấm <strong>Trích xuất AI</strong> để tách điều khoản và các bên. Hệ thống chỉ tách khi tài liệu có số điều và nêu ít nhất hai bên ký kết.</p>
                     </div>
                 `;
             }
@@ -410,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             detailPanel.innerHTML = `
                 <div class="analysis-header">
                     <div class="analysis-title-area">
-                        <h2 class="analysis-title">${data.title}</h2>
+                        <h2 class="analysis-title">${escapeHtml(data.title)}</h2>
                         <div class="analysis-meta">
                             <div class="meta-tag"><i class="fa-solid fa-barcode"></i> ${data.contract_code}</div>
                             <div class="meta-tag"><i class="fa-solid fa-tag"></i> ${data.contract_type}</div>
@@ -420,7 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-trigger-analysis" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.3); cursor: pointer;">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> Run AI Analysis
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích rủi ro hợp đồng
                         </button>
                         <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
                             <i class="fa-solid fa-expand"></i> Full Reader Page
@@ -514,7 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     triggerAnalysisBtns.forEach(b => {
                         b.disabled = true;
                         b.style.opacity = '0.7';
-                        b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Analyzing...`;
+                        b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Đang phân tích…`;
                     });
 
                     // 3. Render inline loading indicator strictly inside AI scanner section (keeping Legal Expert Review intact)
@@ -527,8 +557,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <div style="position: absolute; top:0; left:0; width:64px; height:64px; border:3px solid rgba(99,102,241,0.15); border-top-color:#6366f1; border-radius:50%; animation:spin 1s linear infinite;"></div>
                                 </div>
                                 <div>
-                                    <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">AI Engine is Scanning Contract Risks...</h3>
-                                    <p style="max-width: 400px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Sending contract text to Kaggle fine-tuned Qwen2.5-3B model. Extracting clauses and calculating risk scores...</p>
+                                    <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">Đang phân tích rủi ro hợp đồng</h3>
+                                    <p id="dash-risk-progress" style="max-width: 400px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Từng điều khoản được đối chiếu với văn bản pháp luật và danh mục rủi ro của hệ thống…</p>
                                 </div>
                             </div>
                         `;
@@ -544,10 +574,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         const runData = await runRes.json();
                         
                         if (runData.success) {
-                            // Reload details panel and contract list immediately
+                            // The analysis runs as a background job: follow it until it ends.
+                            let job = null;
+                            for (;;) {
+                                await new Promise(resolve => setTimeout(resolve, 4000));
+                                job = (await (await fetch(`/api/ai/bulk/${runData.job_id}/`)).json()).job;
+                                const item = job && job.items && job.items[0];
+                                const line = document.getElementById('dash-risk-progress');
+                                if (line && item && item.progress) {
+                                    const p = item.progress;
+                                    line.textContent = p.stage === 'clauses' ? `Đã phân tích ${p.done}/${p.total} điều khoản…`
+                                        : p.stage === 'whole_contract' ? 'Đang đánh giá rủi ro chung của toàn hợp đồng…' : 'Đang tìm văn bản pháp luật liên quan…';
+                                }
+                                if (!job || ['complete', 'partial', 'failed'].includes(job.status)) break;
+                            }
                             await showContractDetail(targetContractId);
                             await loadContracts(targetContractId);
-                            showToast("Phân tích AI hoàn tất! Form ký duyệt hợp đồng đã sẵn sàng bên dưới.", "success");
+                            if (job && job.status === 'complete') {
+                                showToast("Phân tích rủi ro hoàn tất.", "success");
+                            } else {
+                                showToast((job && job.items && job.items[0] && job.items[0].error) || "Chưa phân tích được hợp đồng.", "error");
+                            }
                         } else {
                             const errorMsg = runData.error || "Unknown error";
                             const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
@@ -611,12 +658,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     btn.disabled = true;
                     btn.style.opacity = '0.75';
-                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang trích xuất thủ công...';
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang trích xuất AI...';
                     
                     if (scannerLoader) {
                         scannerLoader.classList.add('active');
                         const scannerText = scannerLoader.querySelector('.scanner-text');
-                        if (scannerText) scannerText.innerHTML = "RUNNING RULE-BASED MANUAL EXTRACTION...";
+                        if (scannerText) scannerText.innerHTML = "AI ĐANG TRÍCH XUẤT ĐIỀU KHOẢN VÀ CÁC BÊN...";
                     }
                     
                     try {
@@ -631,54 +678,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         const resData = await res.json();
                         
                         if (resData.success) {
-                            showToast("Trích xuất thủ công hoàn tất!", "success");
-                            await showContractDetail(contractId, vId);
-                            await loadContracts(contractId);
-                        } else {
-                            showToast(resData.error || "Lỗi khi trích xuất thủ công.", "error");
-                        }
-                    } catch (err) {
-                        console.error(err);
-                        showToast("Lỗi kết nối khi trích xuất thủ công.", "error");
-                    } finally {
-                        if (scannerLoader) scannerLoader.classList.remove('active');
-                        btn.disabled = false;
-                        btn.style.opacity = '1';
-                        btn.innerHTML = origHTML;
-                    }
-                });
-            });
-
-            // Bind AI Extract in Dashboard
-            detailPanel.querySelectorAll('.btn-ai-extract-dash').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const contractId = btn.getAttribute('data-contract-id');
-                    const vId = btn.getAttribute('data-version-id') || null;
-                    const scannerLoader = document.getElementById('scanner-loader');
-                    const origHTML = btn.innerHTML;
-                    
-                    btn.disabled = true;
-                    btn.style.opacity = '0.75';
-                    btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles fa-spin"></i> Đang trích xuất AI...';
-                    
-                    if (scannerLoader) {
-                        scannerLoader.classList.add('active');
-                        const scannerText = scannerLoader.querySelector('.scanner-text');
-                        if (scannerText) scannerText.innerHTML = "AI SCANNING CLAUSES & EXTRACTING ENTITIES...";
-                    }
-                    
-                    try {
-                        const res = await fetch(`/api/ai/contracts/${contractId}/extract-entities/`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-CSRFToken': getCookie('csrftoken')
-                            },
-                            body: JSON.stringify({ version_id: vId, re_extract: true })
-                        });
-                        const resData = await res.json();
-                        
-                        if (resData.version_id || resData.clauses) {
                             showToast("Trích xuất AI hoàn tất!", "success");
                             await showContractDetail(contractId, vId);
                             await loadContracts(contractId);
@@ -751,6 +750,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Modal Interactions
     openUploadBtn.addEventListener('click', () => {
         uploadForm.reset();
+        pageImages.clear();
         fileDropText.innerHTML = 'Drag and drop file here, or click to choose file';
         uploadModal.classList.add('active');
     });
@@ -762,12 +762,14 @@ document.addEventListener('DOMContentLoaded', () => {
     closeUploadBtn.addEventListener('click', closeModal);
     cancelUploadBtn.addEventListener('click', closeModal);
 
-    // Drag and drop events
-    fileInput.addEventListener('change', () => {
-        if (fileInput.files.length > 0) {
-            fileDropText.innerHTML = `<strong>Selected file:</strong> ${fileInput.files[0].name}`;
-        }
-    });
+    // Several photos are one document: numbered thumbnails let the user set the page order.
+    const showSelection = (files) => {
+        if (!files.length) return;
+        fileDropText.innerHTML = files.length > 1
+            ? `<strong>${files.length} ảnh</strong> sẽ được ghép thành một văn bản theo thứ tự bên dưới`
+            : `<strong>Selected file:</strong> ${files[0].name}`;
+    };
+    const pageImages = window.PageImages.attach(fileInput, document.getElementById('page-image-list'), showSelection);
 
     fileDropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -783,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fileDropZone.classList.remove('dragover');
         if (e.dataTransfer.files.length > 0) {
             fileInput.files = e.dataTransfer.files;
-            fileDropText.innerHTML = `<strong>Selected file:</strong> ${fileInput.files[0].name}`;
+            pageImages.set(e.dataTransfer.files);
         }
     });
 
@@ -791,7 +793,12 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
-        const fileSelected = fileInput.files.length > 0;
+        const fileSelected = pageImages.files().length > 0;
+        const pageError = pageImages.error();
+        if (pageError) {
+            alert(pageError);
+            return;
+        }
         const rawContentVal = uploadForm.raw_content.value.trim();
         
         if (!fileSelected && !rawContentVal) {
@@ -799,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const formData = new FormData(uploadForm);
+        const formData = pageImages.appendTo(new FormData(uploadForm));
         
         // Show AI Scanner loader
         scannerLoader.classList.add('active');
@@ -815,18 +822,18 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const data = await res.json();
             
-            // Simulate analysis lag slightly to let the animation play beautifully
-            setTimeout(() => {
-                scannerLoader.classList.remove('active');
+            scannerLoader.classList.remove('active');
+            if (res.ok && data.success) {
                 closeModal();
-                
-                if (data.success) {
-                    loadContracts(data.contract_id);
-                    showContractDetail(data.contract_id);
-                } else {
-                    alert("Upload failed: " + (data.error || "Unknown error"));
+                if (new URLSearchParams(window.location.search).get('from') === 'a3') {
+                    window.location.assign(`/ai-extract/contracts/${encodeURIComponent(data.contract_id)}/`);
+                    return;
                 }
-            }, 2500); // 2.5s scan duration for maximum user experience
+                loadContracts(data.contract_id);
+                showContractDetail(data.contract_id);
+            } else {
+                alert("Upload failed: " + (data.error || "Unknown error"));
+            }
 
         } catch (err) {
             scannerLoader.classList.remove('active');
@@ -898,7 +905,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `
                     <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <strong style="color: #ffffff; font-size: 13.5px;">${r.risk_name}</strong>
+                            <strong style="color: #ffffff; font-size: 13.5px;">${escapeHtml(r.risk_name)}</strong>
                             <span class="risk-badge ${badgeClass}" style="font-size: 10px; padding: 2px 6px;">${r.severity_level}</span>
                         </div>
                         <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${r.description || 'No description provided.'}</p>
@@ -961,6 +968,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const initialContractId = urlParams.get('contract_id');
     const initialVersionId = urlParams.get('version_id');
+    if (urlParams.get('upload') === '1') {
+        openUploadBtn.click();
+        uploadForm.elements.contract_code.focus();
+    }
     loadContracts(initialContractId);
     if (initialContractId) {
         showContractDetail(initialContractId, initialVersionId);

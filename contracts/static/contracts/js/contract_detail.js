@@ -1,4 +1,49 @@
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+const ENTITY_LABELS = {PARTY_A: 'Bên A', PARTY_B: 'Bên B', PARTY: 'Bên ký kết', ENTITY: 'Thực thể'};
+
+// OCR can misread a digit silently, so numbers stay visibly tied to the original page.
+function ocrNumbersHTML(text) {
+    return String(text ?? '').split(/(\p{Nd}[\p{Nd}.,]*)/u).map((part, index) => index % 2
+        ? `<mark title="Số do OCR đọc, hãy đối chiếu với ảnh gốc" style="background: rgba(245,158,11,0.22); color: inherit; border-radius: 3px; padding: 0 2px;">${escapeHtml(part)}</mark>`
+        : escapeHtml(part)).join('');
+}
+
+function sourcePagesHTML(contractId, versionId, pages) {
+    if (!pages || !pages.length) return '';
+    return `<div class="clause-source-pages" style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Số tô vàng do OCR đọc, hãy đối chiếu ảnh gốc: ${pages.map(page =>
+        `<a href="/ai-extract/contracts/${encodeURIComponent(contractId)}/pages/${encodeURIComponent(page)}/?version_id=${encodeURIComponent(versionId)}" target="_blank" rel="noopener" style="color: #a5b4fc;">Trang ${escapeHtml(page)}</a>`).join(', ')}</div>`;
+}
+
+// The scan replaces the analysis tab, so its result is shown on a fresh page.
+// The badge states the analysis's own level (a single HIGH finding is a high-risk contract); the score only sets it
+// when no level was stored.
+function gaugeLevel(score, level) {
+    const key = ['HIGH', 'MEDIUM', 'LOW'].includes(level) ? level : score >= 80 ? 'HIGH' : score >= 50 ? 'MEDIUM' : 'LOW';
+    return {HIGH: ['#ef4444', 'High Risk', 'score-high'], MEDIUM: ['#f97316', 'Medium Risk', 'score-medium'],
+            LOW: ['#10b981', 'Low Risk', 'score-low']}[key];
+}
+
+function reloadWithToast(message, type) {
+    try {
+        sessionStorage.setItem('contract-detail-toast', JSON.stringify({message, type}));
+    } catch (err) {
+        console.error(err);
+    }
+    window.location.reload();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    try {
+        const pending = JSON.parse(sessionStorage.getItem('contract-detail-toast') || 'null');
+        sessionStorage.removeItem('contract-detail-toast');
+        if (pending) showToast(pending.message, pending.type);
+    } catch (err) {
+        console.error(err);
+    }
+
     // 0. Auto Initial AJAX Fetch on page load
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     const contractId = pathParts[1];
@@ -23,19 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 100);
         
         // Color the circle and update status text
-        if (score >= 80) {
-            gauge.style.stroke = '#ef4444';
-            gaugeStatus.innerHTML = 'High Risk';
-            gaugeStatus.className = 'gauge-status score-high';
-        } else if (score >= 50) {
-            gauge.style.stroke = '#f97316';
-            gaugeStatus.innerHTML = 'Medium Risk';
-            gaugeStatus.className = 'gauge-status score-medium';
-        } else {
-            gauge.style.stroke = '#10b981';
-            gaugeStatus.innerHTML = 'Low Risk';
-            gaugeStatus.className = 'gauge-status score-low';
-        }
+        const [color, label, cls] = gaugeLevel(score, gauge.dataset.level);
+        gauge.style.stroke = color;
+        gaugeStatus.innerHTML = label;
+        gaugeStatus.className = 'gauge-status ' + cls;
     }
 
     // 2. Expert Review Form Handling
@@ -59,13 +95,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 const data = await res.json();
                 if (data.success) {
-                    showToast("Submit expert review success!", "success");
-                    const contractId = window.location.pathname.split('/')[2];
-                    if (window.refreshContractDetailViaAjax) {
-                        window.refreshContractDetailViaAjax(contractId);
-                    } else {
-                        window.location.reload();
-                    }
+                    // The review section is drawn by the page, not by the data refresh: reload to show it.
+                    reloadWithToast("Đã gửi nhận xét.", "success");
                 } else {
                     alert("Error submitting review: " + (data.error || "Unknown error"));
                 }
@@ -109,11 +140,12 @@ document.addEventListener('DOMContentLoaded', () => {
             triggerButtons.forEach(b => {
                 b.disabled = true;
                 b.style.opacity = '0.7';
-                b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Analyzing...`;
+                b.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Đang phân tích…`;
             });
 
-            // 3. Render inline loading indicator strictly inside Risk Assessment section
-            if (analysisTab) {
+            // 3. A progress card inside the Risk Assessment section, updated from the background job
+            const showRiskProgress = text => {
+                if (!analysisTab) return;
                 analysisTab.innerHTML = `
                     <div class="risk-loading-card" style="text-align: center; color: var(--text-muted); padding: 50px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(99, 102, 241, 0.04); border: 1px dashed rgba(99, 102, 241, 0.3); border-radius: 16px; margin: 12px 0;">
                         <div style="position: relative; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;">
@@ -121,12 +153,23 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div style="position: absolute; top:0; left:0; width:64px; height:64px; border:3px solid rgba(99,102,241,0.15); border-top-color:#6366f1; border-radius:50%; animation:spin 1s linear infinite;"></div>
                         </div>
                         <div>
-                            <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">AI Engine is Scanning Contract Risks...</h3>
-                            <p style="max-width: 400px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;">Extracting agreement clauses, verifying compliance against legal rules, and calculating risk score...</p>
+                            <h3 style="color: #ffffff; font-family: 'Outfit', sans-serif; font-size: 17px; margin: 0 0 6px 0; font-weight: 700;">Đang phân tích rủi ro hợp đồng</h3>
+                            <p id="risk-progress-text" style="max-width: 420px; font-size: 13px; color: var(--text-secondary); margin: 0; line-height: 1.5;"></p>
                         </div>
-                    </div>
-                `;
-            }
+                    </div>`;
+                const line = document.getElementById('risk-progress-text');
+                if (line) line.textContent = text;
+            };
+            const stageText = item => {
+                const p = item && item.progress;
+                if (!item || item.status === 'waiting') return 'Đang chờ trong hàng đợi (mỗi lúc xử lý một tài liệu)…';
+                if (!p) return 'Đang chuẩn bị các điều khoản…';
+                if (p.stage === 'retrieving_law') return `Đang tìm văn bản pháp luật cho ${p.total} điều khoản…`;
+                if (p.stage === 'clauses') return `Đã phân tích ${p.done}/${p.total} điều khoản, đối chiếu với luật và các điều khoản liên quan…`;
+                if (p.stage === 'whole_contract') return 'Đang đánh giá rủi ro chung của toàn hợp đồng…';
+                return 'Đang phân tích…';
+            };
+            showRiskProgress('Đang gửi yêu cầu…');
 
             try {
                 const res = await fetch(`/api/contracts/${contractId}/analyze/`, {
@@ -136,30 +179,86 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
                 const data = await res.json();
-                
-                if (data.success) {
-                    showToast("AI analysis completed successfully!", "success");
-                    if (window.refreshContractDetailViaAjax) {
-                        window.refreshContractDetailViaAjax(contractId);
-                    }
-                } else {
-                    const errorMsg = data.error || "Unknown error";
-                    const isModelError = errorMsg.includes("503") || errorMsg.includes("communication failed") || errorMsg.includes("not loaded");
-                    if (isModelError) {
-                        showToast("Hệ thống chưa kết nối được với mô hình AI. Vui lòng tải mô hình hoặc kích hoạt GPU để tiến hành phân tích hợp đồng.", "warning");
-                    } else {
-                        showToast(errorMsg, "error");
-                    }
-                    if (window.refreshContractDetailViaAjax) {
-                        window.refreshContractDetailViaAjax(contractId);
-                    }
+                if (!data.success) {
+                    reloadWithToast(data.error || "Chưa phân tích được hợp đồng.", "error");
+                    return;
                 }
+                // Clause-by-clause analysis runs as a background job; follow it until it ends.
+                const follow = async () => {
+                    try {
+                        const job = (await (await fetch(`/api/ai/bulk/${data.job_id}/`)).json()).job;
+                        const item = job && job.items && job.items[0];
+                        if (job && job.status === 'complete') { reloadWithToast("Phân tích rủi ro hoàn tất.", "success"); return; }
+                        if (job && (job.status === 'failed' || job.status === 'partial')) {
+                            reloadWithToast((item && item.error) || job.error || "Chưa phân tích được hợp đồng.", "error");
+                            return;
+                        }
+                        showRiskProgress(stageText(item));
+                    } catch (err) {
+                        console.error(err);
+                    }
+                    setTimeout(follow, 4000);
+                };
+                follow();
             } catch (err) {
                 console.error(err);
-                showToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
+                reloadWithToast("Lỗi kết nối: Không thể gửi yêu cầu phân tích tới hệ thống.", "error");
             }
         });
     });
+
+    // 3b. Extraction progress: an uploaded document extracts in the background; the risk analysis opens when it is done.
+    const extraction = document.getElementById('extraction-progress');
+    if (extraction) {
+        const label = document.getElementById('extraction-progress-label');
+        const percent = document.getElementById('extraction-progress-percent');
+        const fill = document.getElementById('extraction-progress-fill');
+        const bar = document.getElementById('extraction-progress-bar');
+        const stages = {queued: 'Đang chờ trong hàng đợi', structure: 'Đang đọc trang', whole_document_entities: 'Đang trích thực thể',
+            pregraph_identity: 'Đang ghép thực thể', contract_clauses: 'Đang tách điều khoản', heading_hierarchy: 'Đang dựng cây mục',
+            document_references: 'Đang tìm dẫn chiếu trong hợp đồng', related_passages: 'Đang nối đoạn liên quan',
+            dense_index: 'Đang đánh chỉ mục vector', neo4j_final: 'Đang lưu đồ thị', neo4j_entities: 'Đang lưu đồ thị',
+            retrieval_index: 'Đang hoàn tất chỉ mục tìm kiếm'};
+        const setButtons = ready => triggerButtons.forEach(b => {
+            if (b.innerHTML.includes('fa-spin')) return;
+            b.disabled = !ready;
+            b.style.opacity = ready ? '1' : '.55';
+            b.title = ready ? '' : 'Chờ trích xuất xong';
+        });
+        const poll = async () => {
+            let again = true;
+            try {
+                const state = await (await fetch(`/api/ai/contracts/${extraction.dataset.contractId}/extraction-status/`)).json();
+                const p = state.progress || {};
+                const value = Math.max(0, Math.min(100, p.percent || 0));
+                fill.style.width = `${value}%`;
+                bar.setAttribute('aria-valuenow', String(value));
+                percent.textContent = `${value}%`;
+                if (state.status === 'COMPLETED') {
+                    label.textContent = 'Đã trích xuất xong. Có thể phân tích rủi ro hợp đồng.';
+                    setButtons(true);
+                    again = false;
+                } else if ((state.status === 'FAILED' || state.status === 'PARTIAL') && !state.queued) {
+                    label.textContent = `Trích xuất chưa hoàn tất: ${state.error || state.status}. Hãy bấm Trích xuất AI ở tab Clauses để chạy lại.`;
+                    setButtons(false);
+                    again = false;
+                } else if (state.status === 'NOT_STARTED') {
+                    label.textContent = 'Chưa trích xuất. Tải phiên bản mới lên hoặc bấm Trích xuất AI ở tab Clauses.';
+                    percent.textContent = '';
+                    setButtons(false);
+                    again = false;
+                } else {
+                    const name = stages[p.stage] || 'Đang trích xuất';
+                    label.textContent = p.stage === 'structure' && p.total_pages ? `${name} ${p.page || 0}/${p.total_pages}` : `${name}…`;
+                    setButtons(false);
+                }
+            } catch (err) {
+                console.error(err);
+            }
+            if (again) setTimeout(poll, 4000);
+        };
+        poll();
+    }
 
     // 4. Push to Workflow button
     const btnPushWorkflow = document.getElementById('btn-push-workflow');
@@ -262,9 +361,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <span style="font-size:12px;font-weight:600;background:${statusColor[wf.status]||'#6366f1'}22;color:${statusColor[wf.status]||'#6366f1'};padding:4px 10px;border-radius:20px;">${wf.status}</span>
-                            <span style="font-size:12px;color:var(--text-muted);">${wf.workflow_name}</span>
+                            <span style="font-size:12px;color:var(--text-muted);">${escapeHtml(wf.workflow_name)}</span>
                         </div>
-                        <a href="http://localhost:8003/board/${wf.workflow_id}/" target="_blank" style="font-size:11.5px;color:#a5b4fc;text-decoration:none;font-weight:600;background:rgba(99,102,241,0.12);padding:4px 10px;border-radius:6px;border:1px solid rgba(99,102,241,0.25);display:inline-flex;align-items:center;gap:4px;" title="Open standalone Workflow Detail page">
+                        <a href="/board/${wf.workflow_id}/" target="_blank" style="font-size:11.5px;color:#a5b4fc;text-decoration:none;font-weight:600;background:rgba(99,102,241,0.12);padding:4px 10px;border-radius:6px;border:1px solid rgba(99,102,241,0.25);display:inline-flex;align-items:center;gap:4px;" title="Open standalone Workflow Detail page">
                             <i class="fa-solid fa-route"></i> Workflow Detail <i class="fa-solid fa-up-right-from-square" style="font-size:10px;"></i>
                         </a>
                     </div>
@@ -273,7 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.07);">
                             <i class="fa-solid ${stepStatusIcon[st.status]||'fa-clock'}" style="color:${stepStatusColor[st.status]||'#6b7280'};font-size:15px;"></i>
                             <div>
-                                <div style="font-size:13px;font-weight:600;color:#fff;">${st.step_order}. ${st.step_name}</div>
+                                <div style="font-size:13px;font-weight:600;color:#fff;">${escapeHtml(st.step_order)}. ${escapeHtml(st.step_name)}</div>
                                 <div style="font-size:11.5px;color:var(--text-muted);">${st.status}${st.completed_at ? ' · ' + new Date(st.completed_at).toLocaleDateString('vi-VN') : ''}</div>
                             </div>
                         </div>`).join('')}
@@ -317,6 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const closeModal = () => {
             uploadModal.classList.remove('active');
             document.getElementById('upload-version-form').reset();
+            if (typeof versionPages !== "undefined" && versionPages) versionPages.clear();
             const selectedFile = document.getElementById('selected-file-name');
             if (selectedFile) {
                 selectedFile.style.display = 'none';
@@ -366,16 +466,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.getElementById('version_file_input');
     const selectedFileName = document.getElementById('selected-file-name');
     
+    // Several photos are one document: numbered thumbnails let the user set the page order.
+    const showSelection = (files) => {
+        if (!selectedFileName) return;
+        selectedFileName.style.display = files.length ? 'block' : 'none';
+        selectedFileName.innerHTML = !files.length ? '' : files.length > 1
+            ? `<i class="fa-solid fa-images"></i> ${files.length} ảnh sẽ được ghép thành một văn bản theo thứ tự bên dưới`
+            : `<i class="fa-solid fa-file-circle-check"></i> Selected: ${files[0].name}`;
+    };
+    const versionPages = fileInput && window.PageImages
+        ? window.PageImages.attach(fileInput, document.getElementById('version-page-image-list'), showSelection) : null;
+
     if (fileZone && fileInput) {
-        fileInput.addEventListener('change', () => {
-            if (fileInput.files.length > 0) {
-                selectedFileName.style.display = 'block';
-                selectedFileName.innerHTML = `<i class="fa-solid fa-file-circle-check"></i> Selected: ${fileInput.files[0].name}`;
-            } else {
-                selectedFileName.style.display = 'none';
-                selectedFileName.innerHTML = '';
-            }
-        });
         
         // Drag and drop events
         ['dragenter', 'dragover'].forEach(eventName => {
@@ -399,8 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const files = dt.files;
             if (files.length > 0) {
                 fileInput.files = files;
-                selectedFileName.style.display = 'block';
-                selectedFileName.innerHTML = `<i class="fa-solid fa-file-circle-check"></i> Selected: ${files[0].name}`;
+                if (versionPages) versionPages.set(files);
             }
         });
     }
@@ -423,7 +524,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const formData = new FormData(uploadForm);
             if (isFileTab) {
                 formData.delete('raw_content');
-                if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+                if (versionPages) {
+                    const pageError = versionPages.error();
+                    if (pageError) {
+                        showToast(pageError, "warning");
+                        return;
+                    }
+                    versionPages.appendTo(formData);
+                }
+                if (!formData.getAll('file').some(f => f && f.size !== undefined && f.name)) {
                     showToast("Vui lòng chọn một tập tin hợp đồng (.pdf, .docx, .txt).", "warning");
                     return;
                 }
@@ -505,8 +614,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Manual / AI Extraction API Handlers
+    const scannerLoader = document.getElementById('scanner-loader');
     const btnManualExtract = document.getElementById('btn-manual-extract');
-    const btnAiExtract = document.getElementById('btn-ai-extract');
     const vSelect = document.getElementById('version-select');
     
     if (btnManualExtract) {
@@ -517,7 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (scannerLoader) {
                 scannerLoader.classList.add('active');
                 const scannerText = scannerLoader.querySelector('.scanner-text');
-                if (scannerText) scannerText.innerHTML = "RUNNING MANUAL EXTRACTION...";
+                if (scannerText) scannerText.innerHTML = "AI ĐANG TRÍCH XUẤT ĐIỀU KHOẢN VÀ CÁC BÊN...";
             }
             
             try {
@@ -534,47 +643,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                      if (scannerLoader) scannerLoader.classList.remove('active');
                      if (data.success) {
-                         showToast("Trích xuất thủ công hoàn tất!", "success");
-                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
-                     } else {
-                         showToast(data.error || "Lỗi khi trích xuất thủ công.", "error");
-                     }
-                }, 1000);
-            } catch (err) {
-                if (scannerLoader) scannerLoader.classList.remove('active');
-                console.error(err);
-                showToast("Lỗi kết nối khi trích xuất thủ công.", "error");
-            }
-        });
-    }
-    
-    if (btnAiExtract) {
-        btnAiExtract.addEventListener('click', async () => {
-            const contractId = btnAiExtract.dataset.contractId;
-            const versionId = vSelect ? vSelect.value : null;
-            
-            if (scannerLoader) {
-                scannerLoader.classList.add('active');
-                const scannerText = scannerLoader.querySelector('.scanner-text');
-                if (scannerText) scannerText.innerHTML = "AI SCANNING CLAUSES & EXTRACTING ENTITIES...";
-            }
-            
-            try {
-                const res = await fetch(`/api/ai/contracts/${contractId}/extract-entities/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({ version_id: versionId, re_extract: true })
-                });
-                const data = await res.json();
-                
-                setTimeout(() => {
-                     if (scannerLoader) scannerLoader.classList.remove('active');
-                     if (data.version_id) {
-                         showToast("Trích xuất AI hoàn tất!", "success");
-                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
+                         // The extraction runs in the background; the page's progress bar follows it.
+                         reloadWithToast("Đã bắt đầu trích xuất lại. Theo dõi thanh tiến độ.", "success");
                      } else {
                          showToast(data.error || "Lỗi khi trích xuất AI.", "error");
                      }
@@ -586,7 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-
+    
     // 9. Generate AI Summary click handler
     const btnGenerateSummary = document.getElementById('btn-generate-summary');
     if (btnGenerateSummary) {
@@ -836,7 +906,7 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
                 </div>
                 ${contract.active_version_change_summary ? `
                 <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.4; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 8px; padding-top: 8px;">
-                    <strong style="color: var(--accent-primary);">Change Log:</strong> ${contract.active_version_change_summary}
+                    <strong style="color: var(--accent-primary);">Change Log:</strong> ${escapeHtml(contract.active_version_change_summary)}
                 </div>` : ''}
             `;
         }
@@ -861,16 +931,10 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
             const circumference = 2 * Math.PI * r;
             const offset = circumference - (score / 100) * circumference;
             gauge.style.strokeDashoffset = offset;
-            if (score >= 80) {
-                gauge.style.stroke = '#ef4444';
-                if (gaugeStatus) { gaugeStatus.innerHTML = 'High Risk'; gaugeStatus.className = 'gauge-status score-high'; }
-            } else if (score >= 50) {
-                gauge.style.stroke = '#f97316';
-                if (gaugeStatus) { gaugeStatus.innerHTML = 'Medium Risk'; gaugeStatus.className = 'gauge-status score-medium'; }
-            } else {
-                gauge.style.stroke = '#10b981';
-                if (gaugeStatus) { gaugeStatus.innerHTML = 'Low Risk'; gaugeStatus.className = 'gauge-status score-low'; }
-            }
+            gauge.dataset.level = contract.analysis.risk_level || '';
+            const [color, label, cls] = gaugeLevel(score, contract.analysis.risk_level);
+            gauge.style.stroke = color;
+            if (gaugeStatus) { gaugeStatus.innerHTML = label; gaugeStatus.className = 'gauge-status ' + cls; }
         }
 
         // 7. Update AI Summary Box
@@ -883,33 +947,34 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
         const findingsList = document.querySelector('.findings-list');
         if (findingsList) {
             if (contract.findings && contract.findings.length > 0) {
-                findingsList.innerHTML = contract.findings.map(f => `
+                findingsList.innerHTML = contract.findings.map((f, i, all) => `
+                    ${f.is_suggestion && !(i > 0 && all[i - 1].is_suggestion) ? '<h5 class="section-title" style="margin-top: 18px; font-size: 14px;"><i class="fa-solid fa-pen-to-square"></i> Gợi ý soạn thảo <span style="font-weight: 400; color: var(--text-muted);">(không có điều luật làm căn cứ, không tính vào điểm rủi ro)</span></h5>' : ''}
                     <div class="finding-item">
                         <div class="finding-header" onclick="toggleFinding(this)">
                             <div class="finding-left">
-                                <span class="risk-badge badge-${(f.risk_level || '').toLowerCase()}">${f.risk_level}</span>
-                                <span>${f.risk_name}</span>
+                                ${f.is_suggestion ? '<span class="risk-badge badge-low">GỢI Ý</span>' : `<span class="risk-badge badge-${escapeHtml((f.risk_level || '').toLowerCase())}">${escapeHtml(f.risk_level)}</span>`}
+                                <span>${escapeHtml(f.risk_name)}</span>
                             </div>
                             <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
                         </div>
                         <div class="finding-body" style="display: none;">
                             <div class="finding-block">
-                                <div class="block-label">Violated Clause</div>
-                                <div class="block-text" style="font-weight: 500; color: #ffffff;">${f.clause_title}</div>
+                                <div class="block-label">Điều khoản liên quan</div>
+                                <div class="block-text" style="font-weight: 500; color: #ffffff;">${escapeHtml(f.clause_title || 'Toàn bộ hợp đồng')}</div>
                             </div>
                             <div class="finding-block">
                                 <div class="block-label">Risk Explanation</div>
-                                <div class="block-text">${f.explanation}</div>
+                                <div class="block-text">${escapeHtml(f.explanation)}</div>
                             </div>
                             ${f.disadvantaged_party ? `
                             <div class="finding-block" style="margin-top: 8px;">
                                 <div class="block-label" style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Bên gặp bất lợi / Disadvantaged Party</div>
-                                <div class="block-text" style="font-weight: 600; color: #f87171;">${f.disadvantaged_party}</div>
+                                <div class="block-text" style="font-weight: 600; color: #f87171;">${escapeHtml(f.disadvantaged_party)}</div>
                             </div>` : ''}
                             ${f.recommendation ? `
                             <div class="rec-box">
                                 <div class="block-label" style="color: var(--risk-low);"><i class="fa-solid fa-lightbulb"></i> AI Recommendation</div>
-                                <div class="block-text">${f.recommendation}</div>
+                                <div class="block-text">${escapeHtml(f.recommendation)}</div>
                             </div>` : ''}
                         </div>
                     </div>
@@ -921,19 +986,21 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
 
         // 9. Update Clauses List
         const clausesList = document.querySelector('.clauses-list');
+        // The parties box is the editable form the user fills; it is not redrawn from the refreshed data.
         if (clausesList) {
             if (contract.clauses && contract.clauses.length > 0) {
                 clausesList.innerHTML = contract.clauses.map(cl => `
                     <div class="clause-item-container" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; overflow: hidden; transition: all 0.2s;">
                         <div class="clause-item-header" style="padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;" onclick="toggleClause(this)">
-                            <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 14px; color: #ffffff;">${cl.title}</span>
+                            <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 14px; color: #ffffff;">${escapeHtml(cl.title)}</span>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span style="font-size: 11px; background: rgba(99,102,241,0.15); color: #818cf8; padding: 2px 8px; border-radius: 12px;">${cl.entities ? cl.entities.length : 0} entities</span>
                                 <i class="fa-solid fa-chevron-down" style="color: var(--text-muted); font-size: 12px; transition: transform 0.2s;"></i>
                             </div>
                         </div>
                         <div class="clause-item-body" style="display: none; padding: 16px; border-top: 1px solid rgba(255,255,255,0.04); background: rgba(0,0,0,0.15);">
-                            <p style="font-size: 13px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; margin-top: 0; margin-bottom: 16px;">${cl.content}</p>
+                            <p style="font-size: 13px; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; margin-top: 0; margin-bottom: 16px;">${ocrNumbersHTML(cl.content)}</p>
+                            ${sourcePagesHTML(contract.id, contract.active_version_id, cl.source_pages)}
                             ${cl.entities && cl.entities.length > 0 ? `
                             <div style="border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 12px;">
                                 <h5 style="margin: 0 0 10px 0; font-family: 'Outfit', sans-serif; font-size: 11px; text-transform: uppercase; color: var(--accent-primary); letter-spacing: 0.5px;">Extracted Entities</h5>
@@ -941,14 +1008,14 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
                                     ${cl.entities.map(ee => `
                                     <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.04);">
                                         <div style="display: flex; align-items: center; gap: 8px;">
-                                            <span class="entity-type-badge entity-type-${(ee.entity_type || '').toLowerCase()}">${ee.entity_type}</span>
-                                            <span style="font-size: 12.5px; color: #ffffff; font-weight: 500;">${ee.entity_value}</span>
+                                            <span class="entity-type-badge entity-type-${escapeHtml((ee.entity_type || '').toLowerCase())}">${escapeHtml(ENTITY_LABELS[ee.entity_type] || ee.entity_type)}</span>
+                                            <span style="font-size: 12.5px; color: #ffffff; font-weight: 500;">${escapeHtml(ee.entity_value)}</span>
                                         </div>
                                         <span style="font-size: 11px; color: var(--text-muted);">Conf: ${ee.confidence_score ? Number(ee.confidence_score).toFixed(2) : '1.00'}</span>
                                     </div>
                                     `).join('')}
                                 </div>
-                            </div>` : '<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;">No entities extracted for this clause.</p>'}
+                            </div>` : '<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0;">Thực thể khác được lưu trong Neo4j.</p>'}
                         </div>
                     </div>
                 `).join('');
@@ -981,3 +1048,47 @@ function getCookie(name) {
     }
     return cookieValue;
 }
+
+// Parties the user enters (the AI does not guess them) and tags from the administrator's list.
+document.addEventListener('DOMContentLoaded', () => {
+    const box = document.getElementById('contract-parties');
+    if (!box) return;
+    const rows = document.getElementById('party-rows');
+    const status = document.getElementById('party-status');
+    const contractId = box.dataset.contractId;
+    const newRow = () => {
+        const row = document.createElement('div');
+        row.className = 'party-row';
+        row.style.cssText = 'display: grid; grid-template-columns: 110px 1.6fr 1fr 1fr 1fr 32px; gap: 6px;';
+        row.innerHTML = '<select class="form-control" name="party_type" aria-label="Vai trò"><option>Bên A</option><option>Bên B</option><option>Bên khác</option></select>' +
+            '<input class="form-control" name="party_name" placeholder="Tên tổ chức / cá nhân" aria-label="Tên">' +
+            '<input class="form-control" name="tax_code" placeholder="Mã số thuế" aria-label="Mã số thuế">' +
+            '<input class="form-control" name="email" placeholder="Email" aria-label="Email">' +
+            '<input class="form-control" name="phone" placeholder="Điện thoại" aria-label="Điện thoại">' +
+            '<button type="button" class="btn btn-secondary party-remove" aria-label="Xóa bên" style="padding: 0;">×</button>';
+        const taken = [...rows.querySelectorAll('select[name=party_type]')].map(s => s.value);
+        row.querySelector('select').value = !taken.includes('Bên A') ? 'Bên A' : !taken.includes('Bên B') ? 'Bên B' : 'Bên khác';
+        rows.appendChild(row);
+    };
+    if (!rows.children.length) { newRow(); newRow(); }
+    document.getElementById('party-add').addEventListener('click', newRow);
+    rows.addEventListener('click', event => {
+        if (event.target.classList.contains('party-remove')) event.target.closest('.party-row').remove();
+    });
+    document.getElementById('party-save').addEventListener('click', async () => {
+        const parties = [...rows.querySelectorAll('.party-row')].map(row => Object.fromEntries(
+            [...row.querySelectorAll('select, input')].map(field => [field.name, field.value.trim()]))).filter(p => p.party_name);
+        const tagIds = [...document.querySelectorAll('.tag-pick:checked')].map(box => Number(box.value));
+        status.textContent = 'Đang lưu…';
+        try {
+            const send = (path, body) => fetch(`/api/contracts/${contractId}/${path}/`, {method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')}, body: JSON.stringify(body)}).then(r => r.json());
+            const [saved, tagged] = await Promise.all([send('parties', {parties}), send('tags', {tag_ids: tagIds})]);
+            if (!saved.success) throw new Error(saved.error || 'Không lưu được các bên.');
+            if (!tagged.success) throw new Error(tagged.error || 'Không lưu được tag.');
+            status.textContent = `Đã lưu ${saved.parties.length} bên và ${tagIds.length} tag.`;
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+});

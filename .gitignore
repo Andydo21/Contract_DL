@@ -11,6 +11,7 @@ env/
 
 # Django
 db.sqlite3
+NewIdea/backups/
 media/
 staticfiles/
 .env
@@ -20,13 +21,81 @@ staticfiles/
 Thumbs.db
 
 # Logs
+*.log
+NewIdea/test_out.txt
+NewIdea/neo4j_storage/
+NewIdea/qdrant_storage/
+legacy/a3/qdrant_storage/
 explorer_logs/
+fabric/crypto-config/
+fabric/chaincode/package_id.txt
+fabric/contracts-channel.block
+fabric/gateway/node_modules/
+fabric/contract_verify_v2.tar.gz
 
 # Temporary and Scratch Directories
 scratch/
+.wsl-data/
 scripts/
 *.docx
 ~$*.docx
 *.ipynb
 .ipynb_checkpoints/
 
+# Generated reports, recordings and retired standalone prototypes
+output/
+/PlanAProject/
+/PlanA/
+/PlanB/
+/DiffusionAD/
+/denso_demo/
+/chatter/
+
+
+legacy/a3/retired_processing_code.zip
+
+legacy/a3/retired_code_manifest.json
+
+# Large data / media files (do not push)
+*.pdf
+*.zip
+*.sqlite
+*.vhdx
+*.pack
+*.png
+*.jpg
+*.jpeg
+*.docx
+*.xlsx
+*.jsonl
+*.json
+*.csv
+*.tsv
+*.parquet
+*.pkl
+*.pickle
+*.h5
+*.bin
+*.exe
+*.dll
+*.so
+*.pyd
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# Research / evaluation data
+evaluation/benchmarks/corpus20/pdfs/
+evaluation/benchmarks/corpus20/*.json
+evaluation/benchmarks/corpus20/*.png
+research_evaluation_20261030/frozen_20261030/
+research_evaluation_20261030/mainflow_20261030/
+research_evaluation_20261030/KET_QUA_20261030/
+research_evaluation_20261030/runs/
+research_evaluation_20261030/report_interim_1710/
+training/risk_skill/data/
+documents/
+media/
+legacy/a3/qdrant_storage/
+ai_extract/demo/

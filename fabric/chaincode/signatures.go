@@ -17,21 +17,7 @@ type SignatureRecord struct {
 }
 
 func (s *SmartContract) StoreSignature(ctx contractapi.TransactionContextInterface, signatureID string, stepID string, userID string, certificateSerial string, signatureHash string, timestamp string) error {
-	record := SignatureRecord{
-		SignatureID:       signatureID,
-		StepID:            stepID,
-		UserID:            userID,
-		CertificateSerial: certificateSerial,
-		SignatureHash:     signatureHash,
-		Timestamp:         timestamp,
-	}
-
-	recordBytes, err := json.Marshal(record)
-	if err != nil {
-		return err
-	}
-
-	return ctx.GetStub().PutState("SIGNATURE_"+signatureID, recordBytes)
+	return fmt.Errorf("legacy unsigned writes disabled; use CommitEnterpriseOperation")
 }
 
 func (s *SmartContract) GetSignature(ctx contractapi.TransactionContextInterface, signatureID string) (*SignatureRecord, error) {

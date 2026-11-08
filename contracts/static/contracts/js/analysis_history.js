@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 findingsHTML = a.findings_preview.map(f => {
                     const cls = (f.risk_level === 'HIGH' || f.risk_level === 'CRITICAL') ? 'finding-high'
                         : f.risk_level === 'MEDIUM' ? 'finding-medium' : 'finding-low';
-                    return `<span class="finding-tag ${cls}">${f.risk_name}</span>`;
+                    return `<span class="finding-tag ${cls}">${escapeHtml(f.risk_name)}</span>`;
                 }).join('');
 
                 const extra = a.findings_count - a.findings_preview.length;
@@ -114,10 +114,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="analysis-card">
                     <div class="score-circle ${scoreClass}">${a.overall_score}%</div>
                     <div class="card-body">
-                        <div class="card-title">${a.contract_title}</div>
+                        <div class="card-title">${escapeHtml(a.contract_title)}</div>
                         <div class="card-meta">
                             <span class="meta-pill"><i class="fa-solid fa-barcode"></i>${a.contract_code}</span>
-                            <span class="meta-pill"><i class="fa-solid fa-microchip"></i>${a.model_name}</span>
+                            <span class="meta-pill"><i class="fa-solid fa-microchip"></i>${escapeHtml(a.model_name)}</span>
                             <span class="meta-pill"><i class="fa-solid fa-flag"></i>${a.findings_count} finding${a.findings_count !== 1 ? 's' : ''}</span>
                         </div>
                         <div class="findings-row">${findingsHTML}</div>
@@ -158,3 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAnalyses();
 });
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}

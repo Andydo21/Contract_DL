@@ -1,3 +1,4 @@
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 
 class ContractSummary(models.Model):
@@ -106,6 +107,7 @@ class LayoutExtractionRun(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="RUNNING")
     total_pages = models.PositiveIntegerField(default=0)
     total_blocks = models.PositiveIntegerField(default=0)
+    structure = models.JSONField(default=dict, blank=True)
     dense_index_status = models.CharField(
         max_length=20, choices=INDEX_STATUS_CHOICES, default="PENDING"
     )
@@ -125,6 +127,53 @@ class LayoutExtractionRun(models.Model):
 
     def __str__(self):
         return f"{self.version} - {self.pipeline_name} ({self.status})"
+
+
+class RetrievalSnapshot(models.Model):
+    """Rebuildable A2 index, never the authoritative source or access policy."""
+    version = models.OneToOneField('contracts.ContractVersion', on_delete=models.CASCADE, related_name='retrieval_snapshot')
+    run = models.ForeignKey(LayoutExtractionRun, null=True, on_delete=models.SET_NULL)
+    dirty = models.BooleanField(default=True)
+    schema = models.PositiveIntegerField(default=1)
+    metadata_key = models.TextField(default='')
+    records = models.JSONField(default=list)
+    tree = models.JSONField(default=dict)
+    graph_scope = models.JSONField(default=dict)
+    passage_count = models.PositiveIntegerField(default=0)
+    token_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class RetrievalPassage(models.Model):
+    snapshot = models.ForeignKey(RetrievalSnapshot, on_delete=models.CASCADE, related_name='passages')
+    record = models.JSONField(default=dict)
+    token_counts = models.JSONField(default=dict)
+    length = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [GinIndex(fields=["token_counts"], name="retrieval_token_gin")]
+
+
+class LegalDocument(models.Model):
+    """Marks a stored document as a legal text; a document without this row is a contract.
+    The text goes through the normal extraction. Public law belongs to a system company and
+    is readable by all accounts; any other marked document stays with its own company."""
+    FULLY_IN_FORCE, PARTLY_REPEALED, NOT_YET_IN_FORCE = 'Còn hiệu lực', 'Hết hiệu lực một phần', 'Chưa có hiệu lực'
+    IN_FORCE = (FULLY_IN_FORCE, PARTLY_REPEALED)
+    TRANSLATION = 'Bản dịch văn bản'
+    UPLOADED, UPLOADED_TYPE = 'Do người dùng tải lên', 'Tài liệu tải lên'
+    contract = models.OneToOneField('contracts.Contract', on_delete=models.CASCADE, related_name='legal_document')
+    public = models.BooleanField(default=False)
+    source_id = models.CharField(max_length=64, unique=True)
+    number = models.CharField(max_length=120, db_index=True)
+    title = models.TextField()
+    doc_type = models.CharField(max_length=60)
+    status = models.CharField(max_length=60, db_index=True)
+    authority = models.TextField(blank=True, default='')
+    issued_on = models.DateField(null=True)
+    effective_on = models.DateField(null=True)
+    amended_by = models.JSONField(default=list)
+    text_source = models.CharField(max_length=120, blank=True, default='')
 
 
 class LayoutExtractionPage(models.Model):
@@ -151,6 +200,7 @@ class LayoutExtractionBlock(models.Model):
     layout_type = models.CharField(max_length=50, default="paragraph")
     text = models.TextField(blank=True)
     bbox = models.JSONField(default=list)
+    structure_metadata = models.JSONField(default=dict, blank=True)
     confidence = models.DecimalField(max_digits=5, decimal_places=4, default=0)
 
     class Meta:
