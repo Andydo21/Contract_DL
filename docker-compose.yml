@@ -18,7 +18,7 @@ services:
       retries: 20
     networks:
       - riskdl-net
-  web:
+  web: &web
     build:
       context: .
       dockerfile: Dockerfile
@@ -37,6 +37,10 @@ services:
       - DB_SSLMODE=disable
       - WORKFLOW_SERVICE_URL=http://workflow-service:8000
       - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
+      - AI_SUMMARY_URL=http://ai-summary:8000
+      # 1 = summarize every uploaded file in the background; off by default on the shared model.
+      - AI_SUMMARY_AUTO=${AI_SUMMARY_AUTO:-0}
+      - AI_SUMMARY_AUTO_PARALLEL=${AI_SUMMARY_AUTO_PARALLEL:-1}
       # Unified Kaggle/ngrok endpoint: summarize + entities + clauses.
       - KAGGLE_QWEN_SERVICE_URL=${KAGGLE_QWEN_SERVICE_URL}
       - COLPALI_BASE_URL=${COLPALI_BASE_URL:-}
@@ -53,6 +57,20 @@ services:
     networks:
       - riskdl-net
 
+  # Picks up text without a current summary (only while AI_SUMMARY_AUTO=1) and retries runs that failed offline.
+  summary-worker:
+    <<: *web
+    container_name: riskdl_summary_worker
+    command: python manage.py retry_summaries --watch
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      web:
+        condition: service_started
+      ai-summary:
+        condition: service_started
+
   ai-summary:
     build:
       context: ./ai_summary
@@ -61,14 +79,19 @@ services:
     restart: always
     environment:
       - SECRET_KEY=${SECRET_KEY}
-      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
+      # Blank SUMMARY_* = the shared gateway (VLLM_BASE_URL / QWEN_MODEL_ID) that every other service uses.
+      - SUMMARY_LLM_URL=${SUMMARY_LLM_URL:-}
+      - SUMMARY_MODEL_ID=${SUMMARY_MODEL_ID:-}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-}
       - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      - SUMMARY_PARALLEL=${SUMMARY_PARALLEL:-2}
+      - SUMMARY_CACHE_DIR=/cache
     ports:
       - "8004:8000"
     volumes:
       - ./ai_summary:/app
       - ./shared:/app/shared
+      - ai_summary_cache:/cache
     networks:
       - riskdl-net
 
@@ -305,3 +328,4 @@ networks:
 
 volumes:
   contract-postgres-data:
+  ai_summary_cache:

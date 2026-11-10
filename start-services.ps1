@@ -18,9 +18,9 @@ for ($taskAttempt = 0; $taskAttempt -lt 30; $taskAttempt++) {
     Start-Sleep -Seconds 2
 }
 if ($taskPgHealth -ne 'healthy') { throw 'Local PostgreSQL did not become healthy.' }
-$taskAi = @('web','qdrant','knowledge-worker')
+$taskAi = @('web','qdrant','knowledge-worker','ai-summary')
 $taskLedger = @('workflow-service','blockchain-service','orderer.example.com','peer0.org1.example.com','fabric-chaincode','fabric-gateway','ledger-worker')
-$taskLegacy = @('ai-service','ai-summary','gateway')
+$taskLegacy = @('ai-service','gateway')
 $taskManaged = $taskAi + $taskLedger + $taskLegacy
 $taskWanted = switch ($Mode) {
     'Ai' { $taskAi }

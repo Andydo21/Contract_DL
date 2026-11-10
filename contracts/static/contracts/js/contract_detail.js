@@ -522,6 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isFileTab = activeTabPane && activeTabPane.id === 'file-tab';
             
             const formData = new FormData(uploadForm);
+            // An unchecked box is not sent at all; say no explicitly so the server default does not apply.
+            formData.set('summarize', uploadForm.summarize && uploadForm.summarize.checked ? 'true' : 'false');
             if (isFileTab) {
                 formData.delete('raw_content');
                 if (versionPages) {
@@ -656,48 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    
-    // 9. Generate AI Summary click handler
-    const btnGenerateSummary = document.getElementById('btn-generate-summary');
-    if (btnGenerateSummary) {
-        btnGenerateSummary.addEventListener('click', async () => {
-            const contractId = btnGenerateSummary.dataset.contractId;
-            const versionSelect = document.getElementById('version-select');
-            const versionId = versionSelect ? versionSelect.value : null;
-            
-            if (scannerLoader) {
-                scannerLoader.classList.add('active');
-                const scannerText = scannerLoader.querySelector('.scanner-text');
-                if (scannerText) scannerText.innerHTML = "GENERATING AI EXECUTIVE SUMMARY...";
-            }
-            
-            try {
-                const res = await fetch(`/api/ai/contracts/${contractId}/summarize/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({ version_id: versionId })
-                });
-                const data = await res.json();
-                
-                setTimeout(() => {
-                     if (scannerLoader) scannerLoader.classList.remove('active');
-                     if (data.summary) {
-                         showToast("Tóm tắt AI hoàn tất!", "success");
-                         if (window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
-                     } else {
-                         showToast(data.error || "Lỗi khi tạo tóm tắt AI.", "error");
-                     }
-                }, 1000);
-            } catch (err) {
-                if (scannerLoader) scannerLoader.classList.remove('active');
-                console.error(err);
-                showToast("Lỗi kết nối khi tạo tóm tắt AI.", "error");
-            }
-        });
-    }
+
 });
 
 // Toggle folding/unfolding of clauses
@@ -1024,11 +985,8 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
             }
         }
 
-        // 10. Update Executive Summary Tab Text
-        const aiSummaryText = document.getElementById('ai-summary-text');
-        if (aiSummaryText && contract.ai_summary) {
-            aiSummaryText.textContent = contract.ai_summary.summary || '';
-        }
+        // 10. Show the summary of the version now on screen
+        if (window.summaryPanel) window.summaryPanel.load(contract.active_version_id);
     } catch (err) {
         console.error("AJAX contract refresh error:", err);
     }

@@ -1,0 +1,93 @@
+# ai_summary
+
+Standalone contract summary service. The source is the contract text in the database (`ContractContext` rows
+with `context_type='raw_text'`, one per page or manual entry); a version with no text yet falls back to its uploaded
+file, which this service reads itself. Either way, extraction never has to run first.
+
+Flow: the text or a file arrives → `manage.py retry_summaries --watch` (service `summary-worker`) picks up text
+without a summary, and an upload starts a background summary right away → the result is stored in `ContractSummary`
+(text, `result` JSON, run state). Runs that fail while the model is offline are retried when it returns.
+A summary is redone when its text changes (`source_fingerprint`) or when the prompt or model changes
+(`analysis_version`). The worker waits until the text has been unchanged for `AI_SUMMARY_SETTLE_SECONDS` (60), since
+pages arrive one at a time, and runs `AI_SUMMARY_AUTO_PARALLEL` (2) at once. Model output is cached per chunk, so an
+edited clause only pays for its own chunk.
+`AI_SUMMARY_AUTO=0` turns the automatic runs off; `POST /api/ai/contracts/<id>/summarize/` runs one on demand.
+
+## Reading files (`reader.py`)
+
+- PDF: PyMuPDF text layer in reading order; pages with no text layer (scans) are OCR'd with Tesseract
+  `vie+eng` at 300 dpi (installed in the Docker image; `/health` reports `ocr_available`).
+- DOCX: paragraphs and tables in document order, table cells joined with ` | `.
+- TXT: UTF-8 (or UTF-16 with BOM; otherwise Windows-1258).
+- The content decides the format, not the file name. Old `.doc`, password-protected or empty files get a
+  clear 422 message. Limits: `SUMMARY_MAX_FILE_MB` (25), `SUMMARY_MAX_OCR_PAGES` (60).
+
+| Endpoint | |
+| --- | --- |
+| `POST /api/v1/summarize-file` | multipart `file` + `perspective`, `length`, `explain_terms`, `force`, `model`, `contract_metadata` (JSON); result + `source` (kind, pages, OCR'd pages, warnings) |
+| `POST /api/v1/compare-files` | `old_file`, `new_file` + the same options |
+| `POST /api/v1/read` | text read from a file and its chunk plan; no model call |
+| `POST /api/v1/summarize`, `/compare`, `/prepare` | the same on plain text (JSON) |
+
+## Pipeline
+
+1. `text_tools.split_sections` — split on `Điều N` / `Article N` headings (`S0` = preamble with the parties).
+2. `text_tools.extract_facts` — regex-copied money, dates, durations, %, tax codes, parties. Sent to the model as anchors.
+3. `text_tools.chunk_sections` — whole sections packed into chunks of `SUMMARY_CHUNK_CHARS`; above
+   `SUMMARY_MAX_CHUNKS` the preamble and value/payment/term/penalty/termination sections are kept first.
+4. One schema-constrained call per chunk (`schemas.SUMMARY_SCHEMA`), run in parallel; vLLM batches them
+   and reuses the shared system-prompt prefix. Token logprobs are requested for confidence.
+5. Merge in code (no extra model call), then verify (`services._verify`):
+   - values whose numbers are absent from the source, injected instructions, payment/delivery deadlines
+     given as the contract term, non-termination text under termination, uncited or repeated risks are dropped;
+   - tax code and representative are read from each party's own block of the source, never from the model;
+   - the effective date and the term fall back to the source sentence that states them.
+   Every dropped value is returned in `unverified` with its reason.
+6. Confidence per field (`structured.confidence`, list items' `confidence`): lowest and mean token
+   probability plus the share of the value's words found in the source; low ones get "⚠ cần kiểm tra".
+7. Labour contracts get the Article 21(1) BLLĐ 2019 checklist (`legal.py`, keyword match with the clause cited).
+8. Render text from the verified JSON (`services.render`): perspective `general` / `employee` / `hr`,
+   length `detailed` / `short` / `one_sentence`, optional plain-language glossary (`legal.GLOSSARY`).
+
+`analyze` results are cached by `sha256(prompt version + model + text)` in memory and in `SUMMARY_CACHE_DIR`,
+so changing perspective, length or glossary never calls the model again; send `force: true` to regenerate.
+
+`POST /api/v1/compare` analyses two versions (each cached) and reports only field changes whose source
+clause actually changed, with amounts and durations computed in code ("tăng từ X lên Y (+Z)", "gia hạn thêm 12 tháng").
+
+## Configuration
+
+| Variable | Default |
+| --- | --- |
+| `SUMMARY_LLM_URL` (falls back to `VLLM_BASE_URL`) | — |
+| `SUMMARY_MODEL_ID` | `phamthanhfd/contract-summary-qwen3-1.7b` |
+| `SUMMARY_CHUNK_CHARS` / `SUMMARY_MAX_CHUNKS` | `9000` / `16` |
+| `SUMMARY_PARALLEL` / `SUMMARY_MAX_TOKENS` / `SUMMARY_LLM_TIMEOUT` | `4` / `1500` / `180` |
+| `SUMMARY_LOGPROBS` / `SUMMARY_LOW_TOKEN_PROB` / `SUMMARY_LOW_MEAN_PROB` | `1` / `0.3` / `0.7` |
+| `SUMMARY_MAX_FILE_MB` / `SUMMARY_MAX_OCR_PAGES` / `SUMMARY_OCR_LANGUAGES` | `25` / `60` / `vie+eng` |
+| Django: `AI_SUMMARY_URL` / `AI_SUMMARY_TIMEOUT` / `AI_SUMMARY_AUTO` | `http://ai-summary:8000` / `600` / `1` |
+
+Run as a container: `docker compose up -d --build ai-summary` (port 8004; reads `SUMMARY_*` and `SECRET_KEY`
+from the root `.env`).
+
+`kaggle_notebook.py` Cell 2 starts the main model (GPU 0) and an optional candidate (GPU 1) in parallel
+behind one proxy and URL; requests choose a model by `model`. Cell 4 swaps only the candidate.
+
+## Tests and evaluation
+
+```
+cd ai_summary
+python -m unittest test_summary test_features test_reader test_insights
+python eval_summary.py                      # golden set against the running service
+python eval_summary.py --model <served id>  # same set against a candidate model
+```
+
+## Fine-tuning a smaller model
+
+1. `python finetune/make_dataset.py --count 2400` writes `finetune/data/{train,dev}.jsonl`: synthetic
+   contracts (sale, service, construction, lease, labour, MOU, English, no-heading, OCR noise, injected
+   instructions, multi-chunk) whose labels are copied from the clauses, so they are exact by construction.
+   Prompts go through the production chunking and `_user_prompt`.
+2. Upload the two files as a Kaggle Dataset and run `finetune/train_kaggle.py` (LoRA, merge, push to HF).
+3. Serve the pushed repo as the candidate (Cell 4 of `kaggle_notebook.py`) and run
+   `eval_summary.py --model <repo>`; switch `SUMMARY_MODEL_ID` only if the golden set does not regress.

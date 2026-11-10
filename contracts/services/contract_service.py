@@ -127,7 +127,7 @@ class ContractService:
             pass
         return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value else None, 'status': c.status, 'file_path': f'/api/contracts/{c.id}/download-pdf/?version_id={version.id}', 'raw_content': raw_content, 'clauses': clauses_data, 'parties': parties_data, 'tags': tags_data, 'analysis': analysis_data, 'findings': findings_data, 'reviews': reviews_data, 'active_version_id': version.id, 'active_version_number': version.version_number, 'active_version_change_summary': version.change_summary, 'versions': versions_list, 'ai_summary': summary_data, 'has_workflow': has_workflow, 'workflow_id': workflow_id}
 
-    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):
+    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None, summarize=None):
         if not code or not title:
             raise ValueError('Contract code and title are required.')
         contract = self.contract_repo.create_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, status='DRAFT', company=company)
@@ -150,9 +150,11 @@ class ContractService:
             saved_file_path = fs.url(filename)
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
+            from ai_extract.services.summary_service import schedule_auto_summary
+            schedule_auto_summary(version, summarize)
         return contract
 
-    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary=''):
+    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary='', summarize=None):
         contract = self.contract_repo.get_contract_by_id(contract_id)
         if not contract:
             raise ValueError('Contract not found.')
@@ -177,6 +179,8 @@ class ContractService:
             saved_file_path = fs.url(filename)
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
+            from ai_extract.services.summary_service import schedule_auto_summary
+            schedule_auto_summary(version, summarize)
         contract.status = 'DRAFT'
         data_repository.save_contract_for_create_new_version(contract)
         return version

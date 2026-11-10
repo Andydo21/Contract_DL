@@ -16,6 +16,7 @@
     
     <!-- External CSS -->
     <link rel="stylesheet" href="{% static 'contracts/css/contract_detail.css' %}">
+    <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.4.0">
 </head>
 <body>
     <div class="app-container">
@@ -134,21 +135,26 @@
 
                     <!-- Panel Tabs Switcher -->
                     <div class="panel-tabs" style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
-                        <button type="button" class="panel-tab-btn active" data-target="analysis-tab" style="background: none; border: none; color: #ffffff; padding: 8px 16px; font-family: 'Outfit', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="panel-tab-btn active" data-target="summary-tab" style="background: none; border: none; color: #ffffff; padding: 8px 16px; font-family: 'Outfit', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Tóm tắt
+                        </button>
+                        <button type="button" class="panel-tab-btn" data-target="analysis-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Outfit', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
                             <i class="fa-solid fa-chart-line"></i> Risk Analysis
                         </button>
                         <button type="button" class="panel-tab-btn" data-target="clauses-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Outfit', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
                             <i class="fa-solid fa-file-contract"></i> Clauses & Entities
                         </button>
-                        <button type="button" class="panel-tab-btn" data-target="summary-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Outfit', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
-                            <i class="fa-solid fa-align-left"></i> Summary
-                        </button>
                     </div>
 
                     <!-- Tab Contents -->
                     <div class="tab-content-wrapper">
-                        <!-- Tab 1: Risk Analysis -->
-                        <div class="tab-pane active" id="analysis-tab" style="display: block;">
+                        <!-- Tab 1: Summary (read from the uploaded file, independent of extraction) -->
+                        <div class="tab-pane active" id="summary-tab" style="display: block;">
+                            <div id="detail-summary-panel" data-contract-id="{{ contract.id }}" data-version-id="{{ contract.active_version_id }}"></div>
+                        </div>
+
+                        <!-- Tab 2: Risk Analysis -->
+                        <div class="tab-pane" id="analysis-tab" style="display: none;">
                             <!-- 1. AI Analysis Section (Pending, Progress, or Results) -->
                             {% if contract.status == 'ANALYZING' %}
                             <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08); border-radius: 12px; margin-bottom: 24px;">
@@ -296,7 +302,7 @@
                         </div>
 
 
-                        <!-- Tab 2: Clauses & Entities -->
+                        <!-- Tab 3: Clauses & Entities -->
                         <div class="tab-pane" id="clauses-tab" style="display: none;">
                             <div style="display: flex; gap: 12px; margin-bottom: 20px;">
                                 <button class="btn btn-secondary" id="btn-manual-extract" data-contract-id="{{ contract.id }}" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #ffffff;">
@@ -381,31 +387,6 @@
                             </div>
                         </div>
 
-                        <!-- Tab 3: Summary -->
-                        <div class="tab-pane" id="summary-tab" style="display: none;">
-                            {% if contract.ai_summary %}
-                                <div class="summary-box" style="margin-top: 10px; background: rgba(99, 102, 241, 0.02); border-left: 4px solid var(--accent-primary); padding: 20px; border-radius: 8px; line-height: 1.8;">
-                                    <h4 style="font-family: 'Outfit', sans-serif; font-size: 16px; color: #ffffff; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; margin-top: 0;">
-                                        <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--accent-primary);"></i> AI Executive Summary
-                                    </h4>
-                                    <div id="ai-summary-text" style="color: var(--text-secondary); font-size: 14px; white-space: pre-wrap;">{{ contract.ai_summary.summary }}</div>
-                                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">
-                                        Model: <span style="font-family: monospace;">{{ contract.ai_summary.model_id }}</span> · Generated: {{ contract.ai_summary.created_at }}
-                                    </div>
-                                    <button class="btn btn-secondary" id="btn-generate-summary" data-contract-id="{{ contract.id }}" style="margin-top: 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #ffffff; display: flex; align-items: center; gap: 8px; font-size: 12.5px;">
-                                        <i class="fa-solid fa-rotate"></i> Re-generate Summary
-                                    </button>
-                                </div>
-                            {% else %}
-                                <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
-                                    <i class="fa-solid fa-align-left" style="font-size: 48px; margin-bottom: 12px; color: var(--accent-primary);"></i>
-                                    <p style="margin-bottom: 16px;">No executive summary available for this contract version.</p>
-                                    <button class="btn" id="btn-generate-summary" data-contract-id="{{ contract.id }}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; display: inline-flex; align-items: center; gap: 8px;">
-                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Summary
-                                    </button>
-                                </div>
-                            {% endif %}
-                        </div>
                     </div>
                 </div>
             </div>
@@ -465,6 +446,13 @@
                         </div>
                     </div>
                     
+                    <div class="summary-choice" style="margin-top: 16px; margin-bottom: 0;">
+                        <label>
+                            <input type="checkbox" name="summarize" value="true" checked>
+                            <span>Tóm tắt phiên bản mới ngay sau khi tải lên<small>AI tự đọc file và tóm tắt, không cần chạy trích xuất trước.</small></span>
+                        </label>
+                    </div>
+
                     <div class="modal-footer" style="margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">
                         <button type="button" class="btn btn-secondary" id="btn-cancel-upload" style="background: transparent; border: 1px solid rgba(255,255,255,0.15); color: var(--text-secondary);">Cancel</button>
                         <button type="submit" class="btn" id="btn-submit-version">
@@ -478,6 +466,13 @@
 
     <!-- External JS -->
     <script src="{% static 'contracts/js/page_images.js' %}?v=1"></script>
-    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.0.9.3"></script>
+    <script src="{% static 'contracts/js/summary_panel.js' %}?v=1.4.0"></script>
+    <script src="{% static 'contracts/js/contract_detail.js' %}?v=1.1.0"></script>
+    <script>
+        (() => {
+            const root = document.getElementById('detail-summary-panel');
+            if (root) window.summaryPanel = SummaryPanel.mount(root, {contractId: root.dataset.contractId, versionId: root.dataset.versionId});
+        })();
+    </script>
 </body>
 </html>

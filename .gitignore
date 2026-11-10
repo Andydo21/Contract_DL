@@ -99,3 +99,8 @@ documents/
 media/
 legacy/a3/qdrant_storage/
 ai_extract/demo/
+
+# ai_summary outputs and IDE files
+ai_summary/eval_report.json
+ai_summary/finetune/data/
+.idea/

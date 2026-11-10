@@ -1,3 +1,4 @@
+from django.db import IntegrityError
 from contracts.repositories import contract_operations_data_repository as data_repository
 from contracts.services import ContractService
 from contracts.services.results import ServiceResult
@@ -6,6 +7,11 @@ from contracts.services.access_service import contract_access_error
 import logging
 logger = logging.getLogger(__name__)
 contract_service = ContractService()
+
+def summarize_choice(form):
+    """The upload form's "summarize right away" checkbox; None when the field was not sent (use the default)."""
+    value = form.get('summarize')
+    return None if value is None else value.lower() in ('1', 'true', 'on', 'yes')
 
 def contract_detail_page(contract_id, user, query):
     """Render Contract Detail standalone UI Page (contract_detail.html)."""
@@ -97,13 +103,15 @@ def create_contract(user, method, form, uploads):
         company = None
         if user.is_authenticated:
             company = getattr(user, 'company', None)
-        contract = contract_service.create_and_analyze_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, file_obj=file_obj, raw_content=raw_content, company=company)
+        contract = contract_service.create_and_analyze_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, file_obj=file_obj, raw_content=raw_content, company=company, summarize=summarize_choice(form))
         if form.get('document_kind') == 'legal':
             from NewIdea.repositories.knowledge_repository import mark_legal
             mark_legal(contract)
         job = _extract_after_upload(user, contract.id) if file_obj or raw_content else None
         return ServiceResult({'success': True, 'contract_id': contract.id, 'contract_code': contract.contract_code, 'status': contract.status,
                               'extraction_job_id': job and job['id']})
+    except IntegrityError:
+        return ServiceResult({'error': f'Mã hợp đồng "{code}" đã tồn tại. Hãy dùng mã khác.'}, status=400)
     except Exception as e:
         return ServiceResult({'error': str(e)}, status=400)
 
@@ -163,7 +171,7 @@ def contract_versions(contract_id, user, method, form, uploads):
         if not file_obj and (not raw_content):
             return ServiceResult({'error': 'Either a file or text content is required for the new version.'}, status=400)
         try:
-            version = contract_service.create_new_version(contract_id=contract_id, file_obj=file_obj, raw_content=raw_content, change_summary=change_summary)
+            version = contract_service.create_new_version(contract_id=contract_id, file_obj=file_obj, raw_content=raw_content, change_summary=change_summary, summarize=summarize_choice(form))
             job = _extract_after_upload(user, int(contract_id))
             return ServiceResult({'success': True, 'version_id': version.id, 'version_number': version.version_number, 'change_summary': version.change_summary,
                                   'extraction_job_id': job and job['id']})

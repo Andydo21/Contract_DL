@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     # Custom Apps
     "contracts.apps.ContractsConfig",
     "ai_extract.apps.AiExtractConfig",
+    "legal_kb.apps.LegalKbConfig",
 ]
 
 MIDDLEWARE = [
@@ -119,6 +120,9 @@ DATABASES = {
 
 
 # Password validation
+# Where `manage.py import_laws` keeps the vbpl dataset files (default: media/legal_kb).
+LEGAL_KB_DATA_DIR = os.getenv('LEGAL_KB_DATA_DIR', '')
+
 FABRIC_GATEWAY_URL = os.getenv('FABRIC_GATEWAY_URL', 'http://fabric-gateway:5000')
 FABRIC_GATEWAY_TOKEN = os.getenv('FABRIC_GATEWAY_TOKEN', '')
 DATABASES['workflow'] = {**DATABASES['default'], 'NAME': os.getenv('WORKFLOW_DB_NAME', 'workflow_db')}
@@ -179,6 +183,12 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
     "KAGGLE_QWEN_SERVICE_URL",
     os.environ.get("KAGGLE_AI_URL", "http://kaggle-qwen-service:8000")
 )
+
+# Standalone contract summary service (ai_summary/). It owns prompts, model and cache.
+AI_SUMMARY_URL = os.environ.get("AI_SUMMARY_URL", "http://ai-summary:8000")
+AI_SUMMARY_TIMEOUT = int(os.environ.get("AI_SUMMARY_TIMEOUT", "600"))
+# Summarize every uploaded file in the background, independently of the extraction pipeline.
+AI_SUMMARY_AUTO = os.environ.get("AI_SUMMARY_AUTO", "0") == "1"
 
 # PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
 COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")

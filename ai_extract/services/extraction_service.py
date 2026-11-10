@@ -1,5 +1,5 @@
-"""Coordinate persisted summaries, entity extraction and A3 clause extraction."""
-from ai_extract.repositories import ContractSummaryRepository, ExtractedEntityRepository
+"""Coordinate entity extraction and A3 clause extraction (summaries live in summary_service)."""
+from ai_extract.repositories import ExtractedEntityRepository
 from ai_extract.repositories import extraction_repository
 
 import logging
@@ -9,28 +9,6 @@ from ai_extract.repositories import clause_extract_data_repository as data_repos
 from .contract_pipeline_service import request_qwen
 
 logger = logging.getLogger('ai_extract')
-MODEL_ID = 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ'
-
-
-class SummarizeService:
-    """Generate and persist a version's executive summary."""
-
-    def summarize_version(self, version: ContractVersion) -> dict:
-        """Call the Qwen gateway and persist its summary."""
-        clauses = extraction_repository.clauses_for_version(version)
-        if not clauses:
-            raise ValueError(f'ContractVersion {version.id} has no clauses. Run clause extraction first.')
-        payload = {'clauses': [{'title': cl.clause_title, 'content': cl.clause_content} for cl in clauses], 'contract_metadata': {'contract_code': version.contract.contract_code, 'title': version.contract.title, 'version': version.version_number}}
-        logger.info(f'[summarize] Qwen chat completion – version_id={version.id}, {len(clauses)} clauses')
-        try:
-            data = request_qwen('summarize', payload)
-        except RuntimeError as e:
-            raise RuntimeError(f'Qwen summarize error: {e}') from e
-        summary_text = data.get('summary', '')
-        obj = ContractSummaryRepository.create_or_update(version=version, summary=summary_text, model_id=MODEL_ID)
-        logger.info(f'[summarize] Saved ContractSummary id={obj.id}')
-        return {'version_id': version.id, 'contract_id': version.contract.id, 'summary': summary_text, 'model_id': MODEL_ID}
-
 
 
 class ExtractEntityService:
@@ -144,17 +122,6 @@ def select_version(user, contract_id, version_id=None):
     if version is None:
         raise ExtractionError('Contract has no version yet.')
     return (contract, version)
-
-def summarize(user, contract_id, data):
-    _, version = select_version(user, contract_id, data.get('version_id'))
-    return SummarizeService().summarize_version(version)
-
-def summary(user, contract_id):
-    contract, version = select_version(user, contract_id)
-    obj = ContractSummaryRepository.get_by_version(version)
-    if not obj:
-        raise ExtractionError('No summary found. Run summarize first.', 404)
-    return dict(id=obj.id, contract_id=contract.id, version_id=version.id, summary=obj.summary, model_id=obj.model_id, created_at=obj.created_at.isoformat(), updated_at=obj.updated_at.isoformat())
 
 def extract_entities(user, contract_id, data):
     contract, version = select_version(user, contract_id, data.get('version_id'))

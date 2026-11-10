@@ -25,6 +25,10 @@ def pipeline_dashboard(request):
     return render(request, 'ai_extract/pipeline_dashboard.html', layout_service.dashboard(request.user))
 
 @login_required
+def summary_lab(request):
+    return render(request, 'ai_extract/summary_lab.html', layout_service.dashboard(request.user))
+
+@login_required
 @page_errors
 def contract_pipeline(request, contract_id):
     return render(request, 'ai_extract/contract_pipeline.html', layout_service.pipeline(
