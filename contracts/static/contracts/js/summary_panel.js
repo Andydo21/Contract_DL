@@ -85,8 +85,8 @@
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         return [el('div', {class: 'sp-dates'}, items.map(item => {
-            if (!item.date) return el('div', {class: 'sp-date'}, el('span', {class: 'sp-date-label'}, item.label));
-            const day = new Date(`${item.date}T00:00:00`);
+            const day = /^\d{4}-\d{2}-\d{2}$/.test(item.date || '') ? new Date(`${item.date}T00:00:00`) : null;
+            if (!day || isNaN(day)) return el('div', {class: 'sp-date'}, el('span', {class: 'sp-date-label'}, item.label));
             const left = Math.round((day - today) / 86400000);
             const tail = item.kind !== 'end' ? '' : left < 0 ? 'đã hết hạn' : left === 0 ? 'hết hạn hôm nay' : `còn ${left} ngày`;
             return el('div', {class: `sp-date ${item.kind === 'end' && left >= 0 && left <= 30 ? 'soon' : ''}`},
@@ -189,9 +189,11 @@
                 // Redrawing on every poll would close an open dropdown and reset scrolling.
                 if (!same || this.state.loading) this.update({saved, loading: false, error: ''});
                 this.loadChanges(saved);
-                if (saved.stale || (saved.status && IN_PROGRESS.has(saved.status.state))) {
+                const inProgress = !!(saved.status && IN_PROGRESS.has(saved.status.state));
+                // A stale summary is only worth watching when the worker will redo it on its own.
+                if (inProgress || (saved.stale && saved.auto_refresh)) {
                     if (this.polls++ < POLL_LIMIT) this.timer = setTimeout(() => this.refresh(), POLL_MS);
-                    else this.update({error: 'Tóm tắt chạy lâu bất thường. Tải lại trang sau ít phút để kiểm tra.'});
+                    else if (inProgress) this.update({error: 'Tóm tắt chạy lâu bất thường. Tải lại trang sau ít phút để kiểm tra.'});
                 } else {
                     this.polls = 0;
                 }
@@ -212,8 +214,10 @@
                 const changes = await api(`/api/ai/contracts/${this.contractId}/summary/changes/?${params}`);
                 if (key === this.changesFor) this.update({changes});
             } catch (error) {
-                this.changesFor = null;  // try again on the next refresh; the summary itself is unaffected
+                // Shown once and not retried on every poll; choosing another version or a new run tries again.
                 console.warn('summary changes:', error.message);
+                if (key === this.changesFor) this.update({changes: {previous_number: null, changes: [],
+                    summary: `Không so sánh được: ${friendly(error.message)}`}});
             }
         }
 
@@ -256,7 +260,12 @@
 
         changeView() {
             const view = this.options.value();
-            if (JSON.stringify(view) === JSON.stringify(DEFAULT_VIEW) && !this.state.result) return;
+            if (JSON.stringify(view) === JSON.stringify(DEFAULT_VIEW) && this.state.saved && this.state.saved.summary) {
+                this.seq++;  // a view still on its way no longer applies
+                this.stopTicker();
+                this.update({result: null, working: null, error: ''});
+                return;
+            }
             this.request(view, false, 'view');
         }
 
@@ -324,14 +333,16 @@
             const [label, tone] = working ? [this.progressLabel(), 'busy']
                 : running ? AUTO[status.state]
                 : loading ? ['Đang tải…', 'busy']
-                : saved && saved.stale ? ['Text đã đổi, chờ cập nhật', 'busy']
+                : saved && saved.stale ? [saved.auto_refresh ? 'Text đã đổi, chờ cập nhật' : 'Text đã đổi', saved.auto_refresh ? 'busy' : '']
                 : failed && !text ? AUTO.failed
                 : text ? ['Đã có tóm tắt', 'ok'] : ['Chưa tóm tắt', ''];
             const meta = result ? `${result.model_id} · ${result.cached ? 'từ cache' : `${(result.elapsed_ms / 1000).toFixed(1)}s`}`
                 : saved && saved.summary ? `${saved.model_id} · ${new Date(saved.updated_at).toLocaleString('vi-VN')}` : '';
 
             const body = [];
-            if (saved && saved.stale && !working) body.push(el('div', {class: 'sp-note warn'}, 'Bản dưới đây được tạo từ text cũ. Hệ thống tự tóm tắt lại khi text ổn định và model trên Kaggle đang hoạt động.'));
+            if (saved && saved.stale && !working) body.push(el('div', {class: 'sp-note warn'}, saved.auto_refresh
+                ? 'Bản dưới đây được tạo từ text cũ. Hệ thống tự tóm tắt lại khi text ổn định và model trên Kaggle đang hoạt động.'
+                : 'Bản dưới đây được tạo từ text cũ. Bấm “Tóm tắt lại” để cập nhật theo text hiện tại.'));
             if (loading) body.push(el('p', {class: 'sp-empty'}, 'Đang tải bản tóm tắt…'));
             else if (text) body.push(this.textWithCitations(text));
             else if (running || working) body.push(el('p', {class: 'sp-empty'}, 'Hệ thống đang đọc file và tóm tắt. Trang sẽ tự cập nhật khi xong.'));
@@ -456,11 +467,11 @@
         });
     }
 
-    // What ends within the window (and what already ended), soonest first.
+    // What ends within the next 90 days or ended within the last 90, soonest first.
     function renderExpiring(root, data, open) {
         root.hidden = !data.expiring.length;
         root.replaceChildren(!data.expiring.length ? '' : el('details', {class: 'sp-expiring', ...(data.expiring.some(e => e.days_left <= 30) ? {open: ''} : {})},
-            el('summary', {}, el('i', {class: 'fa-regular fa-calendar-xmark'}), ` Sắp hết hạn trong 90 ngày (${data.expiring.length})`),
+            el('summary', {}, el('i', {class: 'fa-regular fa-calendar-xmark'}), ` Hết hạn trong 90 ngày qua hoặc 90 ngày tới (${data.expiring.length})`),
             data.expiring.map(e => el('button', {class: 'sp-expiring-row', type: 'button', onclick: () => open(e.contract_id)},
                 el('span', {class: 'sp-expiring-name'}, `${e.code} · ${e.title}`),
                 el('span', {class: `sp-chip ${e.days_left < 0 ? 'bad' : e.days_left <= 30 ? 'warn' : ''}`}, expiryText(e.days_left))))));

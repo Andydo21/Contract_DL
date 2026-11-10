@@ -25,7 +25,14 @@ class Command(BaseCommand):
         settle = summary_service.SettleTracker(options['settle']) if options['watch'] else None
         while True:
             close_old_connections()
-            done = summary_service.retry_failed_runs(settle=settle, parallel=options['parallel'])
+            try:
+                done = summary_service.retry_failed_runs(settle=settle, parallel=options['parallel'])
+            except Exception:
+                if not options['watch']:
+                    raise
+                # A database or network hiccup must not stop the worker; the next round tries again.
+                logger.exception('[summarize] worker round failed')
+                done = 0
             if done:
                 self.stdout.write(f'Completed {done} summaries.')
             if not options['watch']:

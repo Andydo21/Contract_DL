@@ -103,8 +103,8 @@
         if (!source) return '';
         const parts = [KINDS[source.kind] || source.kind, `${source.chars.toLocaleString('vi-VN')} ký tự`];
         if (source.pages) parts.push(`${source.pages} trang`);
-        if (source.ocr_pages.length) parts.push(`OCR ${source.ocr_pages.length} trang scan`);
-        return parts.join(' · ') + (source.warnings.length ? ` — ${source.warnings.join(' ')}` : '');
+        if (source.ocr_pages && source.ocr_pages.length) parts.push(`OCR ${source.ocr_pages.length} trang scan`);
+        return parts.join(' · ') + (source.warnings && source.warnings.length ? ` — ${source.warnings.join(' ')}` : '');
     }
 
     function renderResult(data) {
@@ -229,6 +229,8 @@
 
     $('contract-select').addEventListener('change', event => {
         $('result').hidden = true;
+        $('compare-result').hidden = true;
+        rerun = null;  // the shown result belonged to the previous contract
         if (event.target.value) withBusy('Đang tải hợp đồng', () => loadContract(event.target.value));
         else $('steps').hidden = true;
     });
@@ -279,6 +281,7 @@
         const body = texts ? {old_text: $('compare-old-text').value, new_text: $('compare-new-text').value}
             : {contract_id: $('compare-contract').value, old_version_id: $('compare-old').value, new_version_id: $('compare-new').value};
         if (!texts && !body.contract_id) throw new Error('Chọn hợp đồng và hai phiên bản.');
+        if (!texts && body.old_version_id === body.new_version_id) throw new Error('Hãy chọn hai phiên bản khác nhau.');
         const data = await api('/api/ai/summary-lab/compare/', {...body, force: $('compare-force').checked, ...opts()});
         $('compare-force').checked = false;
         rerun = runCompare;

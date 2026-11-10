@@ -387,6 +387,22 @@ class SummaryLabTests(TestCase):
         self.add_text(self.new_version, 'Text đổi')
         self.assertEqual(self.client.get('/api/ai/summaries/overview/').json()['contracts'][str(self.contract.pk)]['state'], 'stale')
 
+    def test_overview_does_not_promise_a_summary_the_worker_will_not_make(self):
+        self.add_text(self.new_version, 'Trang 1')
+        url = '/api/ai/summaries/overview/'
+        with override_settings(AI_SUMMARY_AUTO=False):
+            self.assertIsNone(self.client.get(url).json()['contracts'][str(self.contract.pk)]['state'])
+        with override_settings(AI_SUMMARY_AUTO=True):
+            self.assertEqual(self.client.get(url).json()['contracts'][str(self.contract.pk)]['state'], 'queued')
+
+    def test_overview_skips_bad_dates_and_long_expired_contracts(self):
+        ContractSummary.objects.create(version=self.new_version, summary='Có', result=dict(key_dates=[dict(kind='end', date='31/12/2025')]))
+        data = self.client.get('/api/ai/summaries/overview/').json()
+        self.assertIsNone(data['contracts'][str(self.contract.pk)]['days_left'])
+        long_ago = (timezone.localdate() - timedelta(days=400)).isoformat()
+        ContractSummary.objects.filter(version=self.new_version).update(result=dict(key_dates=[dict(kind='end', date=long_ago)]))
+        self.assertEqual(self.client.get('/api/ai/summaries/overview/').json()['expiring'], [])
+
     @patch(POST)
     def test_changes_can_compare_any_two_versions_oldest_first(self, post):
         post.return_value = reply(dict(changes=[], summary='x'))
@@ -455,6 +471,33 @@ class SummaryLabTests(TestCase):
         self.assertEqual(self.sent_file(post), ('thu.pdf', b'%PDF-1.7 lab'))
         self.assertEqual((post.call_args.kwargs['data']['length'], post.call_args.kwargs['data']['force']), ('short', 'true'))
         self.assertFalse(ContractSummary.objects.exists())
+
+    @patch(POST)
+    def test_unchecked_explain_terms_from_a_form_stays_off(self, post):
+        post.return_value = reply(SUMMARY)
+        upload = SimpleUploadedFile('thu.pdf', b'%PDF-1.7 lab')
+        self.client.post('/api/ai/summary-lab/file/', {'file': upload, 'explain_terms': 'false', 'force': 'false'})
+        form = post.call_args.kwargs['data']
+        self.assertEqual((form['explain_terms'], form['force']), ('false', 'false'))
+
+    @patch(POST)
+    def test_compare_needs_two_different_versions(self, post):
+        response = self.client.post('/api/ai/summary-lab/compare/', json.dumps(dict(
+            contract_id=self.contract.pk, old_version_id=self.new_version.pk, new_version_id=self.new_version.pk)),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        post.assert_not_called()
+
+    @patch(POST)
+    def test_another_view_of_an_out_of_date_summary_is_a_tracked_run(self, post):
+        post.return_value = reply(SUMMARY)
+        self.add_text(self.new_version, 'Lương 15.000.000')
+        ContractSummary.objects.create(version=self.new_version, summary='Cũ', source_fingerprint='old', run_status='done')
+        self.client.post(f'/api/ai/contracts/{self.contract.pk}/summarize/', json.dumps({'perspective': 'hr'}),
+                         content_type='application/json')
+        saved = ContractSummary.objects.get(version=self.new_version)
+        self.assertEqual(saved.summary, SUMMARY['summary'])  # the stored default view was refreshed too
+        self.assertNotEqual(saved.source_fingerprint, 'old')
 
     @patch(POST)
     def test_pasted_text_is_summarized_without_persisting(self, post):

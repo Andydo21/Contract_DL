@@ -53,12 +53,17 @@ def call_summary(path, payload=None, files=None, form=None):
     return data
 
 
+def flag(value):
+    """A boolean from JSON (True) or from a multipart form ('true', 'on'); the string 'false' is False."""
+    return value.strip().lower() in ('1', 'true', 'on', 'yes') if isinstance(value, str) else bool(value)
+
+
 def render_options(data):
     """Audience, length and glossary options accepted by ai_summary; anything else falls back to defaults."""
     perspective, length = data.get('perspective', 'general'), data.get('length', 'detailed')
     return dict(perspective=perspective if perspective in ('general', 'employee', 'hr') else 'general',
                 length=length if length in ('one_sentence', 'short', 'detailed') else 'detailed',
-                explain_terms=bool(data.get('explain_terms', False)))
+                explain_terms=flag(data.get('explain_terms', False)))
 
 
 DEFAULT_OPTIONS = dict(perspective='general', length='detailed', explain_terms=False)
@@ -98,8 +103,11 @@ class SummarizeService:
                     'version': version.version_number}
         logger.info('[summarize] ai_summary request – version_id=%s file=%s (%d bytes)', version.id, source['name'], len(source['data']))
         default_view = (options or DEFAULT_OPTIONS) == DEFAULT_OPTIONS
-        # Another perspective of a stored summary only re-renders the cached analysis: no run to track or lock.
-        tracked = force or refresh or ContractSummaryRepository.get_by_version(version) is None
+        # Another view of a summary that is still current only re-renders the cached analysis: no run to track or
+        # lock. A missing or out-of-date summary needs a new analysis, which is a run whatever view asked for it.
+        current = ContractSummaryRepository.get_by_version(version)
+        out_of_date = bool(current and current.source_fingerprint and current.source_fingerprint != source['fingerprint'])
+        tracked = force or refresh or current is None or out_of_date
         if tracked and not ContractSummaryRepository.try_start_run(version.id, run_lease(), source['fingerprint']):
             raise SummaryBusy('Phiên bản này đang được tóm tắt, vui lòng đợi kết quả.', 409)
         data, stored = self._run(version, source, force, options, metadata, tracked, default_view)
@@ -282,6 +290,8 @@ def summary(user, contract_id, version_id=None):
                 has_previous=ContractSummaryRepository.previous_version(version) is not None,
                 versions=[dict(id=v.id, number=v.version_number) for v in ContractSummaryRepository.versions_of(contract)],
                 stale=bool(obj and fingerprint and obj.source_fingerprint != fingerprint),
+                # Whether the worker brings a stale summary up to date by itself, or the person has to re-run it.
+                auto_refresh=bool(getattr(settings, 'AI_SUMMARY_AUTO', False)),
                 model_id=obj.model_id if obj else '', created_at=obj.created_at.isoformat() if obj else None,
                 updated_at=obj.updated_at.isoformat() if obj else None, status=get_status(version.id),
                 file_name=ContractSummaryRepository.display_name(record),
@@ -308,6 +318,7 @@ def summary_overview(user):
     rows = ContractSummaryRepository.summary_rows(latest.values())
     fingerprints = ContractSummaryRepository.text_fingerprints(latest.values())
     today = timezone.localdate()
+    auto = getattr(settings, 'AI_SUMMARY_AUTO', False)
     items, expiring = {}, []
     for contract in contracts:
         version_id = latest.get(contract['id'])
@@ -317,18 +328,28 @@ def summary_overview(user):
         state = _row_state(row)
         if state in (None, 'done') and row.get('summary') and fingerprint and row.get('source_fingerprint') != fingerprint:
             state = 'stale'
-        elif state is None and fingerprint:
-            state = 'queued'
+        elif state is None and fingerprint and auto and not row.get('summary'):
+            state = 'queued'  # the worker picks up text without a summary only while automatic summaries are on
         elif state == 'done' and not row.get('summary'):
             state = None
-        gaps = sum(item['status'] != 'found' for item in (result.get('checklist') or {}).get('items', []))
+        gaps = sum(item.get('status') != 'found' for item in (result.get('checklist') or {}).get('items', []))
         end = next((d['date'] for d in result.get('key_dates', []) if d.get('kind') == 'end' and d.get('date')), None)
-        days_left = (date.fromisoformat(end) - today).days if end else None
+        days_left = _days_until(end, today)
+        end = end if days_left is not None else None
         items[contract['id']] = dict(state=state, has_summary=bool(row.get('summary')), gaps=gaps, end_date=end, days_left=days_left)
-        if days_left is not None and days_left <= EXPIRY_WINDOW_DAYS:
+        # Recently ended contracts stay listed for one window; ones that ended long ago are no longer news.
+        if days_left is not None and -EXPIRY_WINDOW_DAYS <= days_left <= EXPIRY_WINDOW_DAYS:
             expiring.append(dict(contract_id=contract['id'], code=contract['contract_code'], title=contract['title'],
                                  end_date=end, days_left=days_left))
     return dict(contracts=items, expiring=sorted(expiring, key=lambda e: e['days_left']))
+
+
+def _days_until(value, today):
+    """Days from today to an ISO date; None when the stored value is not a valid date."""
+    try:
+        return (date.fromisoformat(value) - today).days if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def clause_sections(user, contract_id, version_id=None):
@@ -352,7 +373,8 @@ def export_docx(user, contract_id, version_id=None):
             document.add_paragraph(line.lstrip(' •'), style='List Bullet')
         elif line.strip():
             document.add_paragraph(line)
-    document.add_paragraph(f'Tạo tự động bởi {obj.model_id}, cần đối chiếu với hợp đồng gốc trước khi sử dụng.')
+    by = f' bởi {obj.model_id}' if obj.model_id else ''
+    document.add_paragraph(f'Tạo tự động{by}, cần đối chiếu với hợp đồng gốc trước khi sử dụng.')
     buffer = io.BytesIO()
     document.save(buffer)
     return f'tom-tat-{contract.contract_code}-v{version.version_number}.docx', buffer.getvalue()
@@ -403,15 +425,17 @@ def summary_lab_file(user, upload, data):
     if upload is None:
         raise ExtractionError("Field 'file' is required.")
     return call_summary('/api/v1/summarize-file', files={'file': (upload.name, upload.read())},
-                        form=form_fields(render_options(data), data.get('force') in ('true', '1', 'on')))
+                        form=form_fields(render_options(data), flag(data.get('force', False))))
 
 
 def summary_lab_compare(user, data):
     """Changes between two versions' files, or between two pasted texts."""
     if data.get('contract_id'):
+        old, new = (select_version(user, data['contract_id'], data.get(key))[1] for key in ('old_version_id', 'new_version_id'))
+        if old.id == new.id:  # checked after the lookup, so another company's contract is still a 404
+            raise ExtractionError('Hãy chọn hai phiên bản khác nhau để so sánh.')
         files = {}
-        for field, key in (('old_file', 'old_version_id'), ('new_file', 'new_version_id')):
-            _, version = select_version(user, data['contract_id'], data.get(key))
+        for field, version in (('old_file', old), ('new_file', new)):
             source = version_file(version)
             files[field] = (source['name'], source['data'])
         return call_summary('/api/v1/compare-files', files=files,

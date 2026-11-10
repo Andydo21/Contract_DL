@@ -640,7 +640,8 @@ def compare(old_text, new_text, force=False, model=None, perspective='general', 
         if field != 'contract_type' and not reworded and ' '.join(before.lower().split()) != ' '.join(after.lower().split()):
             changes.append(dict(field=field, kind='modified' if a[field] and b[field] else 'added' if b[field] else 'removed',
                                 old=a[field], new=b[field], note=_describe(a[field], b[field])))
-    old_names, new_names = {p['name'] for p in a['parties']}, {p['name'] for p in b['parties']}
+    # A party whose name failed verification has an empty name; that is not a party added or removed.
+    old_names, new_names = ({p['name'] for p in x['parties'] if p['name']} for x in (a, b))
     changes += [dict(field='parties', kind='added', old='', new=n, note=f'bổ sung bên: {n}') for n in new_names - old_names]
     changes += [dict(field='parties', kind='removed', old=n, new='', note=f'bỏ bên: {n}') for n in old_names - new_names]
     for field in LIST_FIELDS:
