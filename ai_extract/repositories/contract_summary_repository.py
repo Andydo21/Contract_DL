@@ -38,7 +38,8 @@ class ContractSummaryRepository:
         """Runs that failed because the model was down, or died with their process."""
         waiting = ContractSummary.objects.filter(run_status="failed", result__retry=True)
         lost = ContractSummary.objects.filter(run_status__in=("queued", "running"), run_status_at__lt=lost_before)
-        return list((waiting | lost).values_list("version_id", flat=True))
+        # A deleted contract is not summarized again.
+        return list((waiting | lost).filter(version__contract__deleted_at__isnull=True).values_list("version_id", flat=True))
 
     @staticmethod
     def _text_rows():
@@ -60,7 +61,8 @@ class ContractSummaryRepository:
     @staticmethod
     def versions_needing_summary(analysis_version="") -> dict:
         """version id -> fingerprint, for text with no summary or a summary out of date with it."""
-        fingerprints = ContractSummaryRepository.text_fingerprints()
+        live = ContractVersion.objects.filter(contract__deleted_at__isnull=True).values("pk")  # not deleted contracts
+        fingerprints = ContractSummaryRepository.text_fingerprints(live)
         rows = {row["version_id"]: row for row in ContractSummary.objects.filter(version_id__in=fingerprints).values(
             "version_id", "summary", "run_status", "source_fingerprint", "analysis_version", "attempted_fingerprint")}
         needed = {}
@@ -118,6 +120,13 @@ class ContractSummaryRepository:
 
     @staticmethod
     def create_or_update(version: ContractVersion, summary: str, model_id: str = "", result=None, fingerprint="", analysis_version="") -> ContractSummary:
+        # The text a new run replaces stays readable from the panel (one step back, not a full history).
+        old = ContractSummary.objects.filter(version=version).exclude(summary="").first()
+        if result is not None and old is not None:
+            replaced = old.summary != summary
+            previous = dict(summary=old.summary, model_id=old.model_id, updated_at=old.updated_at.isoformat()) if replaced \
+                else (old.result or {}).get("previous")
+            result = {**result, **({"previous": previous} if previous else {})}
         obj, _ = ContractSummary.objects.update_or_create(
             version=version,
             defaults={

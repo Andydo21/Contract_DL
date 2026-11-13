@@ -35,11 +35,28 @@
         return data;
     }
 
+    // Errors stay on the page next to the controls instead of interrupting with a browser alert.
+    function showError(message) {
+        $('lab-error-text').textContent = message;
+        $('lab-error').hidden = !message;
+        if (message) $('lab-error').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }
+
+    // A control's state decided while a task runs takes effect when the task ends and the controls unlock.
+    function setDisabled(node, value) {
+        if (busy) node.dataset.wasDisabled = value;
+        else node.disabled = value;
+    }
+
     async function withBusy(label, task) {
         if (busy) return;
         busy = true;
-        document.querySelectorAll('button').forEach(b => b.dataset.wasDisabled = b.disabled);
-        document.querySelectorAll('button').forEach(b => b.disabled = true);
+        showError('');
+        // Options and inputs lock with the buttons: a value changed mid-run would not be the one the result used.
+        const controls = [...document.querySelectorAll('button, select, input, textarea')];
+        const focused = document.activeElement;
+        controls.forEach(c => c.dataset.wasDisabled = c.disabled);
+        controls.forEach(c => c.disabled = true);
         const started = performance.now();
         const tick = () => $('busy-text').textContent = `${label} · ${((performance.now() - started) / 1000).toFixed(0)}s`;
         tick();
@@ -48,12 +65,13 @@
         try {
             return await task();
         } catch (error) {
-            alert(`${label} thất bại:\n${error.message}`);
+            showError(`${label} thất bại: ${error.message}`);
         } finally {
             clearInterval(timer);
             $('busy').hidden = true;
-            document.querySelectorAll('button').forEach(b => b.disabled = b.dataset.wasDisabled === 'true');
+            controls.forEach(c => c.disabled = c.dataset.wasDisabled === 'true');
             busy = false;
+            if (focused && controls.includes(focused) && !focused.disabled) focused.focus({preventScroll: true});
         }
     }
 
@@ -191,7 +209,7 @@
         $('source-panel').hidden = !source;
         $('source-preview').textContent = source ? source.preview : '';
 
-        $('run-summary').disabled = !source;
+        setDisabled($('run-summary'), !source);
         const auto = data.auto ? AUTO[data.auto.state] || data.auto.state : '';
         pill($('summary-state'), data.saved_summary ? 'ĐÃ LƯU' : auto ? auto.toUpperCase() : 'CHƯA CÓ',
              data.saved_summary ? 'ok' : data.auto && data.auto.state === 'failed' ? 'bad' : '');
@@ -215,13 +233,27 @@
         }
     }
 
-    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
-        $('tab-contract').hidden = tab.dataset.tab !== 'contract';
-        $('tab-file').hidden = tab.dataset.tab !== 'file';
-        $('tab-text').hidden = tab.dataset.tab !== 'text';
-        $('tab-compare').hidden = tab.dataset.tab !== 'compare';
-    }));
+    const tabs = [...document.querySelectorAll('.tab')];
+    function selectTab(tab) {
+        tabs.forEach(t => {
+            t.classList.toggle('active', t === tab);
+            t.setAttribute('aria-selected', String(t === tab));
+            t.tabIndex = t === tab ? 0 : -1;  // one stop in the tab order; arrow keys move between tabs
+            $(`tab-${t.dataset.tab}`).hidden = t !== tab;
+        });
+    }
+    tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => selectTab(tab));
+        tab.addEventListener('keydown', event => {
+            const target = {ArrowRight: tabs[(index + 1) % tabs.length], ArrowLeft: tabs[(index - 1 + tabs.length) % tabs.length],
+                            Home: tabs[0], End: tabs[tabs.length - 1]}[event.key];
+            if (!target) return;
+            event.preventDefault();
+            selectTab(target);
+            target.focus();
+        });
+    });
+    $('lab-error-close').addEventListener('click', () => showError(''));
 
     ['opt-perspective', 'opt-length', 'opt-explain'].forEach(id => $(id).addEventListener('change', () => {
         if (rerun) withBusy('Đang dựng lại bản tóm tắt', rerun);
@@ -271,10 +303,10 @@
         const versions = event.target.value ? (await api(`/api/ai/summary-lab/contracts/${event.target.value}/`)).versions : [];
         ['compare-old', 'compare-new'].forEach((id, index) => {
             $(id).replaceChildren(...versions.map(v => el('option', {value: v.id}, `v${v.number}`)));
-            $(id).disabled = versions.length < 2;
+            setDisabled($(id), versions.length < 2);
             if (versions.length) $(id).selectedIndex = index ? versions.length - 1 : Math.max(0, versions.length - 2);
         });
-        if (event.target.value && versions.length < 2) alert('Hợp đồng này chỉ có một phiên bản. Hãy dùng chế độ dán hai văn bản.');
+        if (event.target.value && versions.length < 2) showError('Hợp đồng này chỉ có một phiên bản. Hãy dùng chế độ dán hai văn bản.');
     }));
     async function runCompare() {
         const texts = document.querySelector('[name=compare-mode]:checked').value === 'texts';
@@ -288,6 +320,13 @@
         renderCompare(data);
     }
     $('run-compare').addEventListener('click', () => withBusy('Đang so sánh (tóm tắt hai bản)', runCompare));
+
+    // Opened from a contract's summary panel: start on that contract.
+    const preset = new URLSearchParams(window.location.search).get('contract');
+    if (preset && [...$('contract-select').options].some(option => option.value === preset)) {
+        $('contract-select').value = preset;
+        withBusy('Đang tải hợp đồng', () => loadContract(preset));
+    }
 
     checkHealth();
 })();

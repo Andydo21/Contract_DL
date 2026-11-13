@@ -249,6 +249,8 @@ def _worker_run(version_id):
         return False
     except Exception as error:
         logger.warning('[summarize] run for version %s failed: %s', version_id, error)
+        # Recorded even when the source could not be read at all, or a lost run would be picked up again forever.
+        set_status(version_id, 'failed', str(error))
         return False
     finally:
         _recycle_connection()
@@ -274,7 +276,7 @@ def retry_failed_runs(settle=None, parallel=1):
 
 def summarize(user, contract_id, data):
     _, version = select_version(user, contract_id, data.get('version_id'))
-    return SummarizeService().summarize_version(version, force=bool(data.get('force', False)), options=render_options(data))
+    return SummarizeService().summarize_version(version, force=flag(data.get('force', False)), options=render_options(data))
 
 
 def summary(user, contract_id, version_id=None):
@@ -333,7 +335,9 @@ def summary_overview(user):
         elif state == 'done' and not row.get('summary'):
             state = None
         gaps = sum(item.get('status') != 'found' for item in (result.get('checklist') or {}).get('items', []))
-        end = next((d['date'] for d in result.get('key_dates', []) if d.get('kind') == 'end' and d.get('date')), None)
+        # The end date a person typed in wins; without one, the date the summary read from the document.
+        end = contract['end_date'].isoformat() if contract.get('end_date') else next(
+            (d['date'] for d in result.get('key_dates', []) if d.get('kind') == 'end' and d.get('date')), None)
         days_left = _days_until(end, today)
         end = end if days_left is not None else None
         items[contract['id']] = dict(state=state, has_summary=bool(row.get('summary')), gaps=gaps, end_date=end, days_left=days_left)
@@ -344,6 +348,13 @@ def summary_overview(user):
     return dict(contracts=items, expiring=sorted(expiring, key=lambda e: e['days_left']))
 
 
+def _display_date(value):
+    try:
+        return date.fromisoformat(value).strftime('%d/%m/%Y')
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _days_until(value, today):
     """Days from today to an ISO date; None when the stored value is not a valid date."""
     try:
@@ -352,27 +363,59 @@ def _days_until(value, today):
         return None
 
 
+def metadata_suggestions(user, contract_id, version_id=None):
+    """Values the document states about itself (code, title, type, dates, value), for a person to review before they
+    are saved on the contract. Read by rules, never by the model."""
+    _, version = select_version(user, contract_id, version_id)
+    source = version_file(version)
+    return dict(suggest=call_summary('/api/v1/read', files={'file': (source['name'], source['data'])}).get('suggest') or {})
+
+
 def clause_sections(user, contract_id, version_id=None):
     _, version = select_version(user, contract_id, version_id)
     source = version_file(version)
     return call_summary('/api/v1/sections', files={'file': (source['name'], source['data'])})
 
 
-def export_docx(user, contract_id, version_id=None):
-    """(file name, bytes) of the stored summary as a Word document."""
+PERSPECTIVES = dict(general='', employee='góc nhìn người lao động', hr='góc nhìn HR / quản lý')
+LENGTHS = dict(detailed='', short='bản ngắn', one_sentence='bản một câu')
+CHECKLIST_STATUS = dict(partial='thiếu một phần', missing='không thấy')
+
+
+def export_docx(user, contract_id, version_id=None, options=None):
+    """(file name, bytes) of a summary as a Word document: the stored one, or the view the person is looking at
+    (options), rendered again from the analysis ai_summary already has."""
     import docx
     contract, version = select_version(user, contract_id, version_id)
     obj = ContractSummaryRepository.get_by_version(version)
     if not obj:
         raise ExtractionError('Phiên bản này chưa có bản tóm tắt để xuất.', 404)
+    options = options or DEFAULT_OPTIONS
+    if options == DEFAULT_OPTIONS:
+        text, details = obj.summary, obj.result or {}
+    else:
+        details = SummarizeService().summarize_version(version, options=options)
+        text = details['summary']
+    view = ', '.join(filter(None, (PERSPECTIVES[options['perspective']], LENGTHS[options['length']],
+                                   'có giải thích thuật ngữ' if options['explain_terms'] else '')))
     document = docx.Document()
     document.add_heading(f'Tóm tắt hợp đồng {contract.contract_code}', level=1)
-    document.add_paragraph(f'{contract.title} · phiên bản {version.version_number}')
-    for line in obj.summary.splitlines():
+    document.add_paragraph(f'{contract.title} · phiên bản {version.version_number}' + (f' · {view}' if view else ''))
+    for line in text.splitlines():
         if line.lstrip().startswith('•'):
             document.add_paragraph(line.lstrip(' •'), style='List Bullet')
         elif line.strip():
             document.add_paragraph(line)
+    dates = [d for d in details.get('key_dates') or [] if d.get('label') and d.get('date')]
+    if dates:
+        document.add_heading('Ngày quan trọng', level=2)
+        for item in dates:
+            document.add_paragraph(f"{item['label']}: {_display_date(item['date'])}", style='List Bullet')
+    gaps = [i for i in (details.get('checklist') or {}).get('items', []) if i.get('status') in CHECKLIST_STATUS]
+    if gaps:
+        document.add_heading('Nội dung bắt buộc còn thiếu', level=2)
+        for item in gaps:
+            document.add_paragraph(f"{item.get('label', '')}: {CHECKLIST_STATUS[item['status']]}", style='List Bullet')
     by = f' bởi {obj.model_id}' if obj.model_id else ''
     document.add_paragraph(f'Tạo tự động{by}, cần đối chiếu với hợp đồng gốc trước khi sử dụng.')
     buffer = io.BytesIO()
@@ -417,7 +460,7 @@ def summary_lab_text(user, data):
         raise ExtractionError("Field 'text' is required.")
     if data.get('prepare_only'):
         return call_summary('/api/v1/prepare', {'text': text})
-    return call_summary('/api/v1/summarize', {'text': text, 'force': bool(data.get('force', False)), **render_options(data)})
+    return call_summary('/api/v1/summarize', {'text': text, 'force': flag(data.get('force', False)), **render_options(data)})
 
 
 def summary_lab_file(user, upload, data):
@@ -439,12 +482,12 @@ def summary_lab_compare(user, data):
             source = version_file(version)
             files[field] = (source['name'], source['data'])
         return call_summary('/api/v1/compare-files', files=files,
-                            form=form_fields(render_options(data), bool(data.get('force', False))))
+                            form=form_fields(render_options(data), flag(data.get('force', False))))
     texts = [data.get('old_text', ''), data.get('new_text', '')]
     if not all(isinstance(t, str) and t.strip() for t in texts):
         raise ExtractionError("Fields 'old_text' and 'new_text' are required.")
     return call_summary('/api/v1/compare', {'old_text': texts[0], 'new_text': texts[1],
-                                            'force': bool(data.get('force', False)), **render_options(data)})
+                                            'force': flag(data.get('force', False)), **render_options(data)})
 
 
 def summary_lab_health(user):

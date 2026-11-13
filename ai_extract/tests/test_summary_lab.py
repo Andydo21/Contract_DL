@@ -499,6 +499,101 @@ class SummaryLabTests(TestCase):
         self.assertEqual(saved.summary, SUMMARY['summary'])  # the stored default view was refreshed too
         self.assertNotEqual(saved.source_fingerprint, 'old')
 
+    def test_export_with_a_version_id_that_is_not_a_number_is_a_client_error(self):
+        ContractSummary.objects.create(version=self.new_version, summary='Lương: 15.000.000')
+        response = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/export/?version_id=abc')
+        self.assertEqual(response.status_code, 400)
+
+    @patch(POST)
+    def test_force_sent_as_the_text_false_is_off(self, post):
+        post.return_value = reply(SUMMARY)
+        self.client.post('/api/ai/summary-lab/text/', json.dumps({'text': 'x', 'force': 'false'}), content_type='application/json')
+        self.assertIs(post.call_args.kwargs['json']['force'], False)
+        self.add_file(self.new_version, 'hd.txt', b'Dieu 1')
+        self.client.post(f'/api/ai/contracts/{self.contract.pk}/summarize/', json.dumps({'force': 'false'}), content_type='application/json')
+        self.assertEqual(post.call_args.kwargs['data']['force'], 'false')
+
+    @patch(POST)
+    def test_worker_leaves_a_deleted_contract_alone(self, post):
+        from django.utils import timezone as tz
+        post.return_value = reply(SUMMARY)
+        ContractContext.objects.create(version=self.new_version, context_type='raw_text', content='Điều 1. Giá trị 100.000 đồng')
+        type(self.contract).all_objects.filter(pk=self.contract.pk).update(deleted_at=tz.now())
+        with override_settings(AI_SUMMARY_AUTO=True), patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+            self.assertEqual(summary_service.retry_failed_runs(), 0)
+        post.assert_not_called()
+
+    @patch(POST)
+    def test_lost_run_whose_source_cannot_be_read_is_marked_failed_not_retried_forever(self, post):
+        ContractSummary.objects.create(version=self.new_version, run_status='queued',
+                                       run_status_at=timezone.now() - timedelta(seconds=summary_service.QUEUED_LEASE + 60))
+        with patch('ai_extract.services.summary_service.model_info', return_value=INFO):
+            self.assertEqual(summary_service.retry_failed_runs(), 0)
+            self.assertEqual(ContractSummary.objects.get(version=self.new_version).run_status, 'failed')
+            with patch('ai_extract.services.summary_service._worker_run') as run:
+                summary_service.retry_failed_runs()
+            run.assert_not_called()
+        post.assert_not_called()
+
+    def test_overview_uses_the_end_date_typed_on_the_contract(self):
+        soon = timezone.localdate() + timedelta(days=5)
+        type(self.contract).objects.filter(pk=self.contract.pk).update(end_date=soon)
+        data = self.client.get('/api/ai/summaries/overview/').json()
+        self.assertEqual(data['contracts'][str(self.contract.pk)]['days_left'], 5)  # no summary needed
+        self.assertEqual([e['code'] for e in data['expiring']], ['HD-001'])
+        # It also wins over the date a summary read from the document.
+        ContractSummary.objects.create(version=self.new_version, summary='Có', result=dict(
+            key_dates=[dict(kind='end', date=(soon + timedelta(days=60)).isoformat())]))
+        self.assertEqual(self.client.get('/api/ai/summaries/overview/').json()['contracts'][str(self.contract.pk)]['days_left'], 5)
+
+    @patch(POST)
+    def test_suggestions_for_the_contract_fields_come_from_the_document_without_the_model(self, post):
+        post.return_value = reply(dict(READ, suggest=dict(title='Hợp đồng lao động', end_date='2027-01-31', contract_value='15000000')))
+        self.add_file(self.new_version, 'hd.txt', b'Dieu 1')
+        data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/suggest/').json()
+        self.assertEqual(data['suggest']['end_date'], '2027-01-31')
+        self.assertTrue(post.call_args.args[0].endswith('/api/v1/read'))
+        self.assertEqual(self.client.get(f'/api/ai/contracts/{self.foreign.pk}/summary/suggest/').status_code, 404)
+
+    @patch(POST)
+    def test_export_follows_the_view_on_screen_and_lists_dates_and_gaps(self, post):
+        import io
+        import docx
+        details = dict(key_dates=[dict(kind='end', label='Ngày hết hạn', date='2027-01-31')],
+                       checklist=dict(basis='Điều 21', items=[dict(label='Tiền lương', status='missing'), dict(label='Công việc', status='found')]))
+        ContractSummary.objects.create(version=self.new_version, summary='Bản chung', source_fingerprint='file:1', result=details)
+        self.add_file(self.new_version, 'hd.txt', b'Dieu 1')
+        url = f'/api/ai/contracts/{self.contract.pk}/summary/export/'
+        stored = [p.text for p in docx.Document(io.BytesIO(self.client.get(url).content)).paragraphs]
+        post.assert_not_called()  # the stored view needs no service
+        self.assertIn('Bản chung', stored)
+        self.assertIn('Ngày hết hạn: 31/01/2027', stored)
+        self.assertIn('Tiền lương: không thấy', stored)
+        self.assertNotIn('Công việc: không thấy', stored)
+
+        post.return_value = reply(dict(SUMMARY, summary='Bản cho người lao động', **details))
+        response = self.client.get(url + '?perspective=employee&length=short')
+        shown = [p.text for p in docx.Document(io.BytesIO(response.content)).paragraphs]
+        self.assertEqual(post.call_args.kwargs['data']['perspective'], 'employee')
+        self.assertIn('Bản cho người lao động', shown)
+        self.assertTrue(any('góc nhìn người lao động, bản ngắn' in line for line in shown))
+        self.assertEqual(ContractSummary.objects.get(version=self.new_version).summary, 'Bản chung')
+
+    @patch(POST)
+    def test_the_text_a_rerun_replaces_stays_readable(self, post):
+        self.add_file(self.new_version, 'hd.txt', b'Dieu 1')
+        url = f'/api/ai/contracts/{self.contract.pk}/summarize/'
+        post.return_value = reply(dict(SUMMARY, summary='Bản đầu'))
+        self.client.post(url, '{}', content_type='application/json')
+        self.assertNotIn('previous', self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()['result'])
+        post.return_value = reply(dict(SUMMARY, summary='Bản mới'))
+        self.client.post(url, json.dumps({'force': True}), content_type='application/json')
+        data = self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()
+        self.assertEqual((data['summary'], data['result']['previous']['summary']), ('Bản mới', 'Bản đầu'))
+        # A run that changes nothing keeps the older text instead of replacing it with a copy of the current one.
+        self.client.post(url, json.dumps({'force': True}), content_type='application/json')
+        self.assertEqual(self.client.get(f'/api/ai/contracts/{self.contract.pk}/summary/').json()['result']['previous']['summary'], 'Bản đầu')
+
     @patch(POST)
     def test_pasted_text_is_summarized_without_persisting(self, post):
         post.return_value = reply(SUMMARY)

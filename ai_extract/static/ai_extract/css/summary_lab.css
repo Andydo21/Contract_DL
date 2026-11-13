@@ -79,3 +79,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.55 ui-monospace,Con
 .conf th{color:var(--muted);font-weight:600}
 .lv-high{color:#a7f3d0}.lv-medium{color:#fde68a}.lv-low{color:#fecdd3;font-weight:700}
 @media(max-width:760px){.compare-grid,.compare-grid.two{grid-template-columns:1fr}}
+.tab:focus-visible{outline:2px solid var(--violet);outline-offset:-2px;border-radius:6px}
+.lab-error{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;white-space:pre-wrap}
+.lab-error[hidden]{display:none}
+.lab-error button{background:none;border:0;color:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px}

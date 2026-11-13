@@ -104,6 +104,26 @@
             .filter(c => c && c.level === 'low').length;
     }
 
+    const CHECK = {found: ['✓', 'có'], partial: ['◐', 'thiếu một phần'], missing: ['✗', 'không thấy']};
+
+    // Which required contents the document has. Open when something is missing, so the list card's
+    // "missing N" chip is explained right here.
+    function checklist(data) {
+        const items = (data && data.items) || [];
+        if (!items.length) return [];
+        const gaps = items.filter(item => item.status !== 'found').length;
+        return [el('details', {class: `sp-more sp-checklist ${gaps ? 'gaps' : 'full'}`, ...(gaps ? {open: ''} : {})},
+            el('summary', {}, gaps ? `Thiếu ${gaps}/${items.length} nội dung bắt buộc` : `Đủ ${items.length} nội dung bắt buộc`,
+                data.basis ? el('span', {class: 'sp-basis'}, ` · ${data.basis}`) : null),
+            el('ul', {}, items.map(item => {
+                const [mark, word] = CHECK[item.status] || ['•', item.status];
+                const where = item.sections && item.sections.length ? ` (${item.sections.join(', ')})` : '';
+                const lacking = item.status === 'partial' && item.missing && item.missing.length ? ` — thiếu ${item.missing.join(', ')}` : '';
+                return el('li', {class: `st-${item.status}`}, `${mark} ${item.label}: ${word}${where}${lacking}`);
+            })),
+            gaps ? el('p', {class: 'sp-note'}, 'Đối chiếu theo từ khóa, cần người đọc kiểm tra lại với văn bản gốc.') : null)];
+    }
+
     // Checklist gaps, dropped values and low-confidence fields from a full ai_summary result.
     function details(data) {
         const notes = [];
@@ -117,7 +137,7 @@
         }
         const low = lowConfidence(data.structured || {});
         if (low) notes.push(el('div', {class: 'sp-note warn'}, `⚠ ${low} giá trị có độ tin cậy thấp, nên đối chiếu lại với văn bản gốc.`));
-        return [...keyDates(data.key_dates), ...notes];
+        return [...keyDates(data.key_dates), ...checklist(data.checklist), ...notes];
     }
 
     const DEFAULT_VIEW = {perspective: 'general', length: 'detailed', explain_terms: false};
@@ -260,7 +280,10 @@
 
         changeView() {
             const view = this.options.value();
-            if (JSON.stringify(view) === JSON.stringify(DEFAULT_VIEW) && this.state.saved && this.state.saved.summary) {
+            // Before the first summary there is nothing to render another way: the choice waits for the run button,
+            // so opening a dropdown never starts a run by itself.
+            if (!(this.state.saved && this.state.saved.summary)) return;
+            if (JSON.stringify(view) === JSON.stringify(DEFAULT_VIEW)) {
                 this.seq++;  // a view still on its way no longer applies
                 this.stopTicker();
                 this.update({result: null, working: null, error: ''});
@@ -289,10 +312,39 @@
             } catch (error) {
                 if (seq !== this.seq) return;
                 this.stopTicker();
-                // Go back to the view whose text is on screen so the controls and the text agree.
-                this.options.set((this.state.result && this.state.result.view) || DEFAULT_VIEW);
+                // Go back to the view whose text is on screen so the controls and the text agree; with no text on
+                // screen the choice stays for the next try.
+                const onScreen = this.state.result ? this.state.result.view : this.state.saved && this.state.saved.summary ? DEFAULT_VIEW : null;
+                if (onScreen) this.options.set(onScreen);
                 this.update({working: null, error: error.message});
                 if (error.status === 409) this.refresh();
+            }
+        }
+
+        // The Word file holds the view on screen (audience, length), not always the stored default.
+        async exportWord() {
+            const view = this.state.result ? this.state.result.view : DEFAULT_VIEW;
+            const params = new URLSearchParams(Object.entries(view).map(([key, value]) => [key, String(value)]));
+            if (this.versionId) params.set('version_id', this.versionId);
+            this.update({exporting: true, error: ''});
+            try {
+                const response = await fetch(`/api/ai/contracts/${this.contractId}/summary/export/?${params}`);
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                const header = response.headers.get('Content-Disposition') || '';
+                const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+                const plain = /filename="?([^";]+)"?/i.exec(header);
+                const link = el('a', {href: URL.createObjectURL(await response.blob()),
+                                      download: encoded ? decodeURIComponent(encoded[1]) : plain ? plain[1] : 'tom-tat-hop-dong.docx'});
+                document.body.append(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+                this.update({exporting: false});
+            } catch (error) {
+                this.update({exporting: false, error: `Không tải được file Word: ${error.message}`});
             }
         }
 
@@ -325,7 +377,7 @@
         }
 
         render() {
-            const {loading, saved, result, working, error, changes, citation} = this.state;
+            const {loading, saved, result, working, error, changes, citation, confirming, exporting} = this.state;
             const status = saved && saved.status;
             const running = !!(status && IN_PROGRESS.has(status.state));
             const text = result ? result.summary : saved && saved.summary;
@@ -360,6 +412,12 @@
             }
             if (result || (saved && saved.result)) body.push(...details(result || saved.result));
             if (saved && saved.summary && saved.versions && saved.versions.length > 1) body.push(this.changesSection(saved, changes));
+            const previous = saved && saved.result && saved.result.previous;
+            if (previous && previous.summary) {
+                body.push(el('details', {class: 'sp-more sp-previous'},
+                    el('summary', {}, `Bản tóm tắt trước${previous.updated_at ? ` · ${new Date(previous.updated_at).toLocaleString('vi-VN')}` : ''}`),
+                    el('pre', {class: 'sp-text'}, previous.summary)));
+            }
             const problem = error || (failed ? status.error : '');
             if (problem) body.push(el('div', {class: 'sp-error', role: 'alert'}, friendly(problem)));
 
@@ -376,20 +434,36 @@
                     meta ? el('span', {class: 'sp-meta'}, meta) : null),
                 this.options.node,
                 el('div', {class: 'sp-body'}, body),
+                // A re-run takes minutes and replaces the text on screen, so it asks once before starting.
+                confirming && canRun ? el('div', {class: 'sp-confirm', role: 'group', 'aria-label': 'Xác nhận tóm tắt lại'},
+                    el('span', {}, 'Tóm tắt lại sẽ thay bản đang hiển thị và có thể mất vài phút. Bản hiện tại vẫn xem lại được ở mục “Bản tóm tắt trước”.'),
+                    el('div', {class: 'sp-buttons'},
+                        el('button', {class: 'sp-btn primary sp-confirm-yes', type: 'button', onclick: () => {
+                            this.state.confirming = false;
+                            this.request(this.options.value(), true, 'run');
+                        }}, el('i', {class: 'fa-solid fa-rotate'}), ' Tóm tắt lại'),
+                        el('button', {class: 'sp-btn', type: 'button', onclick: () => this.update({confirming: false})}, 'Hủy'))) : null,
                 el('div', {class: 'sp-actions'},
                     el('div', {class: 'sp-buttons'},
-                        el('button', {class: 'sp-btn primary', type: 'button', ...(canRun ? {} : {disabled: ''}),
-                                      onclick: () => this.request(this.options.value(), !!text, 'run')},
+                        confirming && canRun ? null : el('button', {class: 'sp-btn primary sp-run', type: 'button', ...(canRun ? {} : {disabled: ''}),
+                                      onclick: () => text ? this.update({confirming: true}) : this.request(this.options.value(), false, 'run')},
                             el('i', {class: text ? 'fa-solid fa-rotate' : 'fa-solid fa-play'}), actionLabel),
                         text ? el('button', {class: 'sp-btn', type: 'button', onclick: event => this.copy(text, event.currentTarget)},
                             el('i', {class: 'fa-regular fa-copy'}), ' Sao chép') : null,
-                        saved && saved.summary ? el('a', {class: 'sp-btn', href: `/api/ai/contracts/${this.contractId}/summary/export/${this.query()}`},
-                            el('i', {class: 'fa-regular fa-file-word'}), ' Tải Word') : null),
-                    el('a', {class: 'sp-link', href: '/ai-extract/summary-lab/', target: '_blank', rel: 'noopener'},
+                        saved && saved.summary ? el('button', {class: 'sp-btn', type: 'button', ...(exporting || working ? {disabled: ''} : {}),
+                                                              title: result ? 'Tải bản đang xem (đúng góc nhìn và độ dài đã chọn)' : 'Tải bản tóm tắt kèm ngày quan trọng và nội dung còn thiếu',
+                                                              onclick: () => this.exportWord()},
+                            el('i', {class: exporting ? 'fa-solid fa-circle-notch fa-spin' : 'fa-regular fa-file-word'}), exporting ? ' Đang tạo file…' : ' Tải Word') : null),
+                    el('a', {class: 'sp-link', href: `/ai-extract/summary-lab/?contract=${encodeURIComponent(this.contractId)}`, target: '_blank', rel: 'noopener'},
                         'Xem chi tiết trong Summary Lab ↗')));
-            // A forced run replaces the analysis the views are rendered from, so views wait for it.
-            this.options.node.querySelectorAll('select, input').forEach(input => { input.disabled = !text || working === 'run' || running; });
+            // A run replaces the analysis the views are rendered from, so views wait for it. Before the first summary
+            // the options stay open: they choose how that first run is written.
+            const hasSource = !!(saved && (saved.has_text || saved.file_name));
+            this.options.node.querySelectorAll('select, input').forEach(input => { input.disabled = loading || !hasSource || working === 'run' || running; });
             if (focused && this.root.contains(focused) && !focused.disabled) focused.focus();
+            // The buttons are drawn anew each time: keep the keyboard on the step the person is in.
+            else if (focused && confirming) this.root.querySelector('.sp-confirm-yes')?.focus();
+            else if (focused && focused.classList.contains('sp-btn')) this.root.querySelector('.sp-run:not(:disabled)')?.focus();
         }
     }
 

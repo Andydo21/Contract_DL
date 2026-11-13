@@ -9,7 +9,7 @@ def contract_for(user, contract_id):
 
 
 def visible_contract_rows(user):
-    return list(visible_contracts(user).values('id', 'contract_code', 'title'))
+    return list(visible_contracts(user).values('id', 'contract_code', 'title', 'end_date'))
 
 
 def version_for(contract, version_id=None):

@@ -1,5 +1,5 @@
 """Database operations for contract workflows."""
-from contracts.models import ContractVersion
+from contracts.models import AIAnalysis, ContractVersion
 from ai_extract.models import ContractSummary
 from ai_extract.models import Clause
 from ai_extract.models import ExtractedEntity
@@ -7,6 +7,18 @@ from contracts.models import User
 
 def first_ai_analyses_for_list_all_contracts(c):
     return c.ai_analyses.order_by('-created_at').first()
+
+
+def latest_analyses_by_contract(contracts):
+    """contract id -> the newest analysis of its latest version, in two queries for the whole list."""
+    latest_version = {}
+    for contract_id, version_id in ContractVersion.objects.filter(contract__in=contracts).order_by(
+            'contract_id', 'version_number').values_list('contract_id', 'id'):
+        latest_version[contract_id] = version_id
+    newest = {}
+    for analysis in AIAnalysis.objects.filter(version_id__in=latest_version.values()).order_by('created_at', 'pk'):
+        newest[analysis.version_id] = analysis
+    return {contract_id: newest.get(version_id) for contract_id, version_id in latest_version.items()}
 
 
 def get_versions_for_get_contract_details(c, version_id):

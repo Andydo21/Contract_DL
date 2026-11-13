@@ -82,6 +82,10 @@ def api_summary_changes(request, contract_id):
     return summary_service.changes_from_previous(request.user, contract_id, request.GET.get('version_id'), request.GET.get('against'))
 
 @extraction_api('GET')
+def api_summary_suggest(request, contract_id):
+    return summary_service.metadata_suggestions(request.user, contract_id, request.GET.get('version_id'))
+
+@extraction_api('GET')
 def api_summary_overview(request):
     return summary_service.summary_overview(request.user)
 
@@ -94,11 +98,16 @@ def api_summary_export(request, contract_id):
     if not request.user.is_authenticated:
         return JsonResponse({'error': 'Authentication required.'}, status=401)
     try:
-        name, content = summary_service.export_docx(request.user, contract_id, request.GET.get('version_id'))
+        name, content = summary_service.export_docx(request.user, contract_id, request.GET.get('version_id'),
+                                                    summary_service.render_options(request.GET))
     except ObjectDoesNotExist:
         return JsonResponse({'error': 'Contract or version not found.'}, status=404)
     except extraction_service.ExtractionError as error:
         return JsonResponse({'error': str(error)}, status=error.status)
+    except (ValueError, TypeError) as error:  # a version_id that is not a number
+        return JsonResponse({'error': str(error)}, status=400)
+    except RuntimeError as error:  # another view has to be rendered by ai_summary, which is down
+        return JsonResponse({'error': str(error)}, status=502)
     response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     response['Content-Disposition'] = content_disposition_header(True, name)
     return response

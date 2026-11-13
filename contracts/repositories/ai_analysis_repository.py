@@ -5,7 +5,8 @@ class AIAnalysisRepository:
     @staticmethod
     def get_analysis_by_id(analysis_id):
         try:
-            return AIAnalysis.objects.get(id=analysis_id)
+            # The analysis of a deleted contract is kept, but nothing may act on it.
+            return AIAnalysis.objects.get(id=analysis_id, version__contract__deleted_at__isnull=True)
         except AIAnalysis.DoesNotExist:
             return None
             
@@ -24,6 +25,6 @@ class AIAnalysisRepository:
 
     @staticmethod
     def get_all_analyses():
-        return AIAnalysis.objects.select_related('version__contract').prefetch_related(
+        return AIAnalysis.objects.filter(version__contract__deleted_at__isnull=True).select_related('version__contract').prefetch_related(
             'findings__rule'
         ).order_by('-created_at')

@@ -3,7 +3,7 @@
 {% block title %}Summary Lab · PlanA Extract{% endblock %}
 {% block nav_pipeline %}{% endblock %}
 {% block nav_summary %}active{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/summary_lab.css' %}">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{% static 'ai_extract/css/summary_lab.css' %}?v=3">{% endblock %}
 {% block content %}
 {% csrf_token %}
 <section class="lab-hero">
@@ -17,11 +17,11 @@
     </div>
 </section>
 
-<nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="contract" role="tab">Theo hợp đồng</button>
-    <button class="tab" data-tab="file" role="tab">Tải file lên</button>
-    <button class="tab" data-tab="text" role="tab">Dán text</button>
-    <button class="tab" data-tab="compare" role="tab">So sánh phiên bản</button>
+<nav class="tabs" role="tablist" aria-label="Nguồn để tóm tắt">
+    <button type="button" class="tab active" id="tab-button-contract" data-tab="contract" role="tab" aria-controls="tab-contract" aria-selected="true">Theo hợp đồng</button>
+    <button type="button" class="tab" id="tab-button-file" data-tab="file" role="tab" aria-controls="tab-file" aria-selected="false" tabindex="-1">Tải file lên</button>
+    <button type="button" class="tab" id="tab-button-text" data-tab="text" role="tab" aria-controls="tab-text" aria-selected="false" tabindex="-1">Dán text</button>
+    <button type="button" class="tab" id="tab-button-compare" data-tab="compare" role="tab" aria-controls="tab-compare" aria-selected="false" tabindex="-1">So sánh phiên bản</button>
 </nav>
 
 <div class="options" id="options">
@@ -43,7 +43,12 @@
     <span class="hint">Đổi tùy chọn chỉ dựng lại văn bản từ kết quả đã có, không gọi lại model.</span>
 </div>
 
-<section class="tab-panel" id="tab-contract">
+<div class="message error lab-error" id="lab-error" role="alert" hidden>
+    <span id="lab-error-text"></span>
+    <button type="button" id="lab-error-close" aria-label="Đóng thông báo lỗi">×</button>
+</div>
+
+<section class="tab-panel" id="tab-contract" role="tabpanel" aria-labelledby="tab-button-contract">
     <div class="picker">
         <label for="contract-select">Hợp đồng (phiên bản mới nhất)</label>
         <select id="contract-select">
@@ -90,7 +95,7 @@
     </details>
 </section>
 
-<section class="tab-panel" id="tab-file" hidden>
+<section class="tab-panel" id="tab-file" role="tabpanel" aria-labelledby="tab-button-file" hidden>
     <label for="lab-file">File hợp đồng (PDF, DOCX, TXT) — không lưu vào hệ thống</label>
     <input type="file" id="lab-file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
     <div class="actions">
@@ -100,7 +105,7 @@
     <p class="hint" id="file-source"></p>
 </section>
 
-<section class="tab-panel" id="tab-text" hidden>
+<section class="tab-panel" id="tab-text" role="tabpanel" aria-labelledby="tab-button-text" hidden>
     <label for="lab-text">Văn bản hợp đồng — không lưu vào hệ thống</label>
     <textarea id="lab-text" rows="12" placeholder="Dán nội dung hợp đồng…"></textarea>
     <div class="actions">
@@ -111,7 +116,7 @@
     <div id="text-prepare-out"></div>
 </section>
 
-<section class="tab-panel" id="tab-compare" hidden>
+<section class="tab-panel" id="tab-compare" role="tabpanel" aria-labelledby="tab-button-compare" hidden>
     <div class="compare-modes">
         <label class="check"><input type="radio" name="compare-mode" value="versions" checked> Hai phiên bản của một hợp đồng</label>
         <label class="check"><input type="radio" name="compare-mode" value="texts"> Dán hai văn bản (bản gốc và bản sửa/phụ lục)</label>
@@ -164,4 +169,4 @@
 
 <div class="busy" id="busy" hidden><span class="spinner"></span><span id="busy-text"></span></div>
 {% endblock %}
-{% block page_js %}<script src="{% static 'ai_extract/js/summary_lab.js' %}?v=2"></script>{% endblock %}
+{% block page_js %}<script src="{% static 'ai_extract/js/summary_lab.js' %}?v=4"></script>{% endblock %}

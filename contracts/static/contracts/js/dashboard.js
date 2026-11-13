@@ -44,106 +44,185 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentContractId = null;
     let allContracts = [];
 
+    const canManage = document.querySelector('.app-container').dataset.canManage === '1';
+    const STATUS_LABELS = {DRAFT: 'Bản nháp', ANALYZING: 'Đang phân tích', ANALYZED: 'Đã phân tích', APPROVED: 'Đã duyệt'};
+    const statusLabel = status => STATUS_LABELS[status] || status;
+    const PAGE_SIZE = 60;  // cards drawn at once; the rest come with "show more", so a long registry stays quick
+    let shownCount = PAGE_SIZE;
+    let renderedKey = '';
+    let selecting = false;
+    const selected = new Set();
+    const searchInput = document.getElementById('contract-search-input');
+    const clearSearchBtn = document.getElementById('btn-clear-search');
+    const filterSelect = document.getElementById('contract-filter');
+    const sortSelect = document.getElementById('contract-sort');
+    const countLine = document.getElementById('contract-count');
+    const bulkBar = document.getElementById('bulk-bar');
+
     // Load Contracts list
     async function loadContracts(selectedId = null) {
         try {
             const res = await fetch('/api/contracts/');
             if (!res.ok) throw new Error("Failed to fetch contracts");
-            const data = await res.json();
-            
-            allContracts = data;
-            renderStats(data);
-            
-            const searchInput = document.getElementById('contract-search-input');
-            const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
-            const filtered = query 
-                ? allContracts.filter(c => {
-                    const code = (c.contract_code || '').toLowerCase();
-                    const title = (c.title || '').toLowerCase();
-                    const status = (c.status || '').toLowerCase();
-                    return code.includes(query) || title.includes(query) || status.includes(query);
-                  })
-                : allContracts;
-                
-            renderContractsList(filtered, selectedId || currentContractId);
+            allContracts = await res.json();
+            renderStats(allContracts);
+            applyFilters(selectedId || currentContractId);
         } catch (err) {
             console.error(err);
-            listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--risk-high)">
-                <i class="fa-solid fa-triangle-exclamation" style="font-size: 32px; margin-bottom: 12px;"></i>
-                <p>Error loading registry database.</p>
+            countLine.textContent = '';
+            listContainer.innerHTML = `<div class="list-empty" style="color: var(--risk-high)">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <p>Không tải được danh sách hợp đồng.</p>
+                <button type="button" class="btn btn-quiet" id="btn-retry-list">Thử lại</button>
             </div>`;
+            document.getElementById('btn-retry-list').addEventListener('click', () => loadContracts(selectedId));
         }
     }
 
+    const riskLevel = c => c.risk_score === null || c.risk_score === undefined ? null
+        : ['HIGH', 'MEDIUM', 'LOW'].includes(c.risk_level) ? c.risk_level : c.risk_score >= 80 ? 'HIGH' : c.risk_score >= 50 ? 'MEDIUM' : 'LOW';
+    const overviewOf = c => (summaryOverview.contracts || {})[c.id] || {};
+    const endOf = c => overviewOf(c).end_date || c.end_date || '';
+    const FILTERS = {
+        all: () => true,
+        high: c => riskLevel(c) === 'HIGH',
+        unanalyzed: c => riskLevel(c) === null,
+        expiring: c => { const days = overviewOf(c).days_left; return days !== null && days !== undefined && days <= 30; },
+        nosummary: c => !overviewOf(c).has_summary,
+        draft: c => c.status === 'DRAFT',
+        approved: c => c.status === 'APPROVED',
+    };
+    const SORTS = {
+        newest: null,  // the order the server sends
+        oldest: (a, b) => String(a.created_at).localeCompare(String(b.created_at)),
+        title: (a, b) => (a.title || '').localeCompare(b.title || '', 'vi'),
+        value: (a, b) => (b.contract_value || 0) - (a.contract_value || 0),
+        ending: (a, b) => (endOf(a) || '9999').localeCompare(endOf(b) || '9999'),  // no end date goes last
+    };
+    const usesOverview = () => ['expiring', 'nosummary'].includes(filterSelect.value) || sortSelect.value === 'ending';
+
+    function visibleContracts() {
+        const query = searchInput.value.toLowerCase().trim();
+        const matches = FILTERS[filterSelect.value] || FILTERS.all;
+        const rows = allContracts.filter(c => matches(c) && (!query
+            || [c.contract_code, c.title, c.contract_type, c.status, statusLabel(c.status)].some(value => (value || '').toLowerCase().includes(query))));
+        const order = SORTS[sortSelect.value];
+        return order ? [...rows].sort(order) : rows;
+    }
+
+    // keepShown: a background refresh; the list is only drawn again when what it shows actually changed.
+    function applyFilters(selectedId = currentContractId, keepShown = false) {
+        if (!keepShown) shownCount = PAGE_SIZE;
+        clearSearchBtn.style.display = searchInput.value ? 'block' : 'none';
+        const rows = visibleContracts();
+        const key = `${rows.map(c => c.id).join(',')}|${shownCount}|${selecting}`;
+        if (keepShown && key === renderedKey) return;
+        renderedKey = key;
+        renderContractsList(rows, selectedId);
+    }
+
+    function resetFilters() {
+        searchInput.value = '';
+        filterSelect.value = 'all';
+        applyFilters();
+    }
+
+    function riskDisplay(c) {
+        const level = riskLevel(c);
+        if (level === null) return {riskClass: 'score-low', indicatorClass: 'bg-low', riskLabel: c.status === 'ANALYZING' ? 'Đang phân tích…' : 'Chưa phân tích rủi ro'};
+        const name = {HIGH: 'cao', MEDIUM: 'trung bình', LOW: 'thấp'}[level];
+        return {riskClass: `score-${level.toLowerCase()}`, indicatorClass: `bg-${level.toLowerCase()}`, riskLabel: `Rủi ro ${name} · ${c.risk_score}%`};
+    }
+
     function renderContractsList(contracts, selectedId = null) {
+        const total = allContracts.length;
+        countLine.textContent = !total ? '' : contracts.length === total ? `${total} hợp đồng` : `${contracts.length} / ${total} hợp đồng`;
+        [...selected].forEach(id => { if (!allContracts.some(c => c.id === id)) selected.delete(id); });
+        updateBulkBar();
+
         if (contracts.length === 0) {
-            listContainer.innerHTML = `<div style="text-align: center; padding: 40px; color: var(--text-muted)">
-                <i class="fa-regular fa-folder-open" style="font-size: 32px; margin-bottom: 12px;"></i>
-                <p>No matching contracts found.</p>
-            </div>`;
+            // Nothing yet and nothing matching are different situations with different next steps.
+            listContainer.innerHTML = total === 0
+                ? `<div class="list-empty">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <p>Chưa có hợp đồng nào.</p>
+                    ${canManage ? '<button type="button" class="btn" id="btn-empty-add"><i class="fa-solid fa-plus"></i> Thêm hợp đồng đầu tiên</button>' : ''}
+                </div>`
+                : `<div class="list-empty">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <p>Không có hợp đồng nào khớp với tìm kiếm và bộ lọc.</p>
+                    <button type="button" class="btn btn-quiet" id="btn-reset-filters">Xóa tìm kiếm và bộ lọc</button>
+                </div>`;
+            document.getElementById('btn-empty-add')?.addEventListener('click', () => openUploadBtn.click());
+            document.getElementById('btn-reset-filters')?.addEventListener('click', resetFilters);
             return;
         }
 
+        // The selected contract is always among the cards drawn.
+        const selectedIndex = contracts.findIndex(c => c.id == selectedId);
+        if (selectedIndex >= shownCount) shownCount = selectedIndex + 1;
+        const scrollTop = listContainer.scrollTop;
         listContainer.innerHTML = '';
-        contracts.forEach(c => {
+        contracts.slice(0, shownCount).forEach(c => {
             const card = document.createElement('div');
-            card.className = `contract-card ${selectedId == c.id ? 'active' : ''}`;
+            card.className = `contract-card ${selectedId == c.id ? 'active' : ''} ${selected.has(c.id) ? 'picked' : ''}`;
             card.dataset.id = c.id;
-
-            // Risk display
-            let riskClass = 'score-low';
-            let indicatorClass = 'bg-low';
-            let riskLabel = 'Low Risk';
-            
-            if (c.risk_score !== null) {
-                const level = ['HIGH', 'MEDIUM', 'LOW'].includes(c.risk_level) ? c.risk_level : c.risk_score >= 80 ? 'HIGH' : c.risk_score >= 50 ? 'MEDIUM' : 'LOW';
-                if (level === 'HIGH') {
-                    riskClass = 'score-high';
-                    indicatorClass = 'bg-high';
-                    riskLabel = `Score: ${c.risk_score}% (High)`;
-                } else if (level === 'MEDIUM') {
-                    riskClass = 'score-medium';
-                    indicatorClass = 'bg-medium';
-                    riskLabel = `Score: ${c.risk_score}% (Medium)`;
-                } else {
-                    riskClass = 'score-low';
-                    indicatorClass = 'bg-low';
-                    riskLabel = `Score: ${c.risk_score}% (Low)`;
-                }
-            } else {
-                riskLabel = 'Pending AI Run';
-                riskClass = 'score-low';
-                indicatorClass = 'bg-low';
-                if (c.status === 'ANALYZING') {
-                    riskLabel = 'Analyzing...';
-                }
-            }
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            const {riskClass, indicatorClass, riskLabel} = riskDisplay(c);
+            card.setAttribute('aria-label', `${c.contract_code}, ${c.title}, ${statusLabel(c.status)}, ${riskLabel}`);
 
             card.innerHTML = `
                 <div class="card-top">
-                    <span class="card-code">${c.contract_code}</span>
-                    <span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span>
+                    <span class="card-code">${selecting ? `<input type="checkbox" class="card-pick" tabindex="-1" aria-hidden="true" ${selected.has(c.id) ? 'checked' : ''}> ` : ''}${escapeHtml(c.contract_code)}</span>
+                    <span class="status-badge status-${escapeHtml(String(c.status).toLowerCase())}">${escapeHtml(statusLabel(c.status))}</span>
                 </div>
                 <div class="card-title">${escapeHtml(c.title)}</div>
                 <div class="card-footer">
-                    <span>$${c.contract_value !== null && c.contract_value !== undefined ? c.contract_value.toLocaleString() : '0'}</span>
+                    <span>${escapeHtml(ContractActions.money(c.contract_value))}</span>
                     <div class="card-score ${riskClass}">
                         <div class="score-indicator ${indicatorClass}"></div>
-                        <span>${riskLabel}</span>
+                        <span>${escapeHtml(riskLabel)}</span>
                     </div>
                 </div>
             `;
-            
-            card.addEventListener('click', () => {
+
+            const open = () => {
+                if (selecting) {
+                    selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id);
+                    card.classList.toggle('picked', selected.has(c.id));
+                    card.querySelector('.card-pick').checked = selected.has(c.id);
+                    updateBulkBar();
+                    return;
+                }
                 document.querySelectorAll('.contract-card').forEach(cc => cc.classList.remove('active'));
                 card.classList.add('active');
                 showContractDetail(c.id);
+            };
+            card.addEventListener('click', open);
+            card.addEventListener('keydown', event => {
+                if (event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
+                event.preventDefault();
+                open();
             });
 
             listContainer.appendChild(card);
         });
 
+        if (contracts.length > shownCount) {
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'btn btn-quiet list-more';
+            more.textContent = `Hiện thêm ${Math.min(PAGE_SIZE, contracts.length - shownCount)} trong ${contracts.length - shownCount} hợp đồng còn lại`;
+            more.addEventListener('click', () => {
+                shownCount += PAGE_SIZE;
+                applyFilters(currentContractId, true);
+            });
+            listContainer.appendChild(more);
+        }
+
         SummaryPanel.decorateCards(summaryOverview);
+        listContainer.scrollTop = scrollTop;
 
         // Auto-select active if set
         if (selectedId) {
@@ -152,43 +231,85 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Search events Setup
-    const searchInput = document.getElementById('contract-search-input');
-    const clearSearchBtn = document.getElementById('btn-clear-search');
-    
-    if (searchInput) {
-        searchInput.addEventListener('input', () => {
-            const query = searchInput.value.toLowerCase().trim();
-            if (query) {
-                if (clearSearchBtn) clearSearchBtn.style.display = 'block';
-            } else {
-                if (clearSearchBtn) clearSearchBtn.style.display = 'none';
-            }
-            
-            const filtered = allContracts.filter(c => {
-                const code = (c.contract_code || '').toLowerCase();
-                const title = (c.title || '').toLowerCase();
-                const status = (c.status || '').toLowerCase();
-                return code.includes(query) || title.includes(query) || status.includes(query);
-            });
-            
-            renderContractsList(filtered, currentContractId);
-        });
+    searchInput.addEventListener('input', () => applyFilters());
+    filterSelect.addEventListener('change', () => applyFilters());
+    sortSelect.addEventListener('change', () => applyFilters());
+    clearSearchBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        applyFilters();
+        searchInput.focus();
+    });
+
+    // Selecting several contracts (managers): the cards toggle instead of opening.
+    function updateBulkBar() {
+        if (!bulkBar) return;
+        bulkBar.hidden = !selecting;
+        document.getElementById('bulk-count').textContent = `Đã chọn ${selected.size}`;
+        document.getElementById('btn-bulk-delete').disabled = selected.size === 0;
     }
-    
-    if (clearSearchBtn) {
-        clearSearchBtn.addEventListener('click', () => {
-            searchInput.value = '';
-            clearSearchBtn.style.display = 'none';
-            renderContractsList(allContracts, currentContractId);
-            searchInput.focus();
-        });
+
+    function setSelecting(on) {
+        selecting = on;
+        if (!on) selected.clear();
+        document.getElementById('btn-select-mode')?.classList.toggle('active', on);
+        applyFilters(currentContractId, true);
     }
+
+    function afterContractsChanged(removedIds = []) {
+        if (removedIds.some(id => id == currentContractId)) {
+            currentContractId = null;
+            detailPanel.innerHTML = `<div class="empty-state"><i class="fa-regular fa-file-lines" style="font-size: 64px;"></i>
+                <h2>Chọn một hợp đồng</h2><p>Chọn hợp đồng trong danh sách bên trái để xem tóm tắt, rủi ro và điều khoản.</p></div>`;
+        }
+        loadContracts(currentContractId);
+    }
+
+    // The list as it is filtered and sorted now. Excel reads the UTF-8 marker; a cell is never taken for a formula.
+    function exportCsv() {
+        const rows = visibleContracts();
+        const cell = value => {
+            let text = value === null || value === undefined ? '' : String(value);
+            if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+            return `"${text.replace(/"/g, '""')}"`;
+        };
+        const lines = [['Mã hợp đồng', 'Tiêu đề', 'Loại', 'Trạng thái', 'Ngày bắt đầu', 'Ngày kết thúc', 'Giá trị (đ)', 'Điểm rủi ro (%)', 'Mức rủi ro', 'Ngày tạo']];
+        rows.forEach(c => lines.push([c.contract_code, c.title, c.contract_type, statusLabel(c.status), c.start_date, endOf(c), c.contract_value,
+                                      c.risk_score, {HIGH: 'Cao', MEDIUM: 'Trung bình', LOW: 'Thấp'}[riskLevel(c)] || '', String(c.created_at || '').slice(0, 10)]));
+        const blob = new Blob(['﻿' + lines.map(line => line.map(cell).join(',')).join('\r\n')], {type: 'text/csv;charset=utf-8'});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `hop-dong-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        ContractActions.toast(`Đã xuất ${rows.length} hợp đồng ra file CSV.`, {tone: 'ok', timeout: 4000});
+    }
+
+    document.getElementById('btn-export-csv').addEventListener('click', exportCsv);
+    document.getElementById('btn-open-trash')?.addEventListener('click', event =>
+        ContractActions.trash({opener: event.currentTarget, onRestored: data => loadContracts(data.contract_id)}));
+    document.getElementById('btn-select-mode')?.addEventListener('click', () => setSelecting(!selecting));
+    document.getElementById('btn-bulk-done')?.addEventListener('click', () => setSelecting(false));
+    document.getElementById('btn-bulk-all')?.addEventListener('click', () => {
+        visibleContracts().slice(0, shownCount).forEach(c => selected.add(c.id));
+        renderedKey = '';  // the same cards, now ticked
+        applyFilters(currentContractId, true);
+    });
+    document.getElementById('btn-bulk-delete')?.addEventListener('click', event => {
+        const chosen = allContracts.filter(c => selected.has(c.id));
+        if (!chosen.length) return;
+        ContractActions.removeMany(chosen, {opener: event.currentTarget, onDone: changed => {
+            changed.forEach(c => selected.delete(c.id));
+            afterContractsChanged(changed.map(c => c.id));
+        }});
+    });
 
     // Stats calculator
     async function refreshSummaryOverview() {
         try {
             summaryOverview = await SummaryPanel.overview();
+            if (usesOverview()) applyFilters(currentContractId, true);
             SummaryPanel.decorateCards(summaryOverview);
             SummaryPanel.renderExpiring(document.getElementById('expiring-strip'), summaryOverview, id => {
                 document.querySelectorAll('.contract-card').forEach(card => card.classList.toggle('active', card.dataset.id == id));
@@ -462,31 +583,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="analysis-title-area">
                         <h2 class="analysis-title">${escapeHtml(data.title)}</h2>
                         <div class="analysis-meta">
-                            <div class="meta-tag"><i class="fa-solid fa-barcode"></i> ${data.contract_code}</div>
-                            <div class="meta-tag"><i class="fa-solid fa-tag"></i> ${data.contract_type}</div>
-                            <div class="meta-tag"><i class="fa-solid fa-dollar-sign"></i> ${data.contract_value !== null && data.contract_value !== undefined ? data.contract_value.toLocaleString() : '0'}</div>
-                            ${data.start_date ? `<div class="meta-tag"><i class="fa-solid fa-calendar-days"></i> ${data.start_date} to ${data.end_date}</div>` : ''}
+                            <div class="meta-tag"><i class="fa-solid fa-barcode"></i> ${escapeHtml(data.contract_code)}</div>
+                            ${data.contract_type ? `<div class="meta-tag"><i class="fa-solid fa-tag"></i> ${escapeHtml(data.contract_type)}</div>` : ''}
+                            <div class="meta-tag"><i class="fa-solid fa-coins"></i> ${escapeHtml(ContractActions.money(data.contract_value))}</div>
+                            ${ContractActions.period(data.start_date, data.end_date) ? `<div class="meta-tag"><i class="fa-solid fa-calendar-days"></i> ${escapeHtml(ContractActions.period(data.start_date, data.end_date))}</div>` : ''}
                         </div>
                     </div>
-                    <div style="display: flex; gap: 8px;">
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
                         <button class="btn btn-trigger-analysis" data-contract-id="${data.id}" style="background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #ffffff; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 12px rgba(99,102,241,0.3); cursor: pointer;">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích rủi ro hợp đồng
                         </button>
                         <a href="/contracts/${data.id}/" class="btn" style="background: var(--accent-primary); color: #ffffff; text-decoration: none;">
-                            <i class="fa-solid fa-expand"></i> Full Reader Page
+                            <i class="fa-solid fa-expand"></i> Mở trang đầy đủ
                         </a>
                         ${data.file_path ? `
                         <a href="${data.file_path}" target="_blank" download class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: var(--text-main); box-shadow: none; text-decoration: none;">
-                            <i class="fa-solid fa-file-pdf"></i> Download PDF
+                            <i class="fa-solid fa-file-pdf"></i> Tải file gốc
                         </a>` : ''}
+                        <button type="button" class="btn btn-quiet" id="btn-dash-history" aria-haspopup="dialog"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử</button>
+                        ${canManage ? `
+                        <button type="button" class="btn btn-quiet" id="btn-dash-edit" aria-haspopup="dialog"><i class="fa-solid fa-pen"></i> Sửa</button>
+                        <button type="button" class="btn btn-quiet btn-danger-quiet" id="btn-dash-delete" aria-haspopup="dialog"><i class="fa-solid fa-trash"></i> Xóa</button>` : ''}
                     </div>
                 </div>
 
                 <div class="tabs-header">
                     <button class="tab-btn active" id="btn-tab-summary"><i class="fa-solid fa-wand-magic-sparkles"></i> Tóm tắt</button>
-                    <button class="tab-btn" id="btn-tab-analysis"><i class="fa-solid fa-chart-line"></i> Risk Assessment</button>
-                    <button class="tab-btn" id="btn-tab-clauses"><i class="fa-solid fa-file-invoice"></i> Original Clauses (${data.clauses ? data.clauses.length : 0})</button>
-                    <button class="tab-btn" id="btn-tab-fulltext"><i class="fa-solid fa-file-lines"></i> Full Document</button>
+                    <button class="tab-btn" id="btn-tab-analysis"><i class="fa-solid fa-chart-line"></i> Đánh giá rủi ro</button>
+                    <button class="tab-btn" id="btn-tab-clauses"><i class="fa-solid fa-file-invoice"></i> Điều khoản (${data.clauses ? data.clauses.length : 0})</button>
+                    <button class="tab-btn" id="btn-tab-fulltext"><i class="fa-solid fa-file-lines"></i> Toàn văn</button>
                 </div>
 
                 <div id="tab-summary" class="tab-content active">
@@ -504,12 +629,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div id="tab-fulltext" class="tab-content">
-                    <pre class="doc-preview-container">${data.raw_content || 'No content available.'}</pre>
+                    <pre class="doc-preview-container">${escapeHtml(data.raw_content || 'Chưa có nội dung.')}</pre>
                 </div>
             `;
 
             SummaryPanel.mount(document.getElementById('dashboard-summary-panel'),
                                {contractId: data.id, versionId: data.active_version_id});
+
+            document.getElementById('btn-dash-history').addEventListener('click', event =>
+                ContractActions.history(data, {opener: event.currentTarget}));
+            document.getElementById('btn-dash-edit')?.addEventListener('click', event =>
+                ContractActions.edit(data, {opener: event.currentTarget, versionId: data.active_version_id, onSaved: () => {
+                    loadContracts(data.id);
+                    showContractDetail(data.id, versionId);
+                }}));
+            document.getElementById('btn-dash-delete')?.addEventListener('click', event =>
+                ContractActions.remove(data, {opener: event.currentTarget, onDeleted: () => afterContractsChanged([data.id]),
+                                              onRestored: () => loadContracts(data.id)}));
 
             // Bind Tab Navigation Events
             const tabSummaryBtn = document.getElementById('btn-tab-summary');
@@ -791,8 +927,8 @@ document.addEventListener('DOMContentLoaded', () => {
             detailPanel.innerHTML = `
                 <div class="empty-state" style="color: var(--risk-high)">
                     <i class="fa-solid fa-triangle-exclamation" style="font-size: 64px;"></i>
-                    <h2>Failed to Load Details</h2>
-                    <p>${err.message || 'An error occurred retrieving database records for this contract ID.'}</p>
+                    <h2>Không tải được hợp đồng</h2>
+                    <p>${escapeHtml(err.message || 'Không tải được dữ liệu của hợp đồng này.')}</p>
                 </div>
             `;
         }
@@ -803,11 +939,19 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadForm.reset();
         pageImages.clear();
         lastSelected = null;
-        fileDropText.innerHTML = 'Drag and drop file here, or click to choose file';
+        fileDropText.innerHTML = 'Kéo thả file vào đây, hoặc bấm để chọn file';
+        showUploadError('');
         inputChanged();
         document.getElementById('upload-file-hint').hidden = true;
         uploadModal.classList.add('active');
     });
+
+    const uploadError = document.getElementById('upload-error');
+    function showUploadError(message) {
+        uploadError.textContent = message || '';
+        uploadError.hidden = !message;
+        if (message) uploadError.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }
 
     function closeModal() {
         uploadModal.classList.remove('active');
@@ -857,7 +1001,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = selectedFile();
         const text = uploadForm.raw_content.value.trim();
         if (!file && !text) {
-            alert("Chọn file hoặc dán nội dung hợp đồng trước.");
+            showUploadError('Chọn file hoặc dán nội dung hợp đồng trước.');
             return;
         }
         quickSummaryBtn.disabled = true;
@@ -882,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!files.length) return;
         fileDropText.innerHTML = files.length > 1
             ? `<strong>${files.length} ảnh</strong> sẽ được ghép thành một văn bản theo thứ tự bên dưới`
-            : `<strong>Selected file:</strong> ${files[0].name}`;
+            : `<strong>File đã chọn:</strong> ${escapeHtml(files[0].name)}`;
     };
     const pageImages = window.PageImages.attach(fileInput, document.getElementById('page-image-list'), showSelection);
 
@@ -910,14 +1054,24 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const fileSelected = pageImages.files().length > 0;
         const pageError = pageImages.error();
+        showUploadError('');
         if (pageError) {
-            alert(pageError);
+            showUploadError(pageError);
             return;
         }
         const rawContentVal = uploadForm.raw_content.value.trim();
         
         if (!fileSelected && !rawContentVal) {
-            alert("Please either upload a contract file or paste the contract text.");
+            showUploadError('Hãy tải file hợp đồng lên hoặc dán nội dung hợp đồng.');
+            return;
+        }
+        const startDate = uploadForm.elements.start_date.value, endDate = uploadForm.elements.end_date.value;
+        if (startDate && endDate && endDate < startDate) {
+            showUploadError('Ngày kết thúc phải sau ngày bắt đầu.');
+            return;
+        }
+        if (Number(uploadForm.elements.contract_value.value) < 0) {
+            showUploadError('Giá trị hợp đồng phải là số không âm.');
             return;
         }
 
@@ -948,13 +1102,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadContracts(data.contract_id);
                 showContractDetail(data.contract_id);
             } else {
-                alert("Upload failed: " + (data.error || "Unknown error"));
+                showUploadError(data.error || 'Không tải lên được. Hãy thử lại.');
             }
 
         } catch (err) {
             scannerLoader.classList.remove('active');
             console.error(err);
-            alert("Network error: Failed to upload contract.");
+            showUploadError('Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.');
         }
     });
 
@@ -1002,7 +1156,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         contractsHTML += `
                             <a href="#" onclick="event.preventDefault(); selectContractFromModal(${c.id})" style="font-size: 11px; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.25); color: #a5b4fc; padding: 3px 8px; border-radius: 4px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; transition: var(--transition);">
                                 <i class="fa-solid fa-file-signature" style="font-size: 10px;"></i>
-                                <span>${c.contract_code}</span>
+                                <span>${escapeHtml(c.contract_code)}</span>
                             </a>
                         `;
                     });
@@ -1022,9 +1176,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <strong style="color: #ffffff; font-size: 13.5px;">${escapeHtml(r.risk_name)}</strong>
-                            <span class="risk-badge ${badgeClass}" style="font-size: 10px; padding: 2px 6px;">${r.severity_level}</span>
+                            <span class="risk-badge ${badgeClass}" style="font-size: 10px; padding: 2px 6px;">${escapeHtml(r.severity_level)}</span>
                         </div>
-                        <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${r.description || 'No description provided.'}</p>
+                        <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin: 0;">${escapeHtml(r.description || 'No description provided.')}</p>
                         ${contractsHTML}
                     </div>
                 `;
@@ -1089,6 +1243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadForm.elements.contract_code.focus();
     }
     loadContracts(initialContractId);
+    if (canManage) ContractActions.showAnnouncedDeletion(restored => loadContracts(restored[0].id));
     if (initialContractId) {
         showContractDetail(initialContractId, initialVersionId);
     }
@@ -1225,7 +1380,7 @@ window.showToast = function(message, type = 'error') {
         <i class="${iconClass} toast-icon"></i>
         <div class="toast-content">
             <div class="toast-title">${titleText}</div>
-            <div class="toast-desc">${message}</div>
+            <div class="toast-desc">${escapeHtml(message)}</div>
         </div>
         <button class="toast-close"><i class="fa-solid fa-xmark"></i></button>
     `;

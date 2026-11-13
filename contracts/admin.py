@@ -39,10 +39,30 @@ class ContractVersionAdmin(admin.ModelAdmin):
 
 @admin.register(Contract)
 class ContractAdmin(admin.ModelAdmin):
-    list_display = ('contract_code', 'title', 'contract_type', 'status', 'contract_value', 'company', 'created_at')
-    list_filter = ('status', 'contract_type', 'company', 'created_at')
+    list_display = ('contract_code', 'title', 'contract_type', 'status', 'contract_value', 'company', 'created_at', 'deleted_at')
+    list_filter = (('deleted_at', admin.EmptyFieldListFilter), 'status', 'contract_type', 'company', 'created_at')
     search_fields = ('contract_code', 'title', 'contract_type')
     filter_horizontal = ('tags',)
+    readonly_fields = ('deleted_at', 'deleted_by')
+    actions = ['restore_contracts']
+
+    def get_queryset(self, request):
+        # Deleted contracts stay visible here so they can be restored.
+        return Contract.all_objects.all()
+
+    @admin.action(description='Khôi phục hợp đồng đã xóa')
+    def restore_contracts(self, request, queryset):
+        from contracts.repositories import ContractRepository
+        from django.contrib import messages
+        from contracts.repositories import contract_operations_data_repository as data_repository
+        restored, blocked = ContractRepository.restore_contracts(queryset)
+        for contract in restored:
+            data_repository.log_contract_action(request.user, contract, f'Restored contract: {contract.contract_code}')
+        self.message_user(request, f'Đã khôi phục {len(restored)} hợp đồng.')
+        if blocked:
+            codes = ', '.join(sorted({contract.contract_code for contract in blocked}))
+            self.message_user(request, f'Chưa khôi phục {len(blocked)} hợp đồng vì mã đã được hợp đồng khác dùng: {codes}. '
+                                       'Hãy đổi mã của hợp đồng đã xóa rồi khôi phục lại.', level=messages.WARNING)
 
 
 

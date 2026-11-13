@@ -125,6 +125,13 @@ class Tag(models.Model):
         return self.tag_name
 
 
+class ActiveContractManager(models.Manager):
+    """The default manager: a deleted contract is kept in the database but hidden from every query."""
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class Contract(models.Model):
     STATUS_CHOICES = (
         ('DRAFT', 'Draft'),
@@ -133,7 +140,8 @@ class Contract(models.Model):
         ('APPROVED', 'Approved'),
     )
     company = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts', verbose_name="Company")
-    contract_code = models.CharField(max_length=50, unique=True, verbose_name="Contract Code")
+    # Unique among the contracts not deleted (see Meta), so the code of a deleted contract can be used again.
+    contract_code = models.CharField(max_length=50, verbose_name="Contract Code")
     title = models.CharField(max_length=255, verbose_name="Title")
     contract_type = models.CharField(max_length=100, blank=True, null=True, verbose_name="Contract Type")
     start_date = models.DateField(blank=True, null=True, verbose_name="Start Date")
@@ -143,17 +151,27 @@ class Contract(models.Model):
     tags = models.ManyToManyField(Tag, related_name='contracts', blank=True, verbose_name="Tags")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created At")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated At")
+    # Soft delete: versions, files, ledger records and the audit trail stay; only listings and lookups skip it.
+    deleted_at = models.DateTimeField(blank=True, null=True, db_index=True, verbose_name="Deleted At")
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='deleted_contracts', verbose_name="Deleted By")
+
+    objects = ActiveContractManager()
+    all_objects = models.Manager()
 
     class Meta:
         verbose_name = 'Contract'
         verbose_name_plural = 'Contracts'
+        # Related lookups (version.contract, audit_log.contract) still reach a deleted contract.
+        base_manager_name = 'all_objects'
+        constraints = [models.UniqueConstraint(fields=['contract_code'], condition=models.Q(deleted_at__isnull=True),
+                                               name='contract_code_unique_when_not_deleted')]
 
     def __str__(self):
         return f"{self.contract_code} - {self.title}"
 
     def save(self, *args, **kwargs):
         if self.pk:
-            old = type(self).objects.filter(pk=self.pk).values('company_id').first()
+            old = type(self).all_objects.filter(pk=self.pk).values('company_id').first()
             if old and old['company_id'] != self.company_id and ContractLedgerOperation.objects.filter(version__contract_id=self.pk, accepted_at__isnull=False).exists():
                 raise ValidationError('Không đổi công ty của hợp đồng đã có yêu cầu ledger. Cần quy trình chuyển giao riêng.')
         return super().save(*args, **kwargs)

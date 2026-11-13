@@ -239,7 +239,8 @@ def retire_old_page_contexts(run):
 
 def latest_company_runs(company_id, exclude_contract_id=None):
     """The newest completed run of each document of one company, for linking documents to each other."""
-    rows = (LayoutExtractionRun.objects.filter(status='COMPLETED', version__contract__company_id=company_id)
+    rows = (LayoutExtractionRun.objects.filter(status='COMPLETED', version__contract__company_id=company_id,
+                                               version__contract__deleted_at__isnull=True)
             .select_related('version__contract').order_by('pk'))
     if exclude_contract_id is not None:
         rows = rows.exclude(version__contract_id=exclude_contract_id)

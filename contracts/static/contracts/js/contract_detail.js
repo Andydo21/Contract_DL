@@ -876,8 +876,8 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
         const metaVals = document.querySelectorAll('.meta-val');
         if (metaVals.length >= 3) {
             metaVals[0].textContent = contract.contract_code || 'N/A';
-            metaVals[1].textContent = contract.contract_type || 'N/A';
-            metaVals[2].textContent = '$' + (contract.contract_value ? Number(contract.contract_value).toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00');
+            metaVals[1].textContent = contract.contract_type || 'Chưa nhập';
+            metaVals[2].textContent = ContractActions.money(contract.contract_value);
         }
 
         // 6. Update Gauge & Risk Score
@@ -1049,4 +1049,30 @@ document.addEventListener('DOMContentLoaded', () => {
             status.textContent = error.message;
         }
     });
+});
+
+// The contract itself: its change history for everyone, editing and deleting for managers (their buttons are not
+// rendered otherwise). The dialogs live in contract_actions.js, shared with the dashboard.
+document.addEventListener('DOMContentLoaded', () => {
+    const meta = document.getElementById('contract-meta');
+    if (!meta || !window.ContractActions) return;
+    const contract = {
+        id: Number(meta.dataset.id), contract_code: meta.dataset.code, title: meta.dataset.title, contract_type: meta.dataset.type,
+        start_date: meta.dataset.start || null, end_date: meta.dataset.end || null,
+        contract_value: meta.dataset.value === '' ? null : Number(meta.dataset.value),
+    };
+    // Dates and the amount the way people here write them.
+    document.getElementById('meta-value').textContent = ContractActions.money(contract.contract_value);
+    document.getElementById('meta-period').textContent = ContractActions.period(contract.start_date, contract.end_date) || 'Chưa nhập';
+
+    document.getElementById('btn-history-contract')?.addEventListener('click', event =>
+        ContractActions.history(contract, {opener: event.currentTarget}));
+    document.getElementById('btn-edit-contract')?.addEventListener('click', event =>
+        ContractActions.edit(contract, {opener: event.currentTarget, versionId: meta.dataset.versionId, onSaved: () => window.location.reload()}));
+    document.getElementById('btn-delete-contract')?.addEventListener('click', event =>
+        ContractActions.remove(contract, {opener: event.currentTarget, onDeleted: deleted => {
+            // The dashboard shows the confirmation, with Undo.
+            ContractActions.announceDeleted(deleted);
+            window.location.href = meta.dataset.dashboardUrl || '/';
+        }}));
 });

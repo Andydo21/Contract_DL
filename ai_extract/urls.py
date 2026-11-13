@@ -34,6 +34,7 @@ urlpatterns = [
     path("contracts/<int:contract_id>/summary/changes/", views.api_summary_changes, name="ai_summary_changes"),
     path("contracts/<int:contract_id>/summary/sections/", views.api_summary_sections, name="ai_summary_sections"),
     path("contracts/<int:contract_id>/summary/export/", views.api_summary_export, name="ai_summary_export"),
+    path("contracts/<int:contract_id>/summary/suggest/", views.api_summary_suggest, name="ai_summary_suggest"),
 
     # ── Summary Lab (test screen at /ai-extract/summary-lab/) ───────────────
     path("summary-lab/health/", views.api_summary_lab_health, name="ai_summary_lab_health"),
