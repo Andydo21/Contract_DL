@@ -15,14 +15,10 @@ class BlockchainConfig(AppConfig):
         import time
         # Give some time for migrations to complete
         time.sleep(5)
-        from django.utils import timezone
-        from .models import BlockchainNetwork, SmartContract
-        from django.db import connection
         try:
-            with connection.cursor() as cursor:
-                tables = connection.introspection.table_names()
-                if "blockchain_blockchainnetwork" not in tables:
-                    return
+            from .repositories import BookRepository
+            if not BookRepository.table_exists("blockchain_blockchainnetwork"):
+                return
             
             # The network the ledger book files into (channel, chaincode, orderer, peer, gateway).
             from .book import network

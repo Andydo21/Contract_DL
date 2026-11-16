@@ -1,6 +1,7 @@
 import json
 from django.http import JsonResponse as DjangoJsonResponse
 from .services import WorkflowService, KeyManagementService
+from .repositories import WorkflowRepository
 
 def JsonResponse(data, status=200, **kwargs):
     kwargs.setdefault('json_dumps_params', {})['ensure_ascii'] = False
@@ -12,11 +13,8 @@ workflow_service = WorkflowService()
 from django.shortcuts import render
 
 def index(request):
-    from django.db import connections
     try:
-        for alias in ['default', 'contract_db']:
-            with connections[alias].cursor() as cursor:
-                cursor.execute('SELECT 1')
+        WorkflowRepository.ping_databases()
         return JsonResponse({"status": "healthy", "service": "workflow_service", "database_connected": True})
     except Exception:
         return JsonResponse({"status": "degraded", "service": "workflow_service", "database_connected": False}, status=503)
@@ -24,7 +22,7 @@ def index(request):
 
 def workflow_board_page(request):
     """Render Workflow Board UI page."""
-    return render(request, 'workflow/workflow_board.html')
+    return render(request, 'approvals/workflow_board.html')
 
 
 def workflow_detail_page(request, workflow_id):
@@ -36,7 +34,7 @@ def workflow_detail_page(request, workflow_id):
             request.GET.get('format') == 'json' or
             'application/json' in request.headers.get('Accept', '')
         )
-        return JsonResponse({"error": "Workflow not found"}, status=404) if is_ajax else render(request, '404.html', status=404)
+        return JsonResponse({"error": "Workflow not found"}, status=404) if is_ajax else render(request, 'common/not_found.html', status=404)
 
     is_json = (
         request.headers.get('x-requested-with') == 'XMLHttpRequest' or
@@ -53,7 +51,7 @@ def workflow_detail_page(request, workflow_id):
         'contract_code': wf_dict.get('contract_code', '')
     } if wf_dict.get('contract_id') else None
 
-    return render(request, 'workflow/workflow_detail.html', {
+    return render(request, 'approvals/workflow_detail.html', {
         'workflow': wf_dict,
         'contract': contract_obj,
         'version_number': wf_dict.get('version_number', 1)
@@ -141,7 +139,8 @@ def approve_step(request, step_id):
             is_manager=body.get("is_manager", False),
         )
     except ValueError as ve:
-        return JsonResponse({"error": str(ve)}, status=400 if "action" in str(ve) else 404)
+        # Only a missing step is 404; a blocked step (unmet dependency, signing step, permission) is a bad request.
+        return JsonResponse({"error": str(ve)}, status=404 if str(ve) == "Step not found" else 400)
 
     return JsonResponse({
         "success": True,
@@ -299,6 +298,13 @@ def delete_step_view(request, step_id):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+def delete_workflows_for_version_view(request, version_id):
+    """POST /workflows/versions/<version_id>/delete/ (the contract web, when a contract is deleted)"""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    return JsonResponse({"success": True, "deleted": workflow_service.delete_workflows_for_version(version_id)})
+
+
 def add_dependency_view(request, workflow_id):
     """POST /workflows/<workflow_id>/dependencies/add/"""
     if request.method != "POST":
@@ -349,7 +355,7 @@ def delete_dependency_view(request, dependency_id):
 
 def _step_to_dict(st):
     approvals_list = []
-    approvals = list(st.approvals.all().order_by('id'))
+    approvals = WorkflowRepository.step_approvals(st)
     for app in approvals:
         approvals_list.append({
             "user_id": app.user_id,

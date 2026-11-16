@@ -14,6 +14,7 @@ urlpatterns = [
     path('workflows/steps/<int:step_id>/approve/', views.approve_step, name='approve_step'),
     path('workflows/steps/<int:step_id>/update_role/', views.update_step_role, name='update_step_role'),
     path('workflows/steps/<int:step_id>/delete/', views.delete_step_view, name='delete_step_view'),
+    path('workflows/versions/<int:version_id>/delete/', views.delete_workflows_for_version_view, name='delete_workflows_for_version'),
     path('workflows/<int:workflow_id>/insert_step/', views.insert_step_view, name='insert_step_view'),
     path('workflows/<int:workflow_id>/dependencies/add/', views.add_dependency_view, name='add_dependency_view'),
     path('dependencies/<int:dependency_id>/delete/', views.delete_dependency_view, name='delete_dependency_view'),

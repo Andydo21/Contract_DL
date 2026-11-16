@@ -29,13 +29,13 @@ Chỉ còn một ứng dụng xử lý AI: `ai_extract`. `a3/documents` và các
 
 ```powershell
 .\.venv\Scripts\python.exe manage.py check
-.\.venv\Scripts\python.exe manage.py test contracts.tests.test_layered_architecture contracts.tests.test_intelligence contracts.tests.test_ledger NewIdea.tests.test_enterprise NewIdea.tests.test_contract_search ai_extract.tests.test_a3_bridge ai_extract.tests.test_hybrid_retrieval ai_extract.tests.test_contract_structure ai_extract.tests.test_surya_ocr shared.tests.test_qwen_gateway --settings=config.intelligence_test_settings --noinput
+.\.venv\Scripts\python.exe manage.py test contracts.tests.test_layered_architecture contracts.tests.test_intelligence contracts.tests.test_ledger legal_ai.tests.test_enterprise legal_ai.tests.test_contract_search ai_extract.tests.test_a3_bridge ai_extract.tests.test_hybrid_retrieval ai_extract.tests.test_contract_structure ai_extract.tests.test_surya_ocr shared.tests.test_qwen_gateway --settings=config.intelligence_test_settings --noinput
 ```
 
 `test_layered_architecture.py` kiểm tra không truy vấn model trực tiếp ở view/service, không dùng HttpRequest/HttpResponse trong service, cùng hành vi endpoint và phân quyền công ty. Các kiểm thử dùng SQLite cô lập, không chạy migration trên Neon hoặc gửi hợp đồng thật đến AI.
 
 Kiểm thử nằm trong `tests/` của từng app. Các nhóm route hợp đồng nằm trong `views/knowledge_urls.py` và `views/ledger_urls.py`. Mã hóa tài liệu và tạo PDF nằm trong `services/`. API blockchain cũ và trang explorer cũ đã được bỏ; dùng `/contract-ledger/` và `/api/ledger/`.
 
-Các route debug `/developer-test/`, `/api/developer-test/run/` và API hỏi của prototype NewIdea đã được bỏ. API phiên bản và workflow kiểm tra đăng nhập và quyền công ty trước khi đọc dữ liệu hoặc gọi dịch vụ ngoài. Tài khoản chưa gắn công ty không được liệt kê toàn bộ hợp đồng.
+Các route debug `/developer-test/`, `/api/developer-test/run/` và API hỏi của prototype legal_ai đã được bỏ. API phiên bản và workflow kiểm tra đăng nhập và quyền công ty trước khi đọc dữ liệu hoặc gọi dịch vụ ngoài. Tài khoản chưa gắn công ty không được liệt kê toàn bộ hợp đồng.
 
-Luồng web được giữ: tạo hợp đồng/phiên bản và lưu file → A3 trích xuất trang, block và cấu trúc điều/khoản → lập chỉ mục theo đúng công ty/phiên bản → NewIdea tìm và trả bằng chứng → chuyên gia tạo case, reviewer duyệt → workflow và ledger ký/kiểm chứng. Kiểm thử dùng gateway giả lập; kết quả không xác nhận Docker, Kaggle hay Fabric đang chạy thật.
+Luồng web được giữ: tạo hợp đồng/phiên bản và lưu file → A3 trích xuất trang, block và cấu trúc điều/khoản → lập chỉ mục theo đúng công ty/phiên bản → legal_ai tìm và trả bằng chứng → chuyên gia tạo case, reviewer duyệt → workflow và ledger ký/kiểm chứng. Kiểm thử dùng gateway giả lập; kết quả không xác nhận Docker, Kaggle hay Fabric đang chạy thật.

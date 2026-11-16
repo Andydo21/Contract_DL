@@ -1,4 +1,14 @@
+# Contract Guard AI - toàn bộ hệ thống trong một file. Bật tất cả: .\run-all.bat
+# Tên project cố định để luôn dùng lại các volume dữ liệu hiện có (contract_dl_*).
+name: contract_dl
+
+x-django-db: &django-db
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_SSLMODE: disable
+
 services:
+  # ---------------------------------------------------------------- dữ liệu
   postgres:
     image: postgres:15-alpine
     container_name: contract_postgres
@@ -18,140 +28,172 @@ services:
       retries: 20
     networks:
       - riskdl-net
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    container_name: contract_qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6335:6333"
+    volumes:
+      - ./runtime/qdrant:/qdrant/storage
+    networks:
+      - riskdl-net
+
+  # Đồ thị tri thức; dữ liệu trong runtime/neo4j của dự án.
+  neo4j:
+    image: neo4j:5-community
+    container_name: contract_neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in the root .env}
+    ports:
+      - "127.0.0.1:7475:7474"
+      - "127.0.0.1:7688:7687"
+    volumes:
+      - ./runtime/neo4j/data:/data
+      - ./runtime/neo4j/logs:/logs
+    networks:
+      - riskdl-net
+
+  # ---------------------------------------------------------------- ứng dụng (cùng image riskdl-web-local)
   web:
+    image: riskdl-web-local:latest
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile.web-local
     container_name: riskdl_web
-    restart: always
+    restart: unless-stopped
+    command: python manage.py runserver 0.0.0.0:8000 --noreload
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-contract_db}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_SSLMODE=disable
-      - WORKFLOW_SERVICE_URL=http://workflow-service:8000
-      - BLOCKCHAIN_SERVICE_URL=http://blockchain-service:8000
+      <<: *django-db
+      SECRET_KEY: ${SECRET_KEY}
+      DB_NAME: ${DB_NAME:-contract_db}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      WORKFLOW_SERVICE_URL: http://workflow-service:8000
+      BLOCKCHAIN_SERVICE_URL: http://blockchain-service:8000
+      AI_SERVICE_URL: http://ai:8000
+      AI_SERVICE_ROLE: web
+      RAG_INFERENCE_URL: ${A3_INFERENCE_URL:-http://host.docker.internal:8010}
+      A3_ENTITY_PROVIDER: gliner
       # Unified Kaggle/ngrok endpoint: summarize + entities + clauses.
-      - KAGGLE_QWEN_SERVICE_URL=${KAGGLE_QWEN_SERVICE_URL}
-      - COLPALI_BASE_URL=${COLPALI_BASE_URL:-}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
-      - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
-      - QDRANT_URL=${QDRANT_URL:-}
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - NEO4J_URI=${NEO4J_DOCKER_URI:-}
-      - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
-      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      KAGGLE_QWEN_SERVICE_URL: ${KAGGLE_QWEN_SERVICE_URL}
+      COLPALI_BASE_URL: ${COLPALI_BASE_URL:-}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-}
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+      QDRANT_URL: ${QDRANT_URL:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      NEO4J_URI: ${NEO4J_DOCKER_URI:-}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
     networks:
       - riskdl-net
 
-  ai-summary:
-    build:
-      context: ./ai_summary
-      dockerfile: Dockerfile
-    container_name: riskdl_ai_summary
-    restart: always
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - KAGGLE_AI_URL=${KAGGLE_AI_URL:-}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-}
-      - QWEN_MODEL_ID=${QWEN_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
-    ports:
-      - "8004:8000"
-    volumes:
-      - ./ai_summary:/app
-      - ./shared:/app/shared
-    networks:
-      - riskdl-net
-
-  # The ledger book: the contract web writes version-bound operations to Fabric itself (ledger_service.py) and files
-  # what Fabric confirmed here (hash proofs, transactions, audits, certificates, signatures, verifications).
-  blockchain-service:
-    build:
-      context: ./blockchain_service
-      dockerfile: Dockerfile
-    container_name: blockchain_service
-    restart: always
+  # Gọi mô hình (Qwen), tìm kiếm tri thức, job trích xuất / phân tích rủi ro; web chuyển việc sang đây (AI_SERVICE_URL).
+  ai:
+    image: riskdl-web-local:latest
+    container_name: riskdl_ai
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py run_ai_service
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - FABRIC_GATEWAY_URL=http://fabric-gateway:5000
-      - LEDGER_BOOK_TOKEN=${LEDGER_BOOK_TOKEN}
-      - DB_NAME=${BLOCKCHAIN_DB_NAME:-blockchain_db}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_SSLMODE=disable
+      <<: *django-db
+      AI_SERVICE_ROLE: ai
+      A3_ENTITY_PROVIDER: gliner
+      RAG_INFERENCE_URL: ${A3_INFERENCE_URL:-http://host.docker.internal:8010}
+      NEO4J_URI: ${NEO4J_DOCKER_URI:-}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+
+  workflow-service:
+    image: riskdl-web-local:latest
+    container_name: workflow_service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *django-db
+      SECRET_KEY: ${SECRET_KEY}
+      WORKFLOW_SERVICE_TOKEN: ${WORKFLOW_SERVICE_TOKEN}
+      DB_NAME: ${WORKFLOW_DB_NAME:-workflow_db}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      KAGGLE_AI_URL: ${KAGGLE_AI_URL}
+    ports:
+      - "127.0.0.1:8003:8000"
+    volumes:
+      - ./workflow_service:/app
+      - ./shared:/app/shared
+      - ./frontend:/app/frontend:ro
+    networks:
+      - riskdl-net
+
+  # Sổ giao dịch: web ghi thao tác lên Fabric (ledger_service.py) và lưu ở đây những gì Fabric đã xác nhận
+  # (bằng chứng hash, giao dịch, kiểm toán, chứng chỉ, chữ ký, kiểm chứng).
+  blockchain-service:
+    image: riskdl-web-local:latest
+    container_name: blockchain_service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *django-db
+      SECRET_KEY: ${SECRET_KEY}
+      FABRIC_GATEWAY_URL: http://fabric-gateway:5000
+      LEDGER_BOOK_TOKEN: ${LEDGER_BOOK_TOKEN}
+      DB_NAME: ${BLOCKCHAIN_DB_NAME:-blockchain_db}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "127.0.0.1:8002:8000"
     volumes:
       - ./blockchain_service:/app
       - ./shared:/app/shared
     networks:
       - riskdl-net
 
-  workflow-service:
-    build:
-      context: ./workflow_service
-      dockerfile: Dockerfile
-    container_name: workflow_service
-    restart: always
+  ledger-worker:
+    image: riskdl-web-local:latest
+    container_name: contract_ledger_worker
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py ledger_worker
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - WORKFLOW_SERVICE_TOKEN=${WORKFLOW_SERVICE_TOKEN}
-      - DB_NAME=${WORKFLOW_DB_NAME:-workflow_db}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_SSLMODE=disable
-      - KAGGLE_AI_URL=${KAGGLE_AI_URL}
+      <<: *django-db
+      # .env trỏ tới cổng trên máy để chạy ngoài Docker; trong Docker gọi theo tên dịch vụ.
+      BLOCKCHAIN_SERVICE_URL: http://blockchain-service:8000
     volumes:
-      - ./workflow_service:/app
-      - ./shared:/app/shared
+      - .:/app
     networks:
       - riskdl-net
 
-  gateway:
-    image: nginx:alpine
-    container_name: riskdl_gateway
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - web
-      - workflow-service
-    networks:
-      - riskdl-net
-
-  # Hyperledger Fabric v2.5 Network Services
-
-  fabric-init:
-    image: hyperledger/fabric-tools:2.5
-    container_name: fabric_init
-    volumes:
-      - ./fabric:/fabric
-    entrypoint: /bin/bash /fabric/bootstrap-init.sh
-    networks:
-      - riskdl-net
-
+  # ---------------------------------------------------------------- Hyperledger Fabric 2.5
   orderer.example.com:
     image: hyperledger/fabric-orderer:2.5
-    container_name: orderer.example.com
+    container_name: contract_orderer
+    restart: unless-stopped
     environment:
       - FABRIC_LOGGING_SPEC=INFO
       - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
@@ -175,19 +217,18 @@ services:
       - ORDERER_ADMIN_TLS_CLIENTPRIVATEKEY=/fabric/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.key
       - ORDERER_ADMIN_TLS_CLIENTCERTIFICATE=/fabric/crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
     volumes:
-      - ./fabric:/fabric
+      - ./blockchain/fabric:/fabric
+      - contract-orderer-ledger:/var/hyperledger/production/orderer
     ports:
       - "7050:7050"
       - "7053:7053"
-    depends_on:
-      fabric-init:
-        condition: service_completed_successfully
     networks:
       - riskdl-net
 
   peer0.org1.example.com:
     image: hyperledger/fabric-peer:2.5
-    container_name: peer0.org1.example.com
+    container_name: contract_peer
+    restart: unless-stopped
     environment:
       - FABRIC_LOGGING_SPEC=INFO
       - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
@@ -208,48 +249,37 @@ services:
       - CORE_PEER_MSPCONFIGPATH=/fabric/crypto-config/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock
-      - ./fabric:/fabric
+      - ./blockchain/fabric:/fabric
+      - contract-peer-ledger:/var/hyperledger/production
     ports:
       - "7051:7051"
-    depends_on:
-      fabric-init:
-        condition: service_completed_successfully
-    networks:
-      - riskdl-net
-
-  fabric-cli:
-    image: hyperledger/fabric-tools:2.5
-    container_name: fabric_cli
-    volumes:
-      - ./fabric:/fabric
-    entrypoint: /bin/bash /fabric/bootstrap-channel.sh
-    depends_on:
-      - orderer.example.com
-      - peer0.org1.example.com
     networks:
       - riskdl-net
 
   fabric-chaincode:
-    image: golang:1.20-alpine
-    container_name: fabric_chaincode
-    working_dir: /chaincode
-    volumes:
-      - ./fabric/chaincode:/chaincode
+    # Biên dịch sẵn trong image; sửa file .go thì: docker compose build fabric-chaincode
+    build: ./blockchain/fabric/chaincode
+    image: contract-chaincode-local:latest
+    container_name: contract_chaincode
+    restart: unless-stopped
     environment:
-      - CHAINCODE_SERVER_ADDRESS=0.0.0.0:9999
-    entrypoint: /bin/sh /chaincode/start.sh
-    depends_on:
-      fabric-init:
-        condition: service_completed_successfully
+      CHAINCODE_SERVER_ADDRESS: 0.0.0.0:9999
+      ENTERPRISE_GATEWAY_CERT_PATH: /gateway-cert.pem
+    volumes:
+      - ./blockchain/fabric/chaincode:/chaincode:ro   # chỉ để đọc package_id.txt do fabric-cli ghi
+      - ./blockchain/fabric/crypto-config/peerOrganizations/org1.example.com/users/User1@org1.example.com/msp/signcerts/User1@org1.example.com-cert.pem:/gateway-cert.pem:ro
     networks:
       - riskdl-net
 
   fabric-gateway:
-    image: node:18-alpine
-    container_name: fabric_gateway
-    working_dir: /fabric/gateway
+    # Thư viện cài sẵn trong image; server.js gắn từ ngoài nên sửa xong chỉ cần restart.
+    build: ./blockchain/fabric/gateway
+    image: contract-fabric-gateway-local:latest
+    container_name: contract_fabric_gateway
+    restart: unless-stopped
     volumes:
-      - ./fabric:/fabric
+      - ./blockchain/fabric/crypto-config:/opt/crypto-config:ro
+      - ./blockchain/fabric/gateway/server.js:/opt/gateway/server.js:ro
     ports:
       - "5000:5000"
     environment:
@@ -258,44 +288,88 @@ services:
       - CHANNEL_NAME=contracts-channel
       - CHAINCODE_NAME=ContractVerifyChaincode
       - FABRIC_GATEWAY_TOKEN=${FABRIC_GATEWAY_TOKEN}
-    entrypoint: /bin/sh -c "npm install && npm start"
     depends_on:
-      fabric-cli:
-        condition: service_completed_successfully
-      fabric-chaincode:
-        condition: service_started
+      - fabric-chaincode
     networks:
       - riskdl-net
 
-  explorer-db:
-    image: hyperledger/explorer-db:latest
-    container_name: explorer_db
-    environment:
-      - DATABASE_DATABASE=fabricexplorer
-      - DATABASE_USERNAME=hppoc
-      - DATABASE_PASSWORD=password
-    networks:
-      - riskdl-net
-
-  explorer:
-    image: hyperledger/explorer:latest
-    container_name: explorer
-    environment:
-      - DATABASE_HOST=explorer-db
-      - DATABASE_PORT=5432
-      - DATABASE_DATABASE=fabricexplorer
-      - DATABASE_USERNAME=hppoc
-      - DATABASE_PASSWORD=password
-      - DISCOVERY_AS_LOCALHOST=false
+  # Chỉ dùng một lần khi dựng mạng Fabric mới (tạo crypto, kênh):
+  #   docker compose --profile fabric-bootstrap run --rm fabric-init
+  #   docker compose up -d orderer.example.com peer0.org1.example.com
+  #   docker compose --profile fabric-bootstrap run --rm fabric-cli
+  fabric-init:
+    profiles: [fabric-bootstrap]
+    image: hyperledger/fabric-tools:2.5
+    container_name: contract_fabric_init
     volumes:
-      - ./fabric/explorer/config.json:/opt/explorer/app/platform/fabric/config.json
-      - ./fabric/explorer/connection-profile.json:/opt/explorer/app/platform/fabric/connection-profile/first-network.json
-      - ./fabric/crypto-config:/tmp/crypto
-    ports:
-      - "8090:8080"
-    depends_on:
-      - explorer-db
-      - fabric-gateway
+      - ./blockchain/fabric:/fabric
+    entrypoint: /bin/bash /fabric/bootstrap-init.sh
+    networks:
+      - riskdl-net
+
+  fabric-cli:
+    profiles: [fabric-bootstrap]
+    image: hyperledger/fabric-tools:2.5
+    container_name: contract_fabric_cli
+    volumes:
+      - ./blockchain/fabric:/fabric
+    entrypoint: /bin/bash /fabric/bootstrap-channel.sh
+    networks:
+      - riskdl-net
+
+  # Tuỳ chọn: chạy GPU runtime trong Docker thay cho start-a3-inference.ps1 trên Windows.
+  #   docker compose --profile linux-runtime up -d a3-inference
+  a3-inference:
+    profiles: [linux-runtime]
+    image: riskdl-web-local:latest
+    container_name: contract_a3_inference
+    restart: unless-stopped
+    gpus: all
+    working_dir: /app
+    command: sh /app/ai/evaluation/start_a3_linux_runtime.sh
+    environment:
+      HF_HOME: /model-cache
+      HF_HUB_CACHE: /model-cache/hub
+      HUGGINGFACE_HUB_CACHE: /model-cache/hub
+      BGE_LOCAL_CACHE: /model-cache/hub
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      RAG_TEXT_DEVICE: cuda
+      RAG_STREAM_CHECKPOINTS: '1'
+      RAG_IDLE_UNLOAD_SECONDS: '120'
+      GLINER_MODEL_PATH: /models/a3/gliner-relex-multi-v1.0
+      GLINER_ENCODER_CACHE: /models/a3/gliner-encoder-cache
+      GLINER2_MODEL_PATH: /models/a3/gliner2-base-v1
+      NLI_MODEL_PATH: /models/a3/nli-deberta-v3-xsmall
+      BGE_MODEL_PATH: /models/a3/bge-m3
+      TABLE_COLUMN_MODEL_PATH: /models/a3/table-transformer
+      QWEN_TOKENIZER_PATH: /models/a3/qwen-tokenizer
+      A3_LLAMA_DIR: /models/a3/llama-linux-cuda128
+      SURYA_INFERENCE_BACKEND: llamacpp
+      SURYA_GGUF_LOCAL_MODEL_PATH: /models/a3/surya/surya-2.gguf
+      SURYA_GGUF_LOCAL_MMPROJ_PATH: /models/a3/surya/surya-2-mmproj.gguf
+      SURYA_INFERENCE_PARALLEL: '2'
+      SURYA_INFERENCE_CTX_SIZE: '32768'
+      SURYA_INFERENCE_KEEP_ALIVE: 'True'
+      SURYA_INFERENCE_AUTOSTART: 'False'
+      SURYA_INFERENCE_URL: http://127.0.0.1:8011/v1
+      SURYA_MANAGED_BACKEND: '1'
+      SURYA_EXCLUSIVE_GPU: '1'
+      SURYA_PAGE_GENERATION_TIMEOUT: '0'
+      SURYA_REQUEST_GENERATION_TIMEOUT: '0'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+      A3_DOCKER_LOG_CONTAINER: ''
+    volumes:
+      - .:/app
+      - ./runtime/hf_cache:/model-cache
+      - ./runtime/models:/models/a3
+    healthcheck:
+      test: ['CMD', '/app/runtime/linux-env/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/rag/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 90s
     networks:
       - riskdl-net
 
@@ -305,3 +379,5 @@ networks:
 
 volumes:
   contract-postgres-data:
+  contract-orderer-ledger:
+  contract-peer-ledger:

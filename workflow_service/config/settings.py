@@ -31,7 +31,8 @@ INSTALLED_APPS = [
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        # The pages live in the project's frontend/approvals (mounted at /app/frontend in the container).
+        'DIRS': [d for d in (BASE_DIR / 'frontend', BASE_DIR.parent / 'frontend') if d.is_dir()],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [

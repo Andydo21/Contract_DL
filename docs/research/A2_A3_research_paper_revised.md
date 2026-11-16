@@ -312,7 +312,7 @@ Cơ chế thu hẹp ngữ cảnh theo phạm vi quan hệ giúp giảm kích th�
 
 Thử nghiệm Map riêng được báo cáo mất 233,60 giây; phép thử Reduce trên đầu ra Map đã lưu mất 55,35 giây và vẫn còn nhận định áp dụng sai chủ thể [19]. Hai phép đo có phạm vi khác nhau, nên không cộng thành một thời gian end-to-end đã đo. Các lượt HTTP tải nâng trước đó có giá trị 193,17 hoặc 227,80 giây cũng thuộc lịch sử cấu hình khác; chúng không được đưa vào Bảng 3 như một baseline được kiểm soát.
 
-Bộ kiểm thử liên quan đến hệ thống AI hỏi đáp (NewIdea), trích xuất cấu trúc và phân lớp được tác giả báo cáo chạy 572 trường hợp, trong đó 571 đạt và một bỏ qua; lần kiểm tra mục tiêu cuối có 172 trường hợp đạt [20]. Các test xét giữ nguyên văn, tách phạm vi tài liệu, giữ cấu trúc bảng, phạm vi ý hỏi, giới hạn cạnh gửi vào prompt và tránh mở rộng qua node cha chung. Hai tập test không được cộng thành số ca độc lập vì chưa xác định phần chồng lặp.
+Bộ kiểm thử liên quan đến hệ thống AI hỏi đáp (legal_ai), trích xuất cấu trúc và phân lớp được tác giả báo cáo chạy 572 trường hợp, trong đó 571 đạt và một bỏ qua; lần kiểm tra mục tiêu cuối có 172 trường hợp đạt [20]. Các test xét giữ nguyên văn, tách phạm vi tài liệu, giữ cấu trúc bảng, phạm vi ý hỏi, giới hạn cạnh gửi vào prompt và tránh mở rộng qua node cha chung. Hai tập test không được cộng thành số ca độc lập vì chưa xác định phần chồng lặp.
 
 Các test dùng dữ liệu kiểm soát để kiểm tra logic chương trình được phân biệt với lượt gọi Qwen thực. Chúng có thể cung cấp bằng chứng cho những bất biến cụ thể khi có log và snapshot tương ứng, nhưng không đo tỷ lệ đúng của mô hình trên kho tài liệu. Bài không chuyển số ca test đạt thành chỉ số độ chính xác QA hoặc chất lượng quan hệ ngữ nghĩa.
 

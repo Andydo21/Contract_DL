@@ -12,10 +12,10 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-from evaluation.ablation_adapters import messages
-from evaluation.io import digest
-from evaluation.metrics import evidence_metrics
-from evaluation.runners.common import Gateway, check_response
+from ai.evaluation.ablation_adapters import messages
+from ai.evaluation.io import digest
+from ai.evaluation.metrics import evidence_metrics
+from ai.evaluation.runners.common import Gateway, check_response
 
 ROOT = Path('/app')
 BASE = ROOT / 'research_evaluation_20261030'
@@ -23,7 +23,7 @@ OUT = BASE / 'E2_probe'
 seed_data = json.loads((OUT / 'retrieval_seed.json').read_text(encoding='utf8'))
 graphs = json.loads((OUT / 'graph_snapshots.json').read_text(encoding='utf8'))
 question = json.loads((BASE / 'pilot50_current_questions.jsonl').read_text(encoding='utf8').splitlines()[0])
-config = json.loads((ROOT / 'evaluation/config.json').read_text(encoding='utf8'))
+config = json.loads((ROOT / 'ai/evaluation/config.json').read_text(encoding='utf8'))
 gateway = Gateway(config['generator'])
 models = gateway.health()
 

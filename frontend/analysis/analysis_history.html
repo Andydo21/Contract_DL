@@ -1,0 +1,90 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Analysis History | Contract Guard AI</title>
+    <meta name="description" content="Full audit trail of all AI contract analysis runs — scores, findings, and contract links.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'analysis/css/analysis_history.css' %}?v=2.1.3">
+    <link rel="stylesheet" href="{% static 'common/css/theme.css' %}?v=2.1.6">
+</head>
+<body class="cg-app">
+    {% include 'common/_sidebar.html' with active='analyses' %}
+    <div class="cg-main">
+<div class="app-container">
+
+    <!-- Header -->
+    <div class="cg-pagehead">
+        <div>
+            <h1 class="cg-title">Lịch sử phân tích</h1>
+            <p class="cg-subtitle">Kết quả phân tích rủi ro của từng phiên bản hợp đồng do AI thực hiện.</p>
+        </div>
+    </div>
+    <div class="cg-kpis"><div class="cg-kpi"><div class="cg-kpi-icon blue"><i class="fa-solid fa-chart-line"></i></div><div><div class="cg-kpi-label">Số lần phân tích</div><div class="cg-kpi-value" id="stat-total">—</div></div></div><div class="cg-kpi"><div class="cg-kpi-icon red"><i class="fa-solid fa-triangle-exclamation"></i></div><div><div class="cg-kpi-label">Rủi ro cao</div><div class="cg-kpi-value" id="stat-high">—</div></div></div><div class="cg-kpi"><div class="cg-kpi-icon amber"><i class="fa-solid fa-gauge"></i></div><div><div class="cg-kpi-label">Điểm rủi ro trung bình</div><div class="cg-kpi-value" id="stat-avg">—</div></div></div></div>
+
+    <!-- Page Body -->
+    <div class="page-body">
+
+        <!-- Sidebar Filters -->
+        <aside class="filter-sidebar">
+            <h3 class="sidebar-title"><i class="fa-solid fa-sliders"></i> Filters</h3>
+
+            <div class="filter-group">
+                <label class="filter-label">Search Contract</label>
+                <div class="search-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="filter-search" placeholder="Code or title..." autocomplete="off">
+                </div>
+            </div>
+
+            <div class="filter-group">
+                <label class="filter-label">Risk Level</label>
+                <div class="filter-chips" id="filter-risk">
+                    <button class="chip active" data-val="ALL">All</button>
+                    <button class="chip chip-high" data-val="HIGH">High</button>
+                    <button class="chip chip-medium" data-val="MEDIUM">Medium</button>
+                    <button class="chip chip-low" data-val="LOW">Low</button>
+                </div>
+            </div>
+
+            <div class="filter-group">
+                <label class="filter-label">Sort By</label>
+                <select class="filter-select" id="filter-sort">
+                    <option value="newest">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="score-desc">Highest Score</option>
+                    <option value="score-asc">Lowest Score</option>
+                </select>
+            </div>
+
+            <button class="btn btn-reset" id="btn-reset-filters">
+                <i class="fa-solid fa-rotate-left"></i> Reset Filters
+            </button>
+        </aside>
+
+        <!-- Main Analysis List -->
+        <main class="history-main">
+            <div class="history-header">
+                <h1 class="page-title"><i class="fa-solid fa-clock-rotate-left"></i> AI Analysis History</h1>
+                <span class="result-count" id="result-count">Loading...</span>
+            </div>
+            <div class="analyses-list" id="analyses-list">
+                <div class="loading-placeholder">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    <p>Loading analysis history...</p>
+                </div>
+            </div>
+        </main>
+
+    </div>
+</div>
+    </div><!-- /cg-main -->
+
+<script src="{% static 'analysis/js/analysis_history.js' %}?v=2.1.3"></script>
+</body>
+</html>

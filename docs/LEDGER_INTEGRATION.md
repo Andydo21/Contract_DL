@@ -22,8 +22,8 @@ Sau commit chữ ký, worker đồng bộ bước workflow tương ứng. Nếu 
 Các migration đã áp dụng: contracts 0011/0012 (credential, outbox, permission), workflow 0009 (đánh dấu bước ký). Fabric đã nâng chaincode lên version 2.0, sequence 2; ledger/chứng chỉ được giữ nguyên.
 
 ```powershell
-.\start-services.ps1
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml logs --tail 30 ledger-worker
+.\run-all.bat
+docker compose logs --tail 30 ledger-worker
 ```
 
 `FABRIC_GATEWAY_TOKEN` và `WORKFLOW_SERVICE_TOKEN` nằm trong `.env` gốc, không commit vào git. Gateway kiểm tra service token; chaincode chỉ nhận thao tác enterprise từ chứng chỉ gateway được pin. Workflow đối chiếu tài khoản/công ty/role từ database hợp đồng, không tin các trường user/company/is_manager trong body.
@@ -43,13 +43,13 @@ Các giao dịch giả đã lưu trong hệ thống cũ không được tự đ�
 Tests mặc định dùng SQLite cô lập, không thay đổi Neon:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml exec -T web python manage.py test contracts.tests.test_ledger contracts.tests.test_intelligence --settings=config.intelligence_test_settings --noinput
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml exec -T workflow-service python manage.py test workflow.test_signing_policy workflow.test_tenant_guard --settings=config.test_settings --noinput
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml exec -T fabric-chaincode go test ./...
+docker compose exec -T web python manage.py test contracts.tests.test_ledger contracts.tests.test_intelligence --settings=config.intelligence_test_settings --noinput
+docker compose exec -T workflow-service python manage.py test workflow.test_signing_policy workflow.test_tenant_guard --settings=config.test_settings --noinput
+docker compose exec -T fabric-chaincode go test ./...
 ```
 
 Smoke test live là opt-in: tạo dữ liệu người/công ty/file giả trong SQLite và ghi một record mẫu vào Fabric, không tạo hoặc sửa hợp đồng/tài khoản trong Neon. Lần kiểm tra mới nhất đã xác nhận mất phản hồi sau commit và phục hồi đúng transaction cũ tại block 7.
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml exec -T -e LEDGER_LIVE_SMOKE=1 web python manage.py test contracts.tests.test_ledger.LedgerTests.test_live_commit_and_lost_response_recovery --settings=config.intelligence_test_settings --noinput
+docker compose exec -T -e LEDGER_LIVE_SMOKE=1 web python manage.py test contracts.tests.test_ledger.LedgerTests.test_live_commit_and_lost_response_recovery --settings=config.intelligence_test_settings --noinput
 ```

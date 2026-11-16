@@ -133,10 +133,10 @@ nạp một lần. Bộ test cuối: 363 test, 361 qua, 2 live test tùy chọn 
 
 ## Bật nhanh và xem log
 
-Từ `D:\Django_project\Contract_DL\Contract_DL`, khi Docker Desktop đã bật:
+Từ `D:\Django_project\Contract_DL\Contract_DL` (script tự bật Docker Desktop nếu đang tắt):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-services.ps1 -Logs
+.\run-all.bat -Logs
 ```
 
 Lệnh bật nhóm A2/A3, sử dụng lại container/image/checkpoint hiện có và mở log
@@ -156,7 +156,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\show-logs.ps1 -Service Mod
 
 `-Service` nhận All/Web/Worker/Models/Surya/Neo4j/Qdrant. `-Tail 100` đổi số dòng
 đầu được đọc; `-Once` chỉ in log hiện tại rồi thoát. Log model lấy file stdout/
-stderr mới nhất trong `scratch/inference*-out.log` và `scratch/inference*-error.log`;
+stderr mới nhất trong `runtime/logs/inference*-out.log` và `runtime/logs/inference*-error.log`;
 Surya dùng `scratch/surya-out.log`, `scratch/surya-error.log`. Script in đường dẫn
 file đang theo dõi. Ctrl+C chỉ dừng các reader của script, dịch vụ vẫn chạy.
 Nếu mới bật notebook Kaggle, cần bảo đảm URL hiện tại được lưu trong `.env`.
@@ -167,30 +167,18 @@ Chạy từ thư mục chứa `manage.py`, dùng cấu hình Neon trong `.env` c
 Các image local đã được build trên máy này. Khi thay dependency, build lại bằng:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml build web ai-service ai-summary
+docker compose build web
 ```
 
-Chế độ mặc định dành cho máy 16 GB là trích xuất/hỏi đáp. Chỉ chạy web, knowledge-worker, Qdrant, Neo4j và yêu cầu khởi động runtime local nếu đủ RAM:
+Bật toàn bộ hệ thống (PostgreSQL, Neo4j, Qdrant, Fabric, web, AI, workflow, blockchain, ledger-worker và GPU runtime cổng 8010):
 
 ```powershell
-.\start-services.ps1
+.\run-all.bat
 ```
 
-Web ở chế độ AI: http://localhost:8000/contract-intelligence/. Gateway cổng 80 chỉ chạy trong chế độ All.
+Không bật GPU runtime: `.\run-all.bat -NoGpu`. Web: http://localhost:8000/.
 
-Chuyển sang ký/ghi blockchain (tạm dừng knowledge-worker, Qdrant, Neo4j và runtime model local):
-
-```powershell
-.\start-services.ps1 -Mode Ledger
-```
-
-Chạy cả hai nhóm cùng proxy/gateway cũ khi máy có đủ tài nguyên:
-
-```powershell
-.\start-services.ps1 -Mode All
-```
-
-`-SkipLocalInference` chỉ khởi động nhóm container, không nạp model. Nếu RAM trống dưới 4 GB, launcher báo lỗi rõ ràng và không khởi động runtime local; container AI vẫn chạy. Không coi việc bật container là xác nhận model đã sẵn sàng. Các dịch vụ ký/Fabric và proxy cũ đặt restart policy `no`, chỉ bật khi chọn chế độ phù hợp. Script không build image, chạy migration, bootstrap lại ledger hoặc xóa volume; sử dụng lại các container đã có. Chế độ Ledger yêu cầu mạng Fabric đã bootstrap trước đó.
+Script không build image, chạy migration, bootstrap lại ledger hoặc xóa volume; sử dụng lại các container đã có. Mạng Fabric phải được bootstrap trước đó. Bật container chưa có nghĩa là model đã sẵn sàng: bảng kiểm tra cuối script cho biết từng dịch vụ (kể cả GPU runtime) đã trả lời hay chưa.
 
 WSL được đặt giới hạn `memory=3GB` trong `%USERPROFILE%\.wslconfig` và `[experimental] autoMemoryReclaim=dropCache`. Script `scripts/apply-wsl-memory-limit.ps1` sao lưu cấu hình cũ nếu có và giữ các tùy chọn khác. Giới hạn áp dụng cho toàn bộ VM WSL 2; thay đổi cần khởi động lại WSL/Docker. Khi dữ liệu/graph tăng, đo lại RAM và OOM của container; 3 GB là cấu hình demo trên máy này, không phải sizing sản xuất. Dừng/bật service không giải quyết lỗi native đã ghi nhận khi đổi text model trong runtime local.
 
@@ -205,7 +193,7 @@ Kiểm tra trạng thái:
 AI và summary là proxy của notebook Kaggle. Nếu tunnel ngrok hết hạn, bật lại notebook, cập nhật `KAGGLE_AI_URL` và `KAGGLE_QWEN_SERVICE_URL` trong `.env`, rồi áp dụng biến môi trường mới:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.web-local.yml up -d --no-build web ai-service ai-summary workflow-service
+docker compose up -d --no-build web ai workflow-service
 ```
 
 ## Fabric của project này
@@ -216,7 +204,7 @@ Bootstrap giữ lại chứng chỉ và channel block khi chạy lại. Không x
 
 Blockchain Django gọi `http://fabric-gateway:5000` qua mạng Docker. Health của Fabric thực sự evaluate chaincode; health của blockchain kiểm tra cả Neon và Fabric. Lỗi ghi Fabric trả lỗi, không tạo transaction/block giả với trạng thái CONFIRMED. Verify lấy transaction và block từ ledger, đồng thời so sánh hash ledger với hash proof lưu trong database.
 
-Luồng mới tại http://localhost/contract-ledger/ dùng khóa RSA 3072 được quản lý khác duyệt, ký đúng manifest phiên bản và ghi qua outbox có retry/idempotency. Chaincode 2.0 kiểm tra chữ ký và binding công ty/người ký/khóa. API ghi/ký cũ đã ngừng nhận yêu cầu. Worker chạy cùng web qua `start-services.ps1`.
+Luồng mới tại http://localhost/contract-ledger/ dùng khóa RSA 3072 được quản lý khác duyệt, ký đúng manifest phiên bản và ghi qua outbox có retry/idempotency. Chaincode 2.0 kiểm tra chữ ký và binding công ty/người ký/khóa. API ghi/ký cũ đã ngừng nhận yêu cầu. Worker chạy cùng web qua `run-all.bat`.
 
 Smoke test ký RSA thật và phục hồi sau mất phản hồi đã thành công tại block 7: đọc lại đúng transaction đã commit, không gửi trùng. Đây là khóa được duyệt trong ứng dụng; chứng thư CA độc lập, HSM và hạ tầng nhiều tổ chức/HA vẫn chưa triển khai. Xem [LEDGER_INTEGRATION.md](LEDGER_INTEGRATION.md) để sử dụng, phân quyền và vận hành.
 
@@ -224,7 +212,7 @@ Theo [tài liệu Fabric 2.5](https://hyperledger-fabric.readthedocs.io/en/relea
 
 ## A2/A3 and Qdrant
 
-Qdrant starts with start-services.ps1; Windows port: 6335. RAG_INFERENCE_URL selects the gateway base URL for BGE and Surya routes. See [HACKATHON_DEMO.md](HACKATHON_DEMO.md) for configuration, A2 expert drafts and the labeled benchmark.
+Qdrant starts with run-all.bat; Windows port: 6335. RAG_INFERENCE_URL selects the gateway base URL for BGE and Surya routes. See [HACKATHON_DEMO.md](HACKATHON_DEMO.md) for configuration, A2 expert drafts and the labeled benchmark.
 
 ### Warm BGE/reranker runtime (2026-10-13)
 
@@ -581,7 +569,7 @@ is an unreviewed model inference, not independent evidence for contract facts.
 Amounts, dates, obligations and conditions remain contract-local.
 
 Completed graph snapshots queue identity work for `entity-worker` in
-`docker-compose.web-local.yml`. This worker uses existing BGE embeddings to find
+`docker-compose.yml`. This worker uses existing BGE embeddings to find
 bounded candidates and the existing multilingual GLiNER RelEx checkpoint to
 judge source pairs. It does not call Qwen. Names/similarity alone never merge
 identities; unresolved or competing candidates remain separate. The current

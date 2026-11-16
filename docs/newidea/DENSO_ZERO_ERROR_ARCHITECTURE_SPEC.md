@@ -1,6 +1,6 @@
 # HỆ THỐNG TRÍ TUỆ NHÀ MÁY DENSO - ZERO-ERROR COPILOT & EXPERT DISTILLATION
 ## TÀI LIỆU ĐẶC TẢ KIẾN TRÚC & QUY TRÌNH THIẾT KẾ PHẦN MỀM (SPECIFICATION)
-**Phiên bản:** 2.0 (NewIdea Release) | **Mục tiêu:** Độ chính xác tuyệt đối (Zero Hallucination) trong Môi trường Công nghiệp Sản xuất
+**Phiên bản:** 2.0 (legal_ai Release) | **Mục tiêu:** Độ chính xác tuyệt đối (Zero Hallucination) trong Môi trường Công nghiệp Sản xuất
 
 ---
 
@@ -8,7 +8,7 @@
 
 Trong môi trường sản xuất linh kiện ô tô công nghệ cao của **Tập đoàn DENSO**, một lỗi phỏng đoán sai của AI về lực siết bu-lông, nhiệt độ dầu, áp suất khí nén hay màng van có thể dẫn tới dừng toàn bộ dây chuyền sản xuất (Line Stop) hoặc tạo ra hàng loạt sản phẩm lỗi (Defect Spill). 
 
-Do đó, ứng dụng **DENSO NewIdea** được xây dựng dựa trên nguyên tắc **Mission-Critical (Tối quan trọng)**:
+Do đó, ứng dụng **DENSO legal_ai** được xây dựng dựa trên nguyên tắc **Mission-Critical (Tối quan trọng)**:
 > **"Nói có sách, mách có BBox, tuyệt đối không bao giờ phỏng đoán mò (Zero-Guessing), và tự động chưng cất tri thức chuyên gia đưa thẳng vào Neo4j Knowledge Graph để AI tự học bền vững."**
 
 ---
@@ -194,12 +194,12 @@ MERGE (e)-[:VALIDATED]->(sol)
 
 | Dịch vụ lưu trữ | Cổng mạng (Port) | Thư mục vật lý trên ổ cứng | Ghi chú cô lập |
 | :--- | :--- | :--- | :--- |
-| **Neo4j Bolt** | **`7688`** | `NewIdea/neo4j_storage/data` | Container Docker riêng: `newidea-neo4j` |
-| **Neo4j Web Browser** | **`7475`** | `NewIdea/neo4j_storage/logs` | Truy cập xem đồ thị: `http://localhost:7475/` |
-| **Qdrant Vector DB** | **`6335`** | `NewIdea/qdrant_storage/` | Container Docker riêng: `newidea-qdrant` |
-| **CSDL Quan hệ SQLite** | N/A | `NewIdea/db.sqlite3` | File CSDL độc lập, quản lý Inquiries & Messages |
-| **Tài liệu & Ảnh Media**| N/A | `NewIdea/media/` | Bản vẽ kỹ thuật và ảnh trang SOP |
-| **Web Server Django** | **`8002`** | `NewIdea/` | Tự động chuyển `8003` nếu cổng 8002 bận |
+| **Neo4j Bolt** | **`7688`** | `legal_ai/neo4j_storage/data` | Container Docker riêng: `newidea-neo4j` |
+| **Neo4j Web Browser** | **`7475`** | `legal_ai/neo4j_storage/logs` | Truy cập xem đồ thị: `http://localhost:7475/` |
+| **Qdrant Vector DB** | **`6335`** | `legal_ai/qdrant_storage/` | Container Docker riêng: `newidea-qdrant` |
+| **CSDL Quan hệ SQLite** | N/A | `legal_ai/db.sqlite3` | File CSDL độc lập, quản lý Inquiries & Messages |
+| **Tài liệu & Ảnh Media**| N/A | `legal_ai/media/` | Bản vẽ kỹ thuật và ảnh trang SOP |
+| **Web Server Django** | **`8002`** | `legal_ai/` | Tự động chuyển `8003` nếu cổng 8002 bận |
 
 ---
 

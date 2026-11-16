@@ -41,6 +41,11 @@ class WorkflowTenantTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content), {'user_id':1,'company_id':1,'is_manager':False})
 
+    def test_a_step_that_does_not_exist_is_not_found(self):
+        r = self.factory.post('/workflows/steps/999999/approve/', '{}', content_type='application/json')
+        r.jwt_user_id = 1
+        self.assertEqual(self.guard(r).status_code, 404)
+
     def test_inactive_user_is_denied(self):
         r = self.factory.get('/workflows/all/')
         r.jwt_user_id = 3

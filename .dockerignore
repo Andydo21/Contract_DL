@@ -10,6 +10,7 @@
 media
 output
 scratch
+runtime
 documents
 extracted_images
 staticfiles
@@ -17,13 +18,12 @@ research_evaluation_20261030
 paper
 docs
 
-legacy
-NewIdea/backups
-NewIdea/media
-NewIdea/neo4j_storage
-NewIdea/db.sqlite3
-evaluation/artifacts
-evaluation/benchmarks
+ai/legal_ai/backups
+ai/legal_ai/media
+ai/legal_ai/neo4j_storage
+ai/legal_ai/db.sqlite3
+ai/evaluation/artifacts
+ai/evaluation/benchmarks
 
 scripts/cloudflared.exe
 *.ipynb

@@ -5,10 +5,11 @@ from dotenv import load_dotenv
 import sys
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Make shared/ importable from project root
+# Make shared/ importable from project root. Appended, not prepended: the root also holds a `blockchain/`
+# domain package, which must not shadow this service's own `blockchain` app.
 shared_parent = str(BASE_DIR.parent)
 if shared_parent not in sys.path:
-    sys.path.insert(0, shared_parent)
+    sys.path.append(shared_parent)
 
 # Load shared root .env so SECRET_KEY matches main Django app
 env_path = BASE_DIR.parent / ".env"

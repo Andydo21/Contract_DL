@@ -1,7 +1,14 @@
 from django.utils import timezone
-from .models import Workflow, WorkflowStep, Approval
+from .models import Workflow, WorkflowStep, Approval, StepDependency, KeyManagement, DigitalSignature
 
 class WorkflowRepository:
+    @staticmethod
+    def ping_databases():
+        from django.db import connections
+        for alias in ['default', 'contract_db']:
+            with connections[alias].cursor() as cursor:
+                cursor.execute('SELECT 1')
+
     @staticmethod
     def get_all_workflows():
         """Retrieve all workflows ordered by ID descending."""
@@ -195,3 +202,127 @@ class WorkflowRepository:
             step_ids = list(wf.steps.values_list('id', flat=True))
             DigitalSignature.objects.filter(step_id__in=step_ids).delete()
             wf.delete()
+
+    # ------------------------------------------------------------------ reads used by serialization
+    @staticmethod
+    def step_approvals(step):
+        return list(step.approvals.all().order_by('id'))
+
+    @staticmethod
+    def step_prerequisites(step):
+        return list(step.dependent_on.select_related('prerequisite_step').all())
+
+    @staticmethod
+    def workflow_steps(workflow):
+        return list(workflow.steps.all())
+
+    @staticmethod
+    def workflow_dependencies(workflow):
+        return list(workflow.dependencies.select_related('prerequisite_step', 'dependent_step').all())
+
+    @staticmethod
+    def workflow_fully_approved(workflow):
+        return not workflow.steps.exclude(status='APPROVED').exists()
+
+    @staticmethod
+    def count_workflows_by_version(version_id):
+        return Workflow.objects.filter(version_id=version_id).count()
+
+    # ------------------------------------------------------------------ step dependencies
+    @staticmethod
+    def unmet_dependencies(step):
+        return list(StepDependency.objects.filter(dependent_step=step).exclude(prerequisite_step__status='APPROVED')
+                    .select_related('prerequisite_step'))
+
+    @staticmethod
+    def get_or_create_dependency(workflow_id, prerequisite_step, dependent_step):
+        dep, _ = StepDependency.objects.get_or_create(workflow_id=workflow_id, prerequisite_step=prerequisite_step,
+                                                      dependent_step=dependent_step)
+        return dep
+
+    @staticmethod
+    def get_dependency_by_id(dependency_id):
+        return StepDependency.objects.filter(id=dependency_id).first()
+
+    @staticmethod
+    def delete(obj):
+        obj.delete()
+
+
+class KeyManagementRepository:
+    @staticmethod
+    def list_keys(company_id=None):
+        qs = KeyManagement.objects.all().order_by('-created_at')
+        if company_id:
+            qs = qs.filter(company_id=company_id)
+        return list(qs)
+
+    @staticmethod
+    def get_key(key_id):
+        return KeyManagement.objects.get(id=key_id)
+
+    @staticmethod
+    def create_key(**fields):
+        return KeyManagement.objects.create(**fields)
+
+    @staticmethod
+    def active_key(company_id=None):
+        qs = KeyManagement.objects.filter(status='ACTIVE')
+        if company_id:
+            qs = qs.filter(company_id=company_id)
+        return qs.order_by('-key_version').first()
+
+    @staticmethod
+    def save(key):
+        key.save()
+        return key
+
+    @staticmethod
+    def create_signature(**fields):
+        return DigitalSignature.objects.create(**fields)
+
+    @staticmethod
+    def list_signatures(step_id=None, user_id=None):
+        qs = DigitalSignature.objects.select_related('key').order_by('-signed_at')
+        if step_id:
+            qs = qs.filter(step_id=step_id)
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        return list(qs)
+
+
+class TenantLookupRepository:
+    """Ownership lookups used by the tenant guard."""
+
+    @staticmethod
+    def step(step_id):
+        return WorkflowStep.objects.get(pk=step_id)
+
+    @staticmethod
+    def dependency_workflow_id(dependency_id):
+        return StepDependency.objects.get(pk=dependency_id).workflow_id
+
+    @staticmethod
+    def workflow_version_id(workflow_id):
+        return Workflow.objects.get(pk=workflow_id).version_id
+
+    @staticmethod
+    def key_company_id(key_id):
+        return KeyManagement.objects.get(pk=key_id).company_id
+
+    @staticmethod
+    def actor(user_id):
+        """(id, company_id, is_active, is_superuser, role_name, role_id) of a contract-web user."""
+        from django.db import connections
+        with connections['contract_db'].cursor() as c:
+            c.execute('SELECT u.id,u.company_id,u.is_active,u.is_superuser,r.role_name,u.role_id FROM contracts_user u '
+                      'LEFT JOIN contracts_role r ON r.id=u.role_id WHERE u.id=%s', [user_id])
+            return c.fetchone()
+
+    @staticmethod
+    def version_company(version_id):
+        from django.db import connections
+        with connections['contract_db'].cursor() as c:
+            c.execute('SELECT c.company_id FROM contracts_contractversion v JOIN contracts_contract c ON c.id=v.contract_id '
+                      'WHERE v.id=%s', [version_id])
+            return c.fetchone()

@@ -1,0 +1,33 @@
+{# Application sidebar. Include with: {% include 'common/_sidebar.html' with active='contracts' %} #}
+{% with u=request.user %}
+<aside class="cg-sidebar">
+    <a class="cg-brand" href="/">
+        <span class="cg-brand-mark"><i class="fa-solid fa-shield-halved"></i></span>
+        <span>
+            <span class="cg-brand-name">Contract Guard</span>
+            {% if u.company.company_name %}<span class="cg-brand-org" style="display:block">{{ u.company.company_name }}</span>{% endif %}
+        </span>
+    </a>
+    <nav class="cg-nav">
+        <div class="cg-nav-label">Hợp đồng</div>
+        <a href="/" class="{% if active == 'contracts' %}active{% endif %}" title="Danh sách hợp đồng"><i class="fa-solid fa-file-contract"></i><span>Danh sách hợp đồng</span></a>
+        <a href="/analyses/" class="{% if active == 'analyses' %}active{% endif %}" title="Lịch sử phân tích"><i class="fa-solid fa-chart-line"></i><span>Lịch sử phân tích</span></a>
+        <div class="cg-nav-label">Phê duyệt &amp; ký</div>
+        <a href="/board/" class="{% if active == 'approvals' %}active{% endif %}" title="Quy trình phê duyệt"><i class="fa-solid fa-diagram-project"></i><span>Quy trình phê duyệt</span></a>
+        <a href="/contract-ledger/" class="{% if active == 'ledger' %}active{% endif %}" title="Ký &amp; kiểm chứng"><i class="fa-solid fa-file-signature"></i><span>Ký &amp; kiểm chứng</span></a>
+        <div class="cg-nav-label">Tổ chức</div>
+        <a href="/identity/" class="{% if active == 'identity' %}active{% endif %}" title="Doanh nghiệp &amp; nhân sự"><i class="fa-solid fa-building-user"></i><span>Doanh nghiệp &amp; nhân sự</span></a>
+        {% if u.is_superuser or u.role.role_name|upper == 'MANAGER' or u.role.role_name|upper == 'ADMIN' %}
+        <a href="/admin-dashboard/" class="{% if active == 'admin' %}active{% endif %}" title="Quản trị hệ thống"><i class="fa-solid fa-sliders"></i><span>Quản trị hệ thống</span></a>
+        {% endif %}
+    </nav>
+    <div class="cg-user">
+        <div class="cg-avatar">{{ u.username|slice:":1"|default:"?" }}</div>
+        <div class="cg-user-text">
+            <div class="cg-user-name">{{ u.username|default:"—" }}</div>
+            <div class="cg-user-role">{{ u.role.role_name|default:"Nhân viên" }}</div>
+        </div>
+        <a class="cg-logout" href="/logout/" title="Đăng xuất" aria-label="Đăng xuất"><i class="fa-solid fa-arrow-right-from-bracket"></i></a>
+    </div>
+</aside>
+{% endwith %}

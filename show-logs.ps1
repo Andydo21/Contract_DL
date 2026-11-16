@@ -9,7 +9,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $OutputEncoding
 Set-Location $PSScriptRoot
 $taskContainers = [ordered]@{
-    Web='riskdl_web'; Worker='contract_knowledge_worker'; Neo4j='newidea-neo4j'; Qdrant='contract_qdrant'
+    Web='riskdl_web'; Worker='contract_knowledge_worker'; Neo4j='contract_neo4j'; Qdrant='contract_qdrant'
 }
 $taskSources = @()
 foreach ($taskName in $taskContainers.Keys) {
@@ -20,16 +20,16 @@ foreach ($taskName in $taskContainers.Keys) {
 if ($Service -in @('All','Models')) {
     # Previous launchers used different filenames; follow the latest live family.
     foreach ($taskStream in @('out','error')) {
-        $taskFile = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'scratch') -Filter "inference*-$taskStream.log" -File -ErrorAction SilentlyContinue |
+        $taskFile = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'runtime\logs') -Filter "inference*-$taskStream.log" -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
         if ($taskFile) { $taskSources += [pscustomobject]@{Name="Models/$taskStream"; Type='File'; Path=$taskFile.FullName} }
     }
 }
 if ($Service -in @('All','Surya')) {
-    $taskManagedLog = Join-Path $PSScriptRoot 'scratch\surya-managed.log'
+    $taskManagedLog = Join-Path $PSScriptRoot 'runtime\logs\surya-managed.log'
     if (Test-Path -LiteralPath $taskManagedLog) { $taskSources += [pscustomobject]@{Name='Surya/managed'; Type='File'; Path=$taskManagedLog} }
     foreach ($taskStream in @('out','error')) {
-        $taskPath = Join-Path $PSScriptRoot "scratch\surya-$taskStream.log"
+        $taskPath = Join-Path $PSScriptRoot "runtime\logs\surya-$taskStream.log"
         if (Test-Path -LiteralPath $taskPath) { $taskSources += [pscustomobject]@{Name="Surya/$taskStream"; Type='File'; Path=$taskPath} }
     }
 }

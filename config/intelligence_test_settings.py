@@ -9,15 +9,20 @@ DEBUG = False
 ALLOWED_HOSTS = ['testserver', 'localhost']
 INSTALLED_APPS = ['django.contrib.auth', 'django.contrib.contenttypes',
                   'django.contrib.sessions', 'django.contrib.messages',
-                  'django.contrib.staticfiles', 'contracts', 'ai_extract']
+                  'django.contrib.staticfiles', 'contract.contracts', 'ai.ai_extract',
+                  'contract.accounts', 'ai.analysis', 'contract.approvals', 'blockchain.ledger', 'contract.administration']
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+# Files a test writes (progress, page images) go to a throwaway folder, never into the project.
+import tempfile
+MEDIA_ROOT = tempfile.mkdtemp(prefix='contract-dl-test-media-')
+MEDIA_URL = '/media/'
 AUTH_USER_MODEL = 'contracts.User'
-ROOT_URLCONF = 'contracts.tests.knowledge_urls'
+ROOT_URLCONF = 'contract.contracts.tests.knowledge_urls'
 MIDDLEWARE = ['django.contrib.sessions.middleware.SessionMiddleware',
               'django.middleware.csrf.CsrfViewMiddleware',
               'django.contrib.auth.middleware.AuthenticationMiddleware',
               'django.contrib.messages.middleware.MessageMiddleware']
-TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates',
+TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIRS': [BASE_DIR / 'frontend'],
               'APP_DIRS': True, 'OPTIONS': {'context_processors':
                 ['django.template.context_processors.request',
                  'django.contrib.auth.context_processors.auth']}}]

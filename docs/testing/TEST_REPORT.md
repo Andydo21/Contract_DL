@@ -401,10 +401,10 @@ The results below record the earlier full multi-service test run.
 
 218 tests discovered across five suites: **217 passed, 1 skipped, 0 failures**.
 
-- Main contract web, A3, integrated NewIdea and Qwen gateway protocol: 182 tests, 181 passed, 1 skipped.
+- Main contract web, A3, integrated legal_ai and Qwen gateway protocol: 182 tests, 181 passed, 1 skipped.
 - Blockchain service: 6 passed.
 - Workflow service: 11 passed.
-- Standalone NewIdea core: 16 passed.
+- Standalone legal_ai core: 16 passed.
 - Preserved A3 legacy schema: 3 passed.
 
 The workflow package lacked `__init__.py`, causing Django discovery to import its tests outside their package. Restoring the package fixed discovery; all 11 workflow tests then passed. Installing `qdrant-client` in the project's `.venv` enabled two previously skipped dense-index tests.
@@ -432,7 +432,7 @@ No existing Neon data or existing contract versions were changed. Django tests u
 From the directory containing the main `manage.py`:
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py test contracts.tests ai_extract.tests NewIdea.tests.test_enterprise NewIdea.tests.test_contract_search shared.tests.test_qwen_gateway --settings=config.intelligence_test_settings --noinput
+.\.venv\Scripts\python.exe manage.py test contracts.tests ai_extract.tests legal_ai.tests.test_enterprise legal_ai.tests.test_contract_search shared.tests.test_qwen_gateway --settings=config.intelligence_test_settings --noinput
 ```
 
 From `blockchain_service`:
@@ -447,7 +447,7 @@ From `workflow_service`:
 ..\.venv\Scripts\python.exe manage.py test workflow --settings=config.test_settings --noinput
 ```
 
-From `NewIdea`:
+From `legal_ai`:
 
 ```powershell
 ..\.venv\Scripts\python.exe manage.py test core --noinput
@@ -472,9 +472,9 @@ Live mode checks passed: after restarting Docker, only the four AI containers re
 
 ### Latest authorized rerun after closing applications
 
-Docker was restarted; Qwen and ColPali health checks returned HTTP 200. The user authorized temporarily stopping the other project containers for the A3/NewIdea test. All ten stopped containers were subsequently started again, and the knowledge worker was restarted to load the updated backend. No local model runtime was started: initial free RAM was approximately 4.15 GB before Docker, but fell below the 4 GB startup threshold after Docker started, including after clearing WSL filesystem caches and temporarily stopping the unrelated flow containers. Local native crash stability therefore remains unverified.
+Docker was restarted; Qwen and ColPali health checks returned HTTP 200. The user authorized temporarily stopping the other project containers for the A3/legal_ai test. All ten stopped containers were subsequently started again, and the knowledge worker was restarted to load the updated backend. No local model runtime was started: initial free RAM was approximately 4.15 GB before Docker, but fell below the 4 GB startup threshold after Docker started, including after clearing WSL filesystem caches and temporarily stopping the unrelated flow containers. Local native crash stability therefore remains unverified.
 
-The real-model Word smoke completed against encrypted synthetic source data, isolated SQLite and unique vector/graph fixture scopes. Layout extraction API: HTTP 200, 7 blocks, native document structure. Clause materialization API: HTTP 200, 4 clauses. Neo4j projection: ready, 15 nodes / 17 edges; semantic extraction complete. Payment QA returned 30 days after receiving invoice and acceptance record; maintenance QA returned disconnect power and lock the breaker. The missing-penalty question returned source excerpts with insufficient-evidence status. The queued frontend job completed with a generated maintenance answer. Extraction and NewIdea template requests returned HTTP 200. The fixture job used the real worker function within the isolated process; separate production worker consumption and interactive browser behavior were not tested.
+The real-model Word smoke completed against encrypted synthetic source data, isolated SQLite and unique vector/graph fixture scopes. Layout extraction API: HTTP 200, 7 blocks, native document structure. Clause materialization API: HTTP 200, 4 clauses. Neo4j projection: ready, 15 nodes / 17 edges; semantic extraction complete. Payment QA returned 30 days after receiving invoice and acceptance record; maintenance QA returned disconnect power and lock the breaker. The missing-penalty question returned source excerpts with insufficient-evidence status. The queued frontend job completed with a generated maintenance answer. Extraction and legal_ai template requests returned HTTP 200. The fixture job used the real worker function within the isolated process; separate production worker consumption and interactive browser behavior were not tested.
 
 Dense indexing explicitly FAILED because the local inference endpoint was not running; dense/reranker retrieval was unavailable. ColPali indexing was SKIPPED for this text-only Word fixture. This rerun validates lexical/structure/graph retrieval and Qwen QA, not the full BGE/ColPali fusion or PDF OCR pipeline. Detailed raw results: `scratch/live_web_flow_results.json`.
 
@@ -488,20 +488,20 @@ Windows restarted with bugcheck 0xEF (CRITICAL_PROCESS_DIED), recorded by System
 
 Before interruption, a real-model synthetic raster PDF completed extraction: 1 page, 9 blocks, BGE index 8 points, ColPali index 1 point, Neo4j 19 nodes / 23 edges, semantic extraction complete. Granite aligned 8 units and left 1 unclassified (`model_partial`). Payment QA returned 30 days with invoice and acceptance record. Visual relationship proposals failed validation, and some later dense/reranker requests failed after the local runtime crashed. A subsequent QA incorrectly described the contract price as a penalty despite valid citation IDs. A model evidence-verification step was added to reject unsupported generated answers; it has not yet been verified end to end against the restored live runtime. Pixel-coordinate validation/conversion and a bounded visual-format repair were also added; live validation remains pending.
 
-After the last code changes, the lightweight main suite completed: 207 discovered, 205 passed, 2 skipped. Separate earlier real Neo4j smoke: 1 passed. Workflow suite: 15 passed. Blockchain suite: 10 passed (gateway mocks, not a new real ledger transaction). HTTP template smoke returned 200 for extraction and NewIdea pages; browser interaction was unavailable. Do not interpret historical reports below as proof that all current model flows are stable.
+After the last code changes, the lightweight main suite completed: 207 discovered, 205 passed, 2 skipped. Separate earlier real Neo4j smoke: 1 passed. Workflow suite: 15 passed. Blockchain suite: 10 passed (gateway mocks, not a new real ledger transaction). HTTP template smoke returned 200 for extraction and legal_ai pages; browser interaction was unavailable. Do not interpret historical reports below as proof that all current model flows are stable.
 
 
 ## 2026-10-13: A2/A3 service simplification
 
 Consolidated expert-case lookup and Qwen answer/citation-repair/semantic-verification into existing A2 services. Corpus search and single-version search share these steps. A3 local and remote OCR now share successful-result cache handling. IndexResult centralizes page aggregation and run fields; reindexing captures Dense and ColPali failures separately, preserving a successful branch when the other raises. No endpoint, database schema, extraction model, relation policy or access scope was changed.
 
-Validation: 251 tests discovered across every NewIdea and ai_extract test module plus contract intelligence; 250 passed and the optional live Neo4j test was skipped. Added regressions for citation repair preserving sources/graph, bounded invalid-answer repair, independent index failure and partial page indexing. Tests used isolated SQLite and mocked model transports; no new live Qwen, OCR or Neo4j measurement was performed. Docker was not running during this change; deployment restart remains necessary when services are started.
+Validation: 251 tests discovered across every legal_ai and ai_extract test module plus contract intelligence; 250 passed and the optional live Neo4j test was skipped. Added regressions for citation repair preserving sources/graph, bounded invalid-answer repair, independent index failure and partial page indexing. Tests used isolated SQLite and mocked model transports; no new live Qwen, OCR or Neo4j measurement was performed. Docker was not running during this change; deployment restart remains necessary when services are started.
 
 ## 2026-10-12: A2 searches the full authorized knowledge corpus
 
 Removed the extra current-company discovery filter. Superusers discover documents and approved expert cases across all companies; ordinary accounts retain existing read permissions. New corpus jobs use scope `knowledge` and an access snapshot, rechecked by the worker and when reading receipts. Qdrant discovery binds each authorized company/contract/version/run tuple. Explicit identifiers found in the corpus narrow discovered candidates to the named products, retaining both documents for comparisons. Insufficient evidence now produces abstention rather than unrelated excerpts as the answer. Verbose retrieval diagnostics remain in the UI and are omitted from Qwen's prompt coverage.
 
-Validation: 113 targeted NewIdea, contract-intelligence and hybrid-retrieval tests passed on isolated SQLite. Web and knowledge-worker were restarted. Live search receipt 12 used the existing admin account and the real Neon corpus, Qdrant/Neo4j and Kaggle configuration, without mocks or fixture documents. It scanned 4 indexed latest versions among 76 visible latest versions, selected EVP2 version 153 in another company, and returned only EVP2 page-1 sources. Retrieval: 12.394 s; processing: 14.048 s. This is a live smoke measurement, not a quality benchmark.
+Validation: 113 targeted legal_ai, contract-intelligence and hybrid-retrieval tests passed on isolated SQLite. Web and knowledge-worker were restarted. Live search receipt 12 used the existing admin account and the real Neon corpus, Qdrant/Neo4j and Kaggle configuration, without mocks or fixture documents. It scanned 4 indexed latest versions among 76 visible latest versions, selected EVP2 version 153 in another company, and returned only EVP2 page-1 sources. Retrieval: 12.394 s; processing: 14.048 s. This is a live smoke measurement, not a quality benchmark.
 
 Live limitations: BGE/reranker runtime on port 8010 was not listening; approximately 0.75 GB host RAM was free, so heavy inference was not restarted. ColPali retrieval succeeded. Qwen generation returned HTTP 404 with ERR_NGROK_3200 at `/v1/chat/completions`; no successful generated answer was recorded. The result therefore used source excerpts. Raw live receipt: `scratch/global_knowledge_live_result.json`; repeatable queue probe: `scratch/check_global_knowledge_live.py`.
 
@@ -511,7 +511,7 @@ The user's real receipt 17 retrieved the EVP2 document correctly and completed t
 
 A2 now requests schema-constrained claims with a text sentence and model-selected source IDs for each claim. The adapter validates source bindings and renders their citations. Existing sentence/quantity validation and the separate Qwen evidence-verification call remain required; missing citations, unknown IDs, unsupported quantities and unsupported semantics are not accepted. Free-text generation in other callers remains compatible.
 
-Validation: 53 targeted NewIdea answer, extraction regression, visualization and contract-intelligence tests passed against isolated SQLite. Real Kaggle generation and semantic verification succeeded. Web and knowledge-worker were restarted, then normal queued knowledge search receipt 18 completed with `generation_status=generated`, valid citations and a positive model evidence check. Its answer explains Guidance on PC versus Runtime with controller and camera, citing EVP2 page 1. Retrieval: 5.860 s; processing: 19.081 s. The 49.829 s receipt age when inspected is not the processing latency.
+Validation: 53 targeted legal_ai answer, extraction regression, visualization and contract-intelligence tests passed against isolated SQLite. Real Kaggle generation and semantic verification succeeded. Web and knowledge-worker were restarted, then normal queued knowledge search receipt 18 completed with `generation_status=generated`, valid citations and a positive model evidence check. Its answer explains Guidance on PC versus Runtime with controller and camera, citing EVP2 page 1. Retrieval: 5.860 s; processing: 19.081 s. The 49.829 s receipt age when inspected is not the processing latency.
 
 This live run used existing Neon documents/cases and actual Qwen/ColPali calls, without model mocks. BGE and the neural reranker were still unavailable; this result does not validate all hybrid branches or establish general answer accuracy. Expert seed cases remain labeled DEMO. Source evidence and generation trace: `scratch/global_knowledge_live_result_18.json`. The original receipt 17 is preserved; re-asking in the web uses the corrected worker.
 

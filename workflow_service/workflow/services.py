@@ -1,11 +1,11 @@
 from django.utils import timezone
-from .repositories import WorkflowRepository
+from .repositories import WorkflowRepository, KeyManagementRepository
 from .rules import recommend_workflow
 
 
 def _step_to_dict(st):
     approvals_list = []
-    approvals = list(st.approvals.all().order_by('id'))
+    approvals = WorkflowRepository.step_approvals(st)
     for app in approvals:
         approvals_list.append({
             "user_id": app.user_id,
@@ -19,7 +19,7 @@ def _step_to_dict(st):
 
     prereqs = []
     if hasattr(st, 'dependent_on'):
-        for dep in st.dependent_on.select_related('prerequisite_step').all():
+        for dep in WorkflowRepository.step_prerequisites(st):
             prereqs.append({
                 "dep_id": dep.id,
                 "prereq_step_id": dep.prerequisite_step_id,
@@ -43,21 +43,15 @@ class WorkflowService:
     def __init__(self):
         self.repo = WorkflowRepository()
 
-    def list_all_workflows(self):
-        """Retrieve all workflows ordered by ID descending."""
-        return self.repo.get_all_workflows()
-
     def list_workflows_for_user(self, user):
-        """Retrieve workflows filtered by user's company permission unless superuser."""
+        """Every workflow for a superuser, the workflows of the user's company otherwise; nothing for a request whose
+        user or company is unknown (the tenant guard should never let one through, this is the safe default)."""
         if not user or not getattr(user, 'is_authenticated', False):
-            return self.repo.get_all_workflows()
+            return []
         if getattr(user, 'is_superuser', False):
             return self.repo.get_all_workflows()
-        
         company_id = getattr(user, 'company_id', None)
-        if company_id:
-            return self.repo.get_workflows_by_company(company_id)
-        return self.repo.get_all_workflows()
+        return self.repo.get_workflows_by_company(company_id) if company_id else []
 
     def active_workflow_exists(self, version_id):
         return self.repo.active_workflow_exists(version_id)
@@ -72,9 +66,9 @@ class WorkflowService:
         if not wf:
             return None
         c_info = contract_info or {}
-        steps = [_step_to_dict(st) for st in sorted(wf.steps.all(), key=lambda s: s.step_order)]
+        steps = [_step_to_dict(st) for st in sorted(self.repo.workflow_steps(wf), key=lambda s: s.step_order)]
         
-        deps = list(wf.dependencies.select_related('prerequisite_step', 'dependent_step').all())
+        deps = self.repo.workflow_dependencies(wf)
         serialized_deps = [
             {
                 "id": dep.id,
@@ -230,6 +224,13 @@ class WorkflowService:
             raise ValueError('Mandatory signing steps cannot be deleted')
         self.repo.delete_step(step)
 
+    def delete_workflows_for_version(self, version_id):
+        """Remove every workflow of a contract version with its steps, approvals, dependencies and signatures
+        (the contract itself is being deleted)."""
+        count = self.repo.count_workflows_by_version(version_id)
+        self.repo.delete_workflows_by_version(version_id)
+        return count
+
     def update_step_role(self, step_id, role_id):
         """Update required role ID for a step via repository."""
         return self.repo.update_step_role(step_id, role_id)
@@ -237,7 +238,6 @@ class WorkflowService:
     def approve_step(self, step_id, user_id, action, comment="", company_id=None, is_manager=False):
         """Approve reviews; signing steps advance only through verified ledger operations."""
         from django.db import transaction
-        from .models import StepDependency
 
         step = self.repo.get_step_by_id(step_id)
         if not step:
@@ -248,10 +248,8 @@ class WorkflowService:
 
         # Custom Step Dependency Check: Block approval if prerequisite steps are not APPROVED
         if action in ("APPROVED", "FORCE_COMPLETE"):
-            unmet_deps = StepDependency.objects.filter(
-                dependent_step=step
-            ).exclude(prerequisite_step__status="APPROVED")
-            if unmet_deps.exists():
+            unmet_deps = self.repo.unmet_dependencies(step)
+            if unmet_deps:
                 unmet_names = ", ".join([f"'{d.prerequisite_step.step_name}'" for d in unmet_deps])
                 raise ValueError(f"Không thể ký/duyệt bước '{step.step_name}' vì đang bị khóa bởi đường nối phụ thuộc: Bước {unmet_names} chưa hoàn thành.")
 
@@ -267,7 +265,7 @@ class WorkflowService:
                 self.repo.update_step_status(step, "APPROVED")
 
                 workflow = step.workflow
-                if all(s.status == "APPROVED" for s in workflow.steps.all()):
+                if self.repo.workflow_fully_approved(workflow):
                     self.repo.update_workflow_status(workflow, "COMPLETED")
                 else:
                     self.repo.update_workflow_status(workflow, "IN_PROGRESS")
@@ -281,12 +279,11 @@ class WorkflowService:
             if action == 'REJECTED':
                 self.repo.update_workflow_status(workflow, 'REJECTED')
             else:
-                complete = not workflow.steps.exclude(status='APPROVED').exists()
+                complete = self.repo.workflow_fully_approved(workflow)
                 self.repo.update_workflow_status(workflow, 'COMPLETED' if complete else 'IN_PROGRESS')
         return step
 
     def add_dependency(self, workflow_id, prerequisite_step_id, dependent_step_id):
-        from .models import StepDependency
         if int(prerequisite_step_id) == int(dependent_step_id):
             raise ValueError("Một bước không thể nối phụ thuộc tới chính nó.")
         
@@ -298,22 +295,32 @@ class WorkflowService:
         if prereq.workflow_id != int(workflow_id) or dependent.workflow_id != int(workflow_id):
             raise ValueError("Các bước không thuộc cùng một quy trình (Workflow).")
 
-        if StepDependency.objects.filter(prerequisite_step=dependent, dependent_step=prereq).exists():
-            raise ValueError("Không thể tạo đường nối vòng lặp phụ thuộc qua lại giữa 2 bước.")
+        if self._reaches(prereq.workflow, dependent.id, prereq.id):
+            raise ValueError("Không thể tạo đường nối vòng lặp phụ thuộc giữa các bước.")
 
-        dep, created = StepDependency.objects.get_or_create(
-            workflow_id=workflow_id,
-            prerequisite_step=prereq,
-            dependent_step=dependent
-        )
-        return dep
+        return self.repo.get_or_create_dependency(workflow_id, prereq, dependent)
+
+    def _reaches(self, workflow, start_id, target_id):
+        """Whether target_id already waits, directly or through other steps, on start_id. Linking target before start
+        would then close a cycle, and every step on it would stay locked for ever."""
+        follows = {}
+        for dep in self.repo.workflow_dependencies(workflow):
+            follows.setdefault(dep.prerequisite_step_id, []).append(dep.dependent_step_id)
+        seen, todo = set(), [start_id]
+        while todo:
+            step = todo.pop()
+            if step == target_id:
+                return True
+            if step not in seen:
+                seen.add(step)
+                todo.extend(follows.get(step, []))
+        return False
 
     def delete_dependency(self, dependency_id):
-        from .models import StepDependency
-        dep = StepDependency.objects.filter(id=dependency_id).first()
+        dep = self.repo.get_dependency_by_id(dependency_id)
         if not dep:
             raise ValueError("Không tìm thấy đường nối phụ thuộc này.")
-        dep.delete()
+        self.repo.delete(dep)
 
 
 class KeyManagementService:
@@ -321,21 +328,15 @@ class KeyManagementService:
 
     @staticmethod
     def list_keys(company_id=None):
-        from .models import KeyManagement
-        qs = KeyManagement.objects.all().order_by('-created_at')
-        if company_id:
-            qs = qs.filter(company_id=company_id)
-        return list(qs)
+        return KeyManagementRepository.list_keys(company_id)
 
     @staticmethod
     def get_key(key_id):
-        from .models import KeyManagement
-        return KeyManagement.objects.get(id=key_id)
+        return KeyManagementRepository.get_key(key_id)
 
     @staticmethod
     def create_key(company_id, key_alias, key_provider, key_reference, algorithm):
-        from .models import KeyManagement
-        return KeyManagement.objects.create(
+        return KeyManagementRepository.create_key(
             company_id=company_id,
             key_alias=key_alias,
             key_provider=key_provider,
@@ -348,14 +349,13 @@ class KeyManagementService:
     @staticmethod
     def rotate_key(key_id):
         """Deactivate old key, create new version with incremented key_version."""
-        from .models import KeyManagement
-        old_key = KeyManagement.objects.get(id=key_id)
+        old_key = KeyManagementRepository.get_key(key_id)
         if old_key.status == 'REVOKED':
             raise ValueError("Cannot rotate a revoked key")
         old_key.status = 'ROTATED'
         old_key.rotated_at = timezone.now()
-        old_key.save()
-        return KeyManagement.objects.create(
+        KeyManagementRepository.save(old_key)
+        return KeyManagementRepository.create_key(
             company_id=old_key.company_id,
             key_alias=old_key.key_alias,
             key_provider=old_key.key_provider,
@@ -367,44 +367,15 @@ class KeyManagementService:
 
     @staticmethod
     def revoke_key(key_id):
-        from .models import KeyManagement
-        key = KeyManagement.objects.get(id=key_id)
+        key = KeyManagementRepository.get_key(key_id)
         key.status = 'REVOKED'
         key.rotated_at = timezone.now()
-        key.save()
-        return key
+        return KeyManagementRepository.save(key)
 
     @staticmethod
     def get_active_key(company_id):
-        from .models import KeyManagement
-        return KeyManagement.objects.filter(
-            company_id=company_id, status='ACTIVE'
-        ).order_by('-key_version').first()
-
-    @staticmethod
-    def create_signature_for_step(step_id, user_id, signature_hash, company_id=None):
-        from .models import DigitalSignature, KeyManagement
-        key = None
-        if company_id:
-            key = KeyManagement.objects.filter(
-                company_id=company_id, status='ACTIVE'
-            ).order_by('-key_version').first()
-        if not key:
-            # Fallback: use any active key in the system
-            key = KeyManagement.objects.filter(status='ACTIVE').order_by('-key_version').first()
-        return DigitalSignature.objects.create(
-            step_id=step_id,
-            user_id=user_id,
-            key=key,
-            signature_hash=signature_hash,
-        )
+        return KeyManagementRepository.active_key(company_id)
 
     @staticmethod
     def list_signatures(step_id=None, user_id=None):
-        from .models import DigitalSignature
-        qs = DigitalSignature.objects.select_related('key').order_by('-signed_at')
-        if step_id:
-            qs = qs.filter(step_id=step_id)
-        if user_id:
-            qs = qs.filter(user_id=user_id)
-        return list(qs)
+        return KeyManagementRepository.list_signatures(step_id, user_id)

@@ -1,0 +1,36 @@
+"""
+Middleware for demo / guest access without login.
+Automatically attaches an admin/manager user to unauthenticated requests
+so external evaluators can test contract extraction and AI intelligence without logging in.
+Disabled unless DEMO_AUTO_LOGIN=True, because every visitor then acts as a superuser.
+"""
+from django.conf import settings
+from django.core.exceptions import MiddlewareNotUsed
+
+
+class AutoDemoLoginMiddleware:
+    def __init__(self, get_response):
+        if not settings.DEMO_AUTO_LOGIN:
+            raise MiddlewareNotUsed
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # If user is not yet authenticated via session or JWT, attach demo admin user
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            from contract.accounts.repositories.user_repository import UserRepository
+            demo_user = UserRepository.demo_user()
+            if demo_user:
+                request.user = demo_user
+                request._jwt_user = demo_user
+                request.jwt_user_id = demo_user.id
+                request.jwt_username = demo_user.username
+                request.jwt_role = (
+                    getattr(demo_user.role, 'role_name', 'ADMIN')
+                    if getattr(demo_user, 'role', None)
+                    else 'ADMIN'
+                )
+                request.jwt_company_id = demo_user.company_id
+                request.jwt_is_superuser = demo_user.is_superuser
+
+        return self.get_response(request)

@@ -8,10 +8,10 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 import django
 django.setup()
 
-from ai_extract.models import RetrievalSnapshot
-from evaluation.ablation_adapters import messages
-from evaluation.io import digest
-from evaluation.runners.common import Gateway, check_response
+from ai.ai_extract.models import RetrievalSnapshot
+from ai.evaluation.ablation_adapters import messages
+from ai.evaluation.io import digest
+from ai.evaluation.runners.common import Gateway, check_response
 from NewIdea.services.knowledge_answer_service import bind_graph_context
 
 root = Path('/app')
@@ -38,7 +38,7 @@ for eid in question['gold_evidence_ids']:
 versions = {source['version_id'] for source in production_sources}
 graph = bind_graph_context([contexts[version] for version in sorted(versions)], production_sources,
                            query=question['question'])
-config = json.loads((root / 'evaluation/config.json').read_text(encoding='utf8'))
+config = json.loads((root / 'ai/evaluation/config.json').read_text(encoding='utf8'))
 gateway = Gateway(config['generator'])
 models = gateway.health()
 schedule = [(variant, rep) for variant in 'ABCDE' for rep in range(3)]

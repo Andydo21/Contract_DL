@@ -8,9 +8,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables
 load_dotenv(BASE_DIR / ".env")
-# Reuse the dual Kaggle gateway configuration from the bundled PlanA reference
-# when Contract_DL has not overridden those values in its own .env.
-load_dotenv(BASE_DIR / "legacy" / "a3" / ".env")
 
 # Make shared/ importable (especially inside Docker)
 shared_path = str(BASE_DIR / "shared")
@@ -59,8 +56,14 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     # Custom Apps
-    "contracts.apps.ContractsConfig",
-    "ai_extract.apps.AiExtractConfig",
+    "contract.contracts.apps.ContractsConfig",
+    "ai.ai_extract.apps.AiExtractConfig",
+    "contract.accounts.apps.AccountsConfig",
+    "ai.analysis.apps.AnalysisConfig",
+    "ai.ai_summary.apps.AiSummaryConfig",
+    "contract.approvals.apps.ApprovalsConfig",
+    "blockchain.ledger.apps.LedgerConfig",
+    "contract.administration.apps.AdministrationConfig",
 ]
 
 MIDDLEWARE = [
@@ -71,8 +74,8 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "shared.jwt_middleware.JWTUserMiddleware",
-    "contracts.middleware.AutoDemoLoginMiddleware",
-    "contracts.middleware.UserActionAuditMiddleware",
+    "contract.contracts.middleware.AutoDemoLoginMiddleware",
+    "contract.contracts.middleware.UserActionAuditMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -82,7 +85,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "frontend"],  # every page: frontend/<topic>/
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -90,7 +93,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-                "ai_extract.context_processors.ocr_engine",
+                "ai.ai_extract.context_processors.ocr_engine",
             ],
         },
     },
@@ -158,9 +161,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_DIRS = [
-    BASE_DIR / "workflow_service" / "workflow" / "static",
-]
+STATICFILES_DIRS = [BASE_DIR / "frontend"]  # css/js live next to their pages
+STATICFILES_FINDERS = ["config.static_finders.FrontendFinder", "django.contrib.staticfiles.finders.AppDirectoriesFinder"]
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -242,7 +244,6 @@ RAG_INFERENCE_URL = os.environ.get("RAG_INFERENCE_URL", "")
 SURYA_PAGE_READ_TIMEOUT = max(0, int(os.environ.get("SURYA_PAGE_READ_TIMEOUT", "0")))
 # Who reads body text inside Surya's layout blocks: vietocr (main flow) or surya.
 OCR_TEXT_ENGINE = os.environ.get("OCR_TEXT_ENGINE", "auto").lower()
-A3_PAGE_CACHE_ROOT = BASE_DIR / 'scratch' / 'a3-page-cache'
 RAG_LOCAL_MODELS = os.environ.get("RAG_LOCAL_MODELS", "False").lower() == "true"
 A3_HYBRID_ENABLED = os.environ.get("A3_HYBRID_ENABLED", "True").lower() == "true"
 

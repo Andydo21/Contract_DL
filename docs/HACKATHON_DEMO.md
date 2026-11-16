@@ -5,12 +5,12 @@
 Chạy từ `D:\Django_project\Contract_DL\Contract_DL`:
 
 ```powershell
-.\start-services.ps1
+.\run-all.bat
 ```
 
 Mở http://localhost:8000/contract-intelligence/ và đăng nhập tài khoản web hiện có. Database dùng Neon trong `.env` gốc. Qdrant của Compose lưu trong named volume `contract-a3-qdrant`, truy cập từ web qua `http://qdrant:6333` và từ Windows qua http://localhost:6335. Không xóa volume khi khởi động lại.
 
-Tìm tài liệu A3 từ NewIdea tại http://localhost:8000/newidea/. Từ màn hình pipeline A3, liên kết “Tìm tài liệu này bằng NewIdea” giữ phiên bản đã chọn. NewIdea dùng cùng nguồn/index A3 và session web; không cần tải file lần thứ hai.
+Tìm tài liệu A3 từ legal_ai tại http://localhost:8000/newidea/. Từ màn hình pipeline A3, liên kết “Tìm tài liệu này bằng legal_ai” giữ phiên bản đã chọn. legal_ai dùng cùng nguồn/index A3 và session web; không cần tải file lần thứ hai.
 
 ## Gateway model
 
@@ -63,7 +63,7 @@ Kết quả phát triển hiện tại: mean required source recall của BM25 t
 ## Kiểm thử code
 
 ```powershell
-docker compose exec web python manage.py test NewIdea.tests.test_contract_search ai_extract.tests.test_hybrid_retrieval ai_extract.tests.test_contract_structure ai_extract.tests.test_a3_bridge contracts.tests.test_intelligence contracts.tests.test_ledger --settings=config.intelligence_test_settings --noinput
+docker compose exec web python manage.py test legal_ai.tests.test_contract_search ai_extract.tests.test_hybrid_retrieval ai_extract.tests.test_contract_structure ai_extract.tests.test_a3_bridge contracts.tests.test_intelligence contracts.tests.test_ledger --settings=config.intelligence_test_settings --noinput
 ```
 
 Các test dùng database SQLite riêng, model giả lập có nhãn rõ và kiểm tra phân quyền, dẫn chiếu, batching, nguồn thiếu, số liệu sai, draft và phê duyệt. Không coi test giả lập là xác nhận gateway Qwen/ColPali đang chạy.

@@ -1,97 +1,85 @@
 from .models import (
     SignatureCertificate, HashProof, BlockchainNetwork, SmartContract,
-    BlockchainTransaction, BlockchainAudit
+    BlockchainTransaction, BlockchainAudit, BlockchainNode, DigitalSignature, VerificationHistory
 )
 
-class SignatureCertificateRepository:
-    @staticmethod
-    def get_by_serial(serial_number):
-        return SignatureCertificate.objects.filter(serial_number=serial_number).first()
+class BookRepository:
+    """Queries of the ledger book (book.py)."""
 
     @staticmethod
-    def get_by_id(certificate_id):
-        try:
-            return SignatureCertificate.objects.get(id=certificate_id)
-        except SignatureCertificate.DoesNotExist:
-            return None
+    def table_exists(name):
+        from django.db import connection
+        return name in connection.introspection.table_names()
 
     @staticmethod
-    def create_certificate(user_id, serial_number, issuer, valid_from, valid_to, status="ACTIVE"):
-        return SignatureCertificate.objects.create(
-            user_id=user_id,
-            serial_number=serial_number,
-            issuer=issuer,
-            valid_from=valid_from,
-            valid_to=valid_to,
-            status=status
-        )
-
-class HashProofRepository:
-    @staticmethod
-    def get_by_version(version_id):
-        return HashProof.objects.filter(version_id=version_id).first()
+    def network_by_name(name):
+        return BlockchainNetwork.objects.filter(network_name=name).first()
 
     @staticmethod
-    def get_by_id(proof_id):
-        try:
-            return HashProof.objects.get(id=proof_id)
-        except HashProof.DoesNotExist:
-            return None
+    def create_network(**fields):
+        return BlockchainNetwork.objects.create(**fields)
 
     @staticmethod
-    def create_proof(version_id, hash_algorithm, document_hash):
-        return HashProof.objects.create(
-            version_id=version_id,
-            hash_algorithm=hash_algorithm,
-            document_hash=document_hash
-        )
-
-class BlockchainNetworkRepository:
-    @staticmethod
-    def get_by_id(network_id):
-        try:
-            return BlockchainNetwork.objects.get(id=network_id)
-        except BlockchainNetwork.DoesNotExist:
-            return None
-
-class SmartContractRepository:
-    @staticmethod
-    def get_by_id(smart_contract_id):
-        try:
-            return SmartContract.objects.get(id=smart_contract_id)
-        except SmartContract.DoesNotExist:
-            return None
-
-class BlockchainTransactionRepository:
-    @staticmethod
-    def get_confirmed_transactions_by_proof(proof):
-        return BlockchainTransaction.objects.filter(proof=proof, status="CONFIRMED")
+    def ensure_node(network, node_name, endpoint, organization):
+        return BlockchainNode.objects.get_or_create(network=network, node_name=node_name,
+                                                    defaults=dict(endpoint=endpoint, organization=organization))[0]
 
     @staticmethod
-    def create_transaction(proof, network, smart_contract, tx_hash, block_hash, block_number, gas_fee, status="CONFIRMED"):
-        return BlockchainTransaction.objects.create(
-            proof=proof,
-            network=network,
-            smart_contract=smart_contract,
-            tx_hash=tx_hash,
-            block_hash=block_hash,
-            block_number=block_number,
-            gas_fee=gas_fee,
-            status=status
-        )
+    def smart_contract(network, contract_name):
+        return SmartContract.objects.filter(network=network, contract_name=contract_name).first()
 
-class BlockchainAuditRepository:
     @staticmethod
-    def create_audit(transaction, user_id=None, company_id=None, ip=None, action="Hash Generated", resource="UNKNOWN", before_state=None, after_state=None, status="SUCCESS", error_message=None):
-        return BlockchainAudit.objects.create(
-            transaction=transaction,
-            user_id=user_id,
-            company_id=company_id,
-            ip=ip,
-            action=action,
-            resource=resource,
-            before_state=before_state,
-            after_state=after_state,
-            status=status,
-            error_message=error_message
-        )
+    def create_smart_contract(**fields):
+        return SmartContract.objects.create(**fields)
+
+    @staticmethod
+    def current_certificate(user_id, latest=True):
+        qs = SignatureCertificate.objects.filter(user_id=user_id, revoked=False)
+        return (qs.order_by('-valid_from') if latest else qs).first()
+
+    @staticmethod
+    def create_certificate(**fields):
+        return SignatureCertificate.objects.create(**fields)
+
+    @staticmethod
+    def save(obj, update_fields=None):
+        obj.save(update_fields=update_fields) if update_fields else obj.save()
+        return obj
+
+    @staticmethod
+    def create_audit(**fields):
+        return BlockchainAudit.objects.create(**fields)
+
+    @staticmethod
+    def transaction_by_hash(tx_hash):
+        return BlockchainTransaction.objects.filter(tx_hash=tx_hash).first()
+
+    @staticmethod
+    def lock_proof(version_id):
+        return HashProof.objects.select_for_update().filter(version_id=version_id).first()
+
+    @staticmethod
+    def create_proof(**fields):
+        return HashProof.objects.create(**fields)
+
+    @staticmethod
+    def create_transaction(**fields):
+        return BlockchainTransaction.objects.create(**fields)
+
+    @staticmethod
+    def create_signature(**fields):
+        return DigitalSignature.objects.create(**fields)
+
+    @staticmethod
+    def create_verification(**fields):
+        return VerificationHistory.objects.create(**fields)
+
+    @staticmethod
+    def latest_transaction_for_version(version_id):
+        return BlockchainTransaction.objects.filter(proof__version_id=version_id).order_by('-block_number').first()
+
+    @staticmethod
+    def ping():
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')

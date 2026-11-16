@@ -15,7 +15,6 @@ FastAPI services: use fastapi_jwt_required as a Depends() dependency:
 
 import os
 import jwt as pyjwt
-from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -46,7 +45,7 @@ def extract_bearer(auth_header: str) -> str | None:
 class JWTMiddleware:
     """
     Lightweight Django middleware — validates JWT and attaches payload to request.
-    Does DB user lookup for the main web if the 'contracts' app is installed.
+    Does DB user lookup for the main web if the 'contract.contracts' app is installed.
     Safe for stateless microservices without a User database.
 
     Sets on request:
@@ -82,11 +81,12 @@ class JWTMiddleware:
                 # Cookie authentication must retain CSRF protection.
                 request._dont_enforce_csrf_checks = bool(extract_bearer(request.headers.get('Authorization', '')))
 
-                if apps.is_installed("contracts"):
+                if apps.is_installed("contract.contracts"):
                     from django.contrib.auth import get_user_model
+                    from contract.accounts.repositories.user_repository import UserRepository
                     User = get_user_model()
                     try:
-                        user = User.objects.get(id=request.jwt_user_id)
+                        user = UserRepository.get_by_id(request.jwt_user_id)
                         request._jwt_user = user
                         request.user = user
                         user_attached = True
@@ -122,52 +122,43 @@ class JWTMiddleware:
                 pass
 
         # Fallback to sessionid cookie lookup if user is not attached yet
-        if not user_attached and not apps.is_installed("contracts"):
+        if not user_attached and not apps.is_installed("contract.contracts"):
             session_key = request.COOKIES.get("sessionid")
             if session_key:
                 try:
-                    from django.db import connections
-                    db_alias = 'contract_db' if 'contract_db' in connections else 'default'
-                    with connections[db_alias].cursor() as cursor:
-                        cursor.execute("SELECT session_data FROM django_session WHERE session_key = %s", [session_key])
-                        row = cursor.fetchone()
-                        if row:
-                            from django.contrib.sessions.backends.db import SessionStore
-                            s_data = SessionStore().decode(row[0])
-                            uid = s_data.get('_auth_user_id')
-                            if uid:
-                                cursor.execute("""
-                                    SELECT u.id, u.username, r.role_name, u.company_id, u.is_superuser
-                                    FROM contracts_user u
-                                    LEFT JOIN contracts_role r ON u.role_id = r.id
-                                    WHERE u.id = %s
-                                """, [int(uid)])
-                                u_row = cursor.fetchone()
-                                if u_row:
-                                    u_id, u_name, r_name, c_id, is_sup = u_row
-                                    class LightweightRole:
-                                        def __init__(self, name):
-                                            self.role_name = name
-                                        def __str__(self):
-                                            return self.role_name
+                    from shared.session_repository import session_data, session_user
+                    session_raw = session_data(session_key)
+                    if session_raw:
+                        from django.contrib.sessions.backends.db import SessionStore
+                        s_data = SessionStore().decode(session_raw)
+                        uid = s_data.get('_auth_user_id')
+                        if uid:
+                            u_row = session_user(uid)
+                            if u_row:
+                                u_id, u_name, r_name, c_id, is_sup = u_row
+                                class LightweightRole:
+                                    def __init__(self, name):
+                                        self.role_name = name
+                                    def __str__(self):
+                                        return self.role_name
 
-                                    class LightweightUser:
-                                        def __init__(self, uid, username, role_name, company_id, is_superuser=False):
-                                            self.id = uid
-                                            self.pk = uid
-                                            self.username = username
-                                            self.is_authenticated = True
-                                            self.is_anonymous = False
-                                            self.is_superuser = is_superuser
-                                            self.company_id = company_id
-                                            self.role = LightweightRole(role_name or "USER")
+                                class LightweightUser:
+                                    def __init__(self, uid, username, role_name, company_id, is_superuser=False):
+                                        self.id = uid
+                                        self.pk = uid
+                                        self.username = username
+                                        self.is_authenticated = True
+                                        self.is_anonymous = False
+                                        self.is_superuser = is_superuser
+                                        self.company_id = company_id
+                                        self.role = LightweightRole(role_name or "USER")
 
-                                    request.user = LightweightUser(u_id, u_name, r_name, c_id, is_sup)
-                                    request.jwt_user_id = u_id
-                                    request.jwt_username = u_name
-                                    request.jwt_role = r_name
-                                    request.jwt_company_id = c_id
-                                    request.jwt_is_superuser = is_sup
+                                request.user = LightweightUser(u_id, u_name, r_name, c_id, is_sup)
+                                request.jwt_user_id = u_id
+                                request.jwt_username = u_name
+                                request.jwt_role = r_name
+                                request.jwt_company_id = c_id
+                                request.jwt_is_superuser = is_sup
                 except Exception:
                     pass
 
