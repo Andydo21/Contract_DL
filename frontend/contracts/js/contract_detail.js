@@ -522,6 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isFileTab = activeTabPane && activeTabPane.id === 'file-tab';
             
             const formData = new FormData(uploadForm);
+            // An unchecked box is not sent at all; say no explicitly so the server default does not apply.
+            formData.set('summarize', uploadForm.summarize && uploadForm.summarize.checked ? 'true' : 'false');
             if (isFileTab) {
                 formData.delete('raw_content');
                 if (versionPages) {
@@ -613,62 +615,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Used by the new-version upload above (its handler runs after this line).
     const scannerLoader = document.getElementById('scanner-loader');
-
-    // 9. Generate AI Summary click handler
-    const btnGenerateSummary = document.getElementById('btn-generate-summary');
-    if (btnGenerateSummary) {
-        btnGenerateSummary.addEventListener('click', async () => {
-            const contractId = btnGenerateSummary.dataset.contractId;
-            const versionSelect = document.getElementById('version-select');
-            const versionId = versionSelect ? versionSelect.value : null;
-            
-            if (scannerLoader) {
-                scannerLoader.classList.add('active');
-                const scannerText = scannerLoader.querySelector('.scanner-text');
-                if (scannerText) scannerText.innerHTML = "GENERATING AI EXECUTIVE SUMMARY...";
-            }
-            
-            try {
-                const res = await fetch(`/api/ai/contracts/${contractId}/summarize/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({ version_id: versionId })
-                });
-                const data = await res.json();
-                
-                const done = (message, kind) => {
-                    if (scannerLoader) scannerLoader.classList.remove('active');
-                    showToast(message, kind);
-                    if (kind === 'success' && window.refreshContractDetailViaAjax) window.refreshContractDetailViaAjax(contractId, versionId);
-                };
-                if (!data.success) { done(data.error || "Lỗi khi tạo tóm tắt AI.", "error"); return; }
-                // The summary runs as a background job (like the risk analysis); follow it until it ends.
-                const follow = async () => {
-                    try {
-                        const job = (await (await fetch(`/api/ai/bulk/${data.job_id}/`)).json()).job;
-                        const item = job && job.items && job.items[0];
-                        if (job && job.status === 'complete') { done("Tóm tắt AI hoàn tất!", "success"); return; }
-                        if (job && (job.status === 'failed' || job.status === 'partial')) {
-                            done((item && item.error) || job.error || "Lỗi khi tạo tóm tắt AI.", "error");
-                            return;
-                        }
-                    } catch (err) {
-                        console.error(err);
-                    }
-                    setTimeout(follow, 3000);
-                };
-                follow();
-            } catch (err) {
-                if (scannerLoader) scannerLoader.classList.remove('active');
-                console.error(err);
-                showToast("Lỗi kết nối khi tạo tóm tắt AI.", "error");
-            }
-        });
-    }
 });
 
 // Toggle folding/unfolding of clauses
@@ -886,8 +834,8 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
         const metaVals = document.querySelectorAll('.meta-val');
         if (metaVals.length >= 3) {
             metaVals[0].textContent = contract.contract_code || 'N/A';
-            metaVals[1].textContent = contract.contract_type || 'N/A';
-            metaVals[2].textContent = '$' + (contract.contract_value ? Number(contract.contract_value).toLocaleString('en-US', {minimumFractionDigits: 2}) : '0.00');
+            metaVals[1].textContent = contract.contract_type || 'Chưa nhập';
+            metaVals[2].textContent = ContractActions.money(contract.contract_value);
         }
 
         // 6. Update Gauge & Risk Score
@@ -995,11 +943,8 @@ window.refreshContractDetailViaAjax = async function(contractId, versionId = nul
             }
         }
 
-        // 10. Update Executive Summary Tab Text
-        const aiSummaryText = document.getElementById('ai-summary-text');
-        if (aiSummaryText && contract.ai_summary) {
-            aiSummaryText.textContent = contract.ai_summary.summary || '';
-        }
+        // 10. Show the summary of the version now on screen
+        if (window.summaryPanel) window.summaryPanel.load(contract.active_version_id);
     } catch (err) {
         console.error("AJAX contract refresh error:", err);
     }
@@ -1064,38 +1009,31 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Delete contract (managers): postponed only while an extraction/analysis job or ledger work is still running.
+// The contract itself: its change history for everyone, editing and deleting for managers (their buttons are not
+// rendered otherwise). The dialogs live in contract_actions.js, shared with the dashboard.
 document.addEventListener('DOMContentLoaded', () => {
-    const button = document.getElementById('btn-delete-contract');
-    if (!button) return;
-    button.addEventListener('click', async () => {
-        const id = button.dataset.contractId;
-        const code = button.dataset.contractCode || id;
-        const typed = window.prompt(`Xoá vĩnh viễn hợp đồng ${code}: mọi phiên bản, tệp, kết quả trích xuất, phân tích rủi ro, `
-            + `đồ thị, chỉ mục tìm kiếm và quy trình duyệt sẽ bị xoá và không khôi phục được. Giao dịch đã ghi trên `
-            + `blockchain vẫn còn trên sổ cái (chỉ xoá bản sao trong hệ thống).\n\nNhập mã hợp đồng để xác nhận:`);
-        if (typed === null) return;
-        if (typed.trim() !== code) {
-            window.alert('Mã hợp đồng không khớp; hợp đồng chưa bị xoá.');
-            return;
-        }
-        button.disabled = true;
-        try {
-            const response = await fetch(`/api/contracts/${id}/`, {
-                method: 'DELETE',
-                headers: { 'X-CSRFToken': getCookie('csrftoken') },
-                credentials: 'same-origin'
-            });
-            const body = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(body.error || `Lỗi ${response.status}`);
-            window.location.href = '/';
-        } catch (error) {
-            window.alert('Không xoá được hợp đồng: ' + error.message);
-            button.disabled = false;
-        }
-    });
-});
+    const meta = document.getElementById('contract-meta');
+    if (!meta || !window.ContractActions) return;
+    const contract = {
+        id: Number(meta.dataset.id), contract_code: meta.dataset.code, title: meta.dataset.title, contract_type: meta.dataset.type,
+        start_date: meta.dataset.start || null, end_date: meta.dataset.end || null,
+        contract_value: meta.dataset.value === '' ? null : Number(meta.dataset.value),
+    };
+    // Dates and the amount the way people here write them.
+    document.getElementById('meta-value').textContent = ContractActions.money(contract.contract_value);
+    document.getElementById('meta-period').textContent = ContractActions.period(contract.start_date, contract.end_date) || 'Chưa nhập';
 
+    document.getElementById('btn-history-contract')?.addEventListener('click', event =>
+        ContractActions.history(contract, {opener: event.currentTarget}));
+    document.getElementById('btn-edit-contract')?.addEventListener('click', event =>
+        ContractActions.edit(contract, {opener: event.currentTarget, versionId: meta.dataset.versionId, onSaved: () => window.location.reload()}));
+    document.getElementById('btn-delete-contract')?.addEventListener('click', event =>
+        ContractActions.remove(contract, {opener: event.currentTarget, onDeleted: deleted => {
+            // The dashboard shows the confirmation, with Undo.
+            ContractActions.announceDeleted(deleted);
+            window.location.href = meta.dataset.dashboardUrl || '/';
+        }}));
+});
 
 // Q&A on this contract: the question is answered in the background job queue, the tab follows it.
 (function () {

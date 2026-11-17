@@ -15,8 +15,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- External CSS -->
-    <link rel="stylesheet" href="{% static 'contracts/css/contract_detail.css' %}?v=2.1.9">
+    <link rel="stylesheet" href="{% static 'contracts/css/contract_detail.css' %}?v=2.2.0">
     <link rel="stylesheet" href="{% static 'common/css/theme.css' %}?v=2.1.6">
+    <link rel="stylesheet" href="{% static 'contracts/css/contract_actions.css' %}?v=1.1.0">
+    <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.6.0">
 </head>
 <body class="cg-app">
     {% include 'common/_sidebar.html' with active='contracts' %}
@@ -30,7 +32,10 @@
                     <h1 class="cg-title">{{ contract.title }}</h1>
                 </div>
             </div>
-            <div class="contract-header-info" style="display: flex; align-items: center; gap: 16px;">
+            <div class="contract-header-info" id="contract-meta" style="display: flex; align-items: center; gap: 16px;"
+                 data-id="{{ contract.id }}" data-version-id="{{ contract.active_version_id }}" data-code="{{ contract.contract_code }}" data-title="{{ contract.title }}"
+                 data-type="{{ contract.contract_type|default:'' }}" data-start="{{ contract.start_date|default:'' }}" data-end="{{ contract.end_date|default:'' }}"
+                 data-value="{{ contract.contract_value|default_if_none:''|stringformat:'s' }}" data-dashboard-url="{% url 'dashboard' %}">
                 <!-- Version Selector Dropdown -->
                 <div class="version-selector-container">
                     <label for="version-select" class="version-label"><i class="fa-solid fa-code-branch"></i> Version:</label>
@@ -47,9 +52,15 @@
                     <i class="fa-solid fa-circle-plus"></i> New Version
                 </button>
 
+                <button type="button" class="btn btn-secondary" id="btn-history-contract" aria-haspopup="dialog" style="padding: 8px 14px; font-size: 13px; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.027); border: 1px solid rgba(15, 23, 42, 0.14); color: #171a21;">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Lịch sử
+                </button>
                 {% if user.is_superuser or user.role.role_name|upper == 'MANAGER' or user.role.role_name|upper == 'ADMIN' %}
-                <button class="btn" id="btn-delete-contract" data-contract-id="{{ contract.id }}" data-contract-code="{{ contract.contract_code }}" style="padding: 8px 16px; font-size: 13px; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 8px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #9f0808;">
-                    <i class="fa-solid fa-trash-can"></i> Xoá hợp đồng
+                <button type="button" class="btn btn-secondary" id="btn-edit-contract" aria-haspopup="dialog" style="padding: 8px 14px; font-size: 13px; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.027); border: 1px solid rgba(15, 23, 42, 0.14); color: #171a21;">
+                    <i class="fa-solid fa-pen"></i> Sửa
+                </button>
+                <button type="button" class="btn" id="btn-delete-contract" aria-haspopup="dialog" style="padding: 8px 14px; font-size: 13px; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 6px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #9f0808;">
+                    <i class="fa-solid fa-trash-can"></i> Xóa
                 </button>
                 {% endif %}
 
@@ -121,36 +132,43 @@
                         <div class="meta-card">
                             <div class="meta-icon"><i class="fa-solid fa-barcode"></i></div>
                             <div class="meta-info">
-                                <span class="meta-label">Code</span>
+                                <span class="meta-label">Mã hợp đồng</span>
                                 <span class="meta-val">{{ contract.contract_code }}</span>
                             </div>
                         </div>
                         <div class="meta-card">
                             <div class="meta-icon"><i class="fa-solid fa-tag"></i></div>
                             <div class="meta-info">
-                                <span class="meta-label">Type</span>
-                                <span class="meta-val">{{ contract.contract_type|default:"N/A" }}</span>
+                                <span class="meta-label">Loại</span>
+                                <span class="meta-val">{{ contract.contract_type|default:"Chưa nhập" }}</span>
                             </div>
                         </div>
                         <div class="meta-card">
-                            <div class="meta-icon"><i class="fa-solid fa-dollar-sign"></i></div>
+                            <div class="meta-icon"><i class="fa-solid fa-coins"></i></div>
                             <div class="meta-info">
-                                <span class="meta-label">Value</span>
-                                <span class="meta-val">${{ contract.contract_value|floatformat:2|default:"0" }}</span>
+                                <span class="meta-label">Giá trị</span>
+                                <span class="meta-val" id="meta-value">{{ contract.contract_value|default_if_none:"—" }}</span>
+                            </div>
+                        </div>
+                        <div class="meta-card">
+                            <div class="meta-icon"><i class="fa-solid fa-calendar-days"></i></div>
+                            <div class="meta-info">
+                                <span class="meta-label">Thời hạn</span>
+                                <span class="meta-val" id="meta-period">{{ contract.start_date|default:"" }}{% if contract.start_date or contract.end_date %} – {% else %}Chưa nhập{% endif %}{{ contract.end_date|default:"" }}</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Panel Tabs Switcher -->
                     <div class="panel-tabs" style="display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid rgba(15, 23, 42, 0.112); padding-bottom: 8px;">
-                        <button type="button" class="panel-tab-btn active" data-target="analysis-tab" style="background: none; border: none; color: #171a21; padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="panel-tab-btn active" data-target="summary-tab" style="background: none; border: none; color: #171a21; padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Tóm tắt
+                        </button>
+                        <button type="button" class="panel-tab-btn" data-target="analysis-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
                             <i class="fa-solid fa-chart-line"></i> Risk Analysis
                         </button>
                         <button type="button" class="panel-tab-btn" data-target="clauses-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
                             <i class="fa-solid fa-file-contract"></i> Clauses & Entities
-                        </button>
-                        <button type="button" class="panel-tab-btn" data-target="summary-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
-                            <i class="fa-solid fa-align-left"></i> Summary
                         </button>
                         <button type="button" class="panel-tab-btn" data-target="qa-tab" style="background: none; border: none; color: var(--text-muted); padding: 8px 16px; font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 600; cursor: pointer; border-radius: 6px; display: flex; align-items: center; gap: 8px;">
                             <i class="fa-solid fa-comments"></i> Hỏi đáp
@@ -159,8 +177,13 @@
 
                     <!-- Tab Contents -->
                     <div class="tab-content-wrapper">
-                        <!-- Tab 1: Risk Analysis -->
-                        <div class="tab-pane active" id="analysis-tab" style="display: block;">
+                        <!-- Tab 1: Summary (read from the uploaded file, independent of extraction) -->
+                        <div class="tab-pane active" id="summary-tab" style="display: block;">
+                            <div id="detail-summary-panel" data-contract-id="{{ contract.id }}" data-version-id="{{ contract.active_version_id }}"></div>
+                        </div>
+
+                        <!-- Tab 2: Risk Analysis -->
+                        <div class="tab-pane" id="analysis-tab" style="display: none;">
                             <!-- 1. AI Analysis Section (Pending, Progress, or Results) -->
                             {% if contract.status == 'ANALYZING' %}
                             <div style="text-align: center; color: var(--text-muted); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; background: rgba(15, 23, 42, 0.025); border: 1px dashed rgba(15, 23, 42, 0.112); border-radius: 12px; margin-bottom: 24px;">
@@ -309,7 +332,7 @@
                         </div>
 
 
-                        <!-- Tab 2: Clauses & Entities -->
+                        <!-- Tab 3: Clauses & Entities -->
                         <div class="tab-pane" id="clauses-tab" style="display: none;">
 
                             <div id="contract-parties" data-contract-id="{{ contract.id }}" style="margin-bottom: 18px; padding: 14px; border: 1px solid rgba(15, 23, 42, 0.112); border-radius: 12px; background: rgba(15, 23, 42, 0.025);">
@@ -424,31 +447,6 @@
                             <div id="contract-qa-sources" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;"></div>
                         </div>
 
-                        <!-- Tab 3: Summary -->
-                        <div class="tab-pane" id="summary-tab" style="display: none;">
-                            {% if contract.ai_summary %}
-                                <div class="summary-box" style="margin-top: 10px; background: rgba(37, 99, 235, 0.02); border-left: 4px solid var(--accent-primary); padding: 20px; border-radius: 8px; line-height: 1.8;">
-                                    <h4 style="font-family: 'Inter', sans-serif; font-size: 16px; color: #171a21; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; margin-top: 0;">
-                                        <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--accent-primary);"></i> AI Executive Summary
-                                    </h4>
-                                    <div id="ai-summary-text" style="color: var(--text-secondary); font-size: 14px; white-space: pre-wrap;">{{ contract.ai_summary.summary }}</div>
-                                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 16px; border-top: 1px solid rgba(15, 23, 42, 0.09); padding-top: 8px;">
-                                        Model: <span style="font-family: monospace;">{{ contract.ai_summary.model_id }}</span> · Generated: {{ contract.ai_summary.created_at }}
-                                    </div>
-                                    <button class="btn btn-secondary" id="btn-generate-summary" data-contract-id="{{ contract.id }}" style="margin-top: 16px; background: rgba(15, 23, 42, 0.027); border: 1px solid rgba(15, 23, 42, 0.14); color: #171a21; display: flex; align-items: center; gap: 8px; font-size: 12.5px;">
-                                        <i class="fa-solid fa-rotate"></i> Re-generate Summary
-                                    </button>
-                                </div>
-                            {% else %}
-                                <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
-                                    <i class="fa-solid fa-align-left" style="font-size: 48px; margin-bottom: 12px; color: var(--accent-primary);"></i>
-                                    <p style="margin-bottom: 16px;">No executive summary available for this contract version.</p>
-                                    <button class="btn" id="btn-generate-summary" data-contract-id="{{ contract.id }}" style="background: #2563eb; border: none; display: inline-flex; align-items: center; gap: 8px;">
-                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Summary
-                                    </button>
-                                </div>
-                            {% endif %}
-                        </div>
                     </div>
                 </div>
             </div>
@@ -509,6 +507,13 @@
                         </div>
                     </div>
                     
+                    <div class="summary-choice" style="margin-top: 16px; margin-bottom: 0;">
+                        <label>
+                            <input type="checkbox" name="summarize" value="true" checked>
+                            <span>Tóm tắt phiên bản mới ngay sau khi tải lên<small>AI tự đọc file và tóm tắt, không cần chạy trích xuất trước.</small></span>
+                        </label>
+                    </div>
+
                     <div class="modal-footer" style="margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">
                         <button type="button" class="btn btn-secondary" id="btn-cancel-upload" style="background: transparent; border: 1px solid rgba(15, 23, 42, 0.2); color: var(--text-secondary);">Cancel</button>
                         <button type="submit" class="btn" id="btn-submit-version">
@@ -522,6 +527,14 @@
 
     <!-- External JS -->
     <script src="{% static 'contracts/js/page_images.js' %}?v=2.1.3"></script>
-    <script src="{% static 'contracts/js/contract_detail.js' %}?v=2.2.0"></script>
+    <script src="{% static 'contracts/js/summary_panel.js' %}?v=1.6.0"></script>
+    <script src="{% static 'contracts/js/contract_actions.js' %}?v=1.1.0"></script>
+    <script src="{% static 'contracts/js/contract_detail.js' %}?v=2.3.0"></script>
+    <script>
+        (() => {
+            const root = document.getElementById('detail-summary-panel');
+            if (root) window.summaryPanel = SummaryPanel.mount(root, {contractId: root.dataset.contractId, versionId: root.dataset.versionId});
+        })();
+    </script>
 </body>
 </html>
