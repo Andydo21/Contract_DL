@@ -12,7 +12,9 @@
         <div class="cg-nav-label">Hợp đồng</div>
         <a href="/" class="{% if active == 'contracts' %}active{% endif %}" title="Danh sách hợp đồng"><i class="fa-solid fa-file-contract"></i><span>Danh sách hợp đồng</span></a>
         <a href="/analyses/" class="{% if active == 'analyses' %}active{% endif %}" title="Lịch sử phân tích"><i class="fa-solid fa-chart-line"></i><span>Lịch sử phân tích</span></a>
+        {% if u.is_superuser or u.role.role_name|upper == 'ADMIN' %}
         <a href="/ai-extract/summary-lab/" class="{% if active == 'summary_lab' %}active{% endif %}" title="Thử tóm tắt văn bản, file hoặc hai phiên bản"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Summary Lab</span></a>
+        {% endif %}
         <div class="cg-nav-label">Phê duyệt &amp; ký</div>
         <a href="/board/" class="{% if active == 'approvals' %}active{% endif %}" title="Quy trình phê duyệt"><i class="fa-solid fa-diagram-project"></i><span>Quy trình phê duyệt</span></a>
         <a href="/contract-ledger/" class="{% if active == 'ledger' %}active{% endif %}" title="Ký &amp; kiểm chứng"><i class="fa-solid fa-file-signature"></i><span>Ký &amp; kiểm chứng</span></a>

@@ -8,6 +8,11 @@ def is_manager(user):
     return bool(user.is_superuser or (user.role and user.role.role_name.upper() in MANAGER_ROLES))
 
 
+def is_admin(user):
+    """A superuser, or a user whose role is ADMIN."""
+    return bool(user.is_superuser or (getattr(user, 'role', None) and user.role.role_name.upper() == 'ADMIN'))
+
+
 def check_contract_permission(user, contract):
     if not user or not user.is_authenticated:
         return False

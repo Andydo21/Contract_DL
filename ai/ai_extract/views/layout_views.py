@@ -1,7 +1,7 @@
 """HTML and JSON adapters for the A3 extraction pipeline."""
 from functools import wraps
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST,require_GET
@@ -21,8 +21,12 @@ def page_errors(view):
 
 @login_required
 def summary_lab(request):
-    """Test screen for the contract summary: a pasted text, an uploaded file, two versions or a stored contract."""
+    """Test screen for the contract summary: a pasted text, an uploaded file, two versions or a stored contract.
+    Admins only: it shows the pipeline's internals (chunks, cache, confidence)."""
+    from contract.core.services.access_service import is_admin
     from ai.ai_extract.services import summary_service
+    if not is_admin(request.user):
+        raise PermissionDenied('Summary Lab chỉ dành cho quản trị viên.')
     return render(request, 'document_viewer/summary_lab.html', summary_service.summary_lab_page(request.user))
 
 @login_required

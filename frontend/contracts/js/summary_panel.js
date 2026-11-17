@@ -467,8 +467,10 @@
                                                               title: result ? 'Tải bản đang xem (đúng góc nhìn và độ dài đã chọn)' : 'Tải bản tóm tắt kèm ngày quan trọng và nội dung còn thiếu',
                                                               onclick: () => this.exportWord()},
                             el('i', {class: exporting ? 'fa-solid fa-circle-notch fa-spin' : 'fa-regular fa-file-word'}), exporting ? ' Đang tạo file…' : ' Tải Word') : null),
-                    el('a', {class: 'sp-link', href: `/ai-extract/summary-lab/?contract=${encodeURIComponent(this.contractId)}`, target: '_blank', rel: 'noopener'},
-                        'Xem chi tiết trong Summary Lab ↗')));
+                    // Summary Lab is for admins (the page marks them on <body>).
+                    document.body.dataset.summaryLab === '1'
+                        ? el('a', {class: 'sp-link', href: `/ai-extract/summary-lab/?contract=${encodeURIComponent(this.contractId)}`, target: '_blank', rel: 'noopener'},
+                             'Xem chi tiết trong Summary Lab ↗') : null));
             // A run replaces the analysis the views are rendered from, so views wait for it. Before the first summary
             // the options stay open: they choose how that first run is written.
             const hasSource = !!(saved && (saved.has_text || saved.file_name));

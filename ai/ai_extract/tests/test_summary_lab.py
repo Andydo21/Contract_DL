@@ -685,9 +685,21 @@ class SummaryLabTests(TestCase):
         self.assertEqual(data['status'], 'unreachable')
         self.assertFalse(data['llm_connected'])
 
-    def test_page_lists_only_visible_contracts(self):
+    def test_page_is_for_admins_and_lists_only_visible_contracts(self):
+        from contract.contracts.models import Role
+        self.assertEqual(self.client.get('/ai-extract/summary-lab/').status_code, 403)
+        self.client.force_login(self.manager)
+        self.assertEqual(self.client.get('/ai-extract/summary-lab/').status_code, 403)
+        dashboard = self.client.get('/').content.decode()
+        self.assertNotIn('/ai-extract/summary-lab/', dashboard)  # no sidebar link
+        self.assertNotIn('data-summary-lab', dashboard)  # no link in the summary panel
+        self.user.role = Role.objects.create(role_name='ADMIN')
+        self.user.save()
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get('/'), 'data-summary-lab="1"')
         page = self.client.get('/ai-extract/summary-lab/')
         self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'href="/ai-extract/summary-lab/"')
         self.assertContains(page, 'HD-001')
         self.assertNotContains(page, 'HD-002')
 
