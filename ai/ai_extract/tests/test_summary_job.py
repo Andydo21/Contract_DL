@@ -1,10 +1,11 @@
-"""The contract summary runs as a background job, as the risk analysis does."""
+"""A contract summary can also run in the background job queue (mode "summary"), as the risk analysis does.
+The summary API itself (summary_service.summarize) tracks its own run state; see test_summary_lab."""
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from ai.ai_extract.services import bulk_service, extraction_service
+from ai.ai_extract.services import bulk_service, summary_service
 
 
 class SummaryJobTests(SimpleTestCase):
@@ -12,23 +13,6 @@ class SummaryJobTests(SimpleTestCase):
         self.user = SimpleNamespace(pk=7, is_superuser=False)
         self.contract = SimpleNamespace(pk=11)
         self.version = SimpleNamespace(pk=21)
-
-    def test_summarize_queues_a_summary_job_for_the_chosen_version(self):
-        with patch.object(extraction_service, 'select_version', return_value=(self.contract, self.version)), \
-                patch.object(extraction_service.extraction_repository, 'clauses_for_version', return_value=['clause']), \
-                patch.object(bulk_service, 'start', return_value=dict(id='a' * 32, status='waiting')) as start:
-            result = extraction_service.summarize(self.user, 11, dict(version_id=21))
-        start.assert_called_once_with(self.user, [11], 'summary', options={'version_id': 21})
-        self.assertEqual(result, dict(success=True, contract_id=11, version_id=21, job_id='a' * 32, job_status='waiting'))
-
-    def test_summarize_without_clauses_is_refused_before_queueing(self):
-        with patch.object(extraction_service, 'select_version', return_value=(self.contract, self.version)), \
-                patch.object(extraction_service.extraction_repository, 'clauses_for_version', return_value=[]), \
-                patch.object(bulk_service, 'start') as start:
-            with self.assertRaises(extraction_service.ExtractionError) as raised:
-                extraction_service.summarize(self.user, 11, {})
-        self.assertEqual(raised.exception.status, 409)
-        start.assert_not_called()
 
     def test_summary_mode_is_open_to_users_who_may_read_the_contract(self):
         # Like a risk analysis, a summary only reads the document: no document-manager role is needed.
@@ -52,8 +36,8 @@ class SummaryJobTests(SimpleTestCase):
                 patch('ai.ai_extract.repositories.layout_repository.contract_exists', return_value=True), \
                 patch('ai.ai_extract.repositories.layout_repository.latest_run', return_value=None), \
                 patch('ai.ai_extract.repositories.layout_repository.user_by_id', return_value=self.user), \
-                patch.object(extraction_service, 'select_version', return_value=(contract, version)) as select, \
-                patch.object(extraction_service.SummarizeService, 'summarize_version') as summarize:
+                patch.object(summary_service, 'select_version', return_value=(contract, version)) as select, \
+                patch.object(summary_service.SummarizeService, 'summarize_version') as summarize:
             result = bulk_service.run_job('b' * 32)
         select.assert_called_once_with(self.user, 11, 21)
         summarize.assert_called_once_with(version)

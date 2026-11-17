@@ -9,5 +9,6 @@ urlpatterns = [
     path('', include('contract.approvals.urls')),
     path('', include('ai.legal_ai.urls')),
     path('api/ai/', include('ai.ai_extract.urls')),
+    path('ai-extract/summary-lab/', layout_views.summary_lab, name='ai_summary_lab'),
     path('ai-extract/contracts/<int:contract_id>/pages/<int:page_number>/', layout_views.page_inspector, name='ai_extract_page'),
 ]
