@@ -8,6 +8,14 @@ def contract_for(user, contract_id):
     return visible_contracts(user).prefetch_related('versions__ai_extract_clauses').get(pk=contract_id)
 
 
+def visible_contracts_with_versions(user):
+    return list(visible_contracts(user).prefetch_related('versions').order_by('-created_at', '-pk'))
+
+
+def visible_contract_rows(user):
+    return list(visible_contracts(user).values('id', 'contract_code', 'title', 'end_date'))
+
+
 def version_for(contract, version_id=None):
     return contract.versions.get(pk=version_id) if version_id else contract.latest_version
 
