@@ -102,3 +102,4 @@ ai/ai_summary/tools/eval_report.json
 ai/ai_summary/tools/finetune/data/
 .idea/
 legacy/a3/qdrant_storage/
+report_build/build_report.py
