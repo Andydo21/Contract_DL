@@ -96,3 +96,9 @@ ai/training/risk_skill/data/
 documents/
 media/
 ai/ai_extract/demo/
+
+# ai_summary outputs and IDE files
+ai/ai_summary/tools/eval_report.json
+ai/ai_summary/tools/finetune/data/
+.idea/
+legacy/a3/qdrant_storage/

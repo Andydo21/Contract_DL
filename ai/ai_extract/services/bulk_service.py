@@ -240,7 +240,7 @@ def run_job(job_id):
                     write_job(job)
                 ContractService().analyze_contract(contract.pk, user=layout_repository.user_by_id(job['user_id']), progress=progress)
             elif job['mode'] == 'summary':
-                from .extraction_service import SummarizeService, select_version
+                from .summary_service import SummarizeService, select_version
                 _, version = select_version(layout_repository.user_by_id(job['user_id']), contract.pk,
                                             job.get('options', {}).get('version_id'))
                 SummarizeService().summarize_version(version)

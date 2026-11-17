@@ -1,5 +1,5 @@
-"""Coordinate persisted summaries, entity extraction and A3 clause extraction."""
-from ai.ai_extract.repositories import ContractSummaryRepository, ExtractedEntityRepository
+"""Coordinate entity extraction and A3 clause extraction (summaries live in summary_service)."""
+from ai.ai_extract.repositories import ExtractedEntityRepository
 from ai.ai_extract.repositories import extraction_repository
 
 import logging
@@ -9,30 +9,6 @@ from ai.ai_extract.repositories import clause_extract_data_repository as data_re
 from .contract_pipeline_service import request_qwen
 
 logger = logging.getLogger('ai_extract')
-MODEL_ID = 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ'
-
-
-class SummarizeService:
-    """Generate and persist a version's executive summary."""
-
-    def summarize_version(self, version: ContractVersion) -> dict:
-        """Summarize the version's clauses with the ai_summary pipeline (chunked, parallel, values checked against
-        the source) and persist the rendered summary."""
-        from ai.ai_summary.services import summary_service
-        clauses = extraction_repository.clauses_for_version(version)
-        if not clauses:
-            raise ValueError(f'ContractVersion {version.id} has no clauses. Run clause extraction first.')
-        # Clause content starts with its own heading ("Điều N. ..."), which the summary pipeline splits on.
-        text = '\n\n'.join(cl.clause_content if cl.clause_content.lstrip().startswith(cl.clause_title.split('.')[0])
-                           else f'{cl.clause_title}\n{cl.clause_content}' for cl in clauses)
-        metadata = {'contract_code': version.contract.contract_code, 'title': version.contract.title, 'version': version.version_number}
-        logger.info(f'[summarize] ai_summary pipeline – version_id={version.id}, {len(clauses)} clauses')
-        result = summary_service.summarize(text, metadata)
-        obj = ContractSummaryRepository.create_or_update(version=version, summary=result['summary'], model_id=result['model_id'])
-        logger.info(f'[summarize] Saved ContractSummary id={obj.id}')
-        return {'version_id': version.id, 'contract_id': version.contract.id, 'summary': result['summary'],
-                'model_id': result['model_id'], 'structured': result['structured'], 'unverified': result['unverified']}
-
 
 
 class ExtractEntityService:
@@ -146,24 +122,6 @@ def select_version(user, contract_id, version_id=None):
     if version is None:
         raise ExtractionError('Contract has no version yet.')
     return (contract, version)
-
-def summarize(user, contract_id, data):
-    """Queue the version's summary as a background job, as the risk analysis is: the model takes from seconds to
-    minutes, which a web request should not hold. The page follows /api/ai/bulk/<job_id>/ and then reads
-    /api/ai/contracts/<id>/summary/."""
-    from . import bulk_service
-    contract, version = select_version(user, contract_id, data.get('version_id'))
-    if not extraction_repository.clauses_for_version(version):
-        raise ExtractionError('Hợp đồng chưa có điều khoản; hãy chờ trích xuất xong rồi tóm tắt.', 409)
-    job = bulk_service.start(user, [contract.pk], 'summary', options={'version_id': version.pk})
-    return dict(success=True, contract_id=contract.pk, version_id=version.pk, job_id=job['id'], job_status=job['status'])
-
-def summary(user, contract_id):
-    contract, version = select_version(user, contract_id)
-    obj = ContractSummaryRepository.get_by_version(version)
-    if not obj:
-        raise ExtractionError('No summary found. Run summarize first.', 404)
-    return dict(id=obj.id, contract_id=contract.id, version_id=version.id, summary=obj.summary, model_id=obj.model_id, created_at=obj.created_at.isoformat(), updated_at=obj.updated_at.isoformat())
 
 def extract_entities(user, contract_id, data):
     contract, version = select_version(user, contract_id, data.get('version_id'))

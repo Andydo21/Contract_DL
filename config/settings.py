@@ -186,6 +186,11 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
     os.environ.get("KAGGLE_AI_URL", "http://kaggle-qwen-service:8000")
 )
 
+# Contract summary (ai.ai_summary, in-process): how long one run may take before another may start over it.
+AI_SUMMARY_TIMEOUT = int(os.environ.get("AI_SUMMARY_TIMEOUT", "600"))
+# Summarize every uploaded file in the background, independently of the extraction pipeline.
+AI_SUMMARY_AUTO = os.environ.get("AI_SUMMARY_AUTO", "0") == "1"
+
 # PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
 COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")
 COLPALI_ENABLED = os.environ.get('COLPALI_ENABLED', 'True').lower() == 'true'

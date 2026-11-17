@@ -20,6 +20,12 @@ def page_errors(view):
     return adapter
 
 @login_required
+def summary_lab(request):
+    """Test screen for the contract summary: a pasted text, an uploaded file, two versions or a stored contract."""
+    from ai.ai_extract.services import summary_service
+    return render(request, 'document_viewer/summary_lab.html', summary_service.summary_lab_page(request.user))
+
+@login_required
 @page_errors
 def page_inspector(request, contract_id, page_number):
     return render(request, 'document_viewer/page_inspector.html', layout_service.inspect_page(

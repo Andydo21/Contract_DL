@@ -19,6 +19,8 @@ urlpatterns = [
     # Answered only inside the AI service container (AI_SERVICE_ROLE=ai), with the shared token.
     path('internal/ai/', include('ai.ai_extract.internal_urls')),
     path('api/legal/', include('ai.legal_kb.urls')),
+    # Test screen of the contract summary (pasted text, file, two versions, stored contract).
+    path('ai-extract/summary-lab/', layout_views.summary_lab, name='ai_summary_lab'),
     # The source page of a citation (page image with its blocks); evidence links open it. No other AI Extract page.
     path(
         'ai-extract/contracts/<int:contract_id>/pages/<int:page_number>/',

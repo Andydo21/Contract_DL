@@ -68,7 +68,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
+    environment: &web-env
       <<: *django-db
       SECRET_KEY: ${SECRET_KEY}
       DB_NAME: ${DB_NAME:-contract_db}
@@ -91,8 +91,34 @@ services:
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
       NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+      # Contract summary (ai.ai_summary, in-process). Blank SUMMARY_* = the shared gateway (VLLM_BASE_URL / QWEN_MODEL_ID).
+      SUMMARY_LLM_URL: ${SUMMARY_LLM_URL:-}
+      SUMMARY_MODEL_ID: ${SUMMARY_MODEL_ID:-}
+      SUMMARY_PARALLEL: ${SUMMARY_PARALLEL:-2}
+      SUMMARY_CACHE_DIR: /app/runtime/ai_summary_cache
+      # 1 = summarize every uploaded file in the background; off by default on the shared model.
+      AI_SUMMARY_AUTO: ${AI_SUMMARY_AUTO:-0}
+      AI_SUMMARY_AUTO_PARALLEL: ${AI_SUMMARY_AUTO_PARALLEL:-1}
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - .:/app
+    networks:
+      - riskdl-net
+
+  # Tóm tắt nền: nhận bản chưa có tóm tắt (chỉ khi AI_SUMMARY_AUTO=1) và chạy lại các lần tóm tắt lỗi khi model offline.
+  summary-worker:
+    image: riskdl-web-local:latest
+    container_name: riskdl_summary_worker
+    restart: unless-stopped
+    working_dir: /app
+    command: python manage.py retry_summaries --watch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      web:
+        condition: service_started
+    environment: *web-env
     volumes:
       - .:/app
     networks:

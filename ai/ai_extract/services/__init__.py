@@ -5,6 +5,8 @@ _public_services = {'SummarizeService', 'ExtractEntityService', 'ClauseExtractSe
 
 
 def __getattr__(name):
+    if name == 'SummarizeService':
+        return getattr(import_module(f'{__name__}.summary_service'), name)
     if name in _public_services:
         return getattr(import_module(f'{__name__}.extraction_service'), name)
     raise AttributeError(name)

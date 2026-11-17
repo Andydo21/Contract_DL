@@ -58,7 +58,7 @@ Step 'Neo4j, Qdrant, Hyperledger Fabric, web, AI, workflow, blockchain'
 $services = @(
     'neo4j', 'qdrant',
     'orderer.example.com', 'peer0.org1.example.com', 'fabric-chaincode', 'fabric-gateway',
-    'web', 'ai', 'workflow-service', 'blockchain-service', 'ledger-worker'
+    'web', 'ai', 'summary-worker', 'workflow-service', 'blockchain-service', 'ledger-worker'
 )
 # Chaincode và gateway chạy từ image dựng sẵn; máy chưa có image thì dựng một lần (cần mạng).
 foreach ($pair in @(@('contract-chaincode-local:latest', 'fabric-chaincode'), @('contract-fabric-gateway-local:latest', 'fabric-gateway'))) {
@@ -72,7 +72,7 @@ foreach ($pair in @(@('contract-chaincode-local:latest', 'fabric-chaincode'), @(
 & docker @compose up -d --no-build --no-deps @services
 if ($LASTEXITCODE -ne 0) { throw 'Không bật được các dịch vụ Docker.' }
 # Docker tự bật lại container khi khởi động, có thể trước lúc PostgreSQL sẵn sàng; khởi động lại các dịch vụ dùng CSDL.
-& docker restart riskdl_web riskdl_ai workflow_service blockchain_service contract_ledger_worker | Out-Null
+& docker restart riskdl_web riskdl_ai riskdl_summary_worker workflow_service blockchain_service contract_ledger_worker | Out-Null
 
 # 4. GPU runtime trên Windows (Surya, VietOCR, GLiNER, BGE) - cổng 8010
 if (-not $NoGpu) {
