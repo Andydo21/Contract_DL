@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="{% static 'common/css/theme.css' %}?v=2.1.6">
 </head>
 <body class="cg-app">
-    {% if request.path == '/contract-ledger/' %}{% include 'common/_sidebar.html' with active='ledger' %}{% else %}{% include 'common/_sidebar.html' with active='contracts' %}{% endif %}
+    {% if request.path == '/contract-ledger/' %}{% include 'common/_sidebar.html' with active='ledger' %}{% elif request.path == '/ai-extract/summary-lab/' %}{% include 'common/_sidebar.html' with active='summary_lab' %}{% else %}{% include 'common/_sidebar.html' with active='contracts' %}{% endif %}
     <div class="cg-main">
         <main class="page-shell">{% block content %}{% endblock %}</main>
     </div>
