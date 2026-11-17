@@ -1,4 +1,5 @@
-"""Deleting a contract: managers of its company only; postponed only while ledger work is still in flight (a
+"""Deleting a contract for good ("Xoá vĩnh viễn" in the trash; a plain delete only moves it to the trash, see
+test_contract_crud): managers of its company only; postponed only while ledger work is still in flight (a
 background extraction of it is cancelled instead, and other documents' extraction goes on);
 the graph and vectors go first, workflows and the local ledger copy go with it, the audit trail stays."""
 import json
@@ -49,10 +50,14 @@ class DeleteContractTests(TestCase):
         purged = stack.enter_context(patch('ai.ai_extract.services.layout_service.purge_contract_index', **outcome(purge)))
         return deleted, purged
 
+    def trash(self):
+        Contract.all_objects.filter(pk=self.contract.pk).update(deleted_at=timezone.now(), deleted_by=self.manager)
+
     def delete(self, user, **services):
+        self.trash()
         with ExitStack() as stack:
             deleted, purged = self.services(stack, **services)
-            return ops.contract_detail(self.contract.pk, user=user, method='DELETE', query={}), purged
+            return ops.purge_contract(self.contract.pk, user), purged
 
     def anchored(self, **changes):
         now = timezone.now()
@@ -66,7 +71,7 @@ class DeleteContractTests(TestCase):
         result, purged = self.delete(self.manager)
         self.assertEqual(result.status, 200, result.payload)
         purged.assert_called_once()
-        self.assertFalse(Contract.objects.filter(pk=self.contract.pk).exists())
+        self.assertFalse(Contract.all_objects.filter(pk=self.contract.pk).exists())
         self.assertFalse(ContractVersion.objects.filter(pk=self.version.pk).exists())
         self.assertFalse(AIAnalysis.objects.exists())
         self.assertFalse(KnowledgeSearchLog.objects.exists())
@@ -103,22 +108,23 @@ class DeleteContractTests(TestCase):
         self.assertEqual(self.delete(self.manager)[0].status, 200)
 
     def test_its_workflows_are_deleted_with_it(self):
+        self.trash()
         with ExitStack() as stack:
             deleted, _ = self.services(stack, workflows=2)
-            result = ops.delete_contract(self.contract.pk, self.manager)
+            result = ops.purge_contract(self.contract.pk, self.manager)
         self.assertEqual(result.payload['workflows_deleted'], 2)
         deleted.assert_called_once_with([self.version.pk])
 
     def test_an_unreachable_workflow_service_keeps_the_contract(self):
         result, _ = self.delete(self.manager, workflows=RuntimeError('down'))
         self.assertEqual(result.status, 502)
-        self.assertTrue(Contract.objects.filter(pk=self.contract.pk).exists())
+        self.assertTrue(Contract.all_objects.filter(pk=self.contract.pk).exists())
 
     def test_staff_cannot_delete(self):
         result, purged = self.delete(self.staff)
         self.assertEqual(result.status, 403)
         purged.assert_not_called()
-        self.assertTrue(Contract.objects.filter(pk=self.contract.pk).exists())
+        self.assertTrue(Contract.all_objects.filter(pk=self.contract.pk).exists())
 
     def test_a_manager_of_another_company_cannot_delete(self):
         other = User.objects.create_user('other', password='x', role=self.manager.role,
@@ -133,17 +139,27 @@ class DeleteContractTests(TestCase):
         self.cancel.assert_called_once_with(self.contract.pk)
         self.assertTrue(result.payload['background_extraction_cancelled'])
         purged.assert_called_once()
-        self.assertFalse(Contract.objects.filter(pk=self.contract.pk).exists())
+        self.assertFalse(Contract.all_objects.filter(pk=self.contract.pk).exists())
 
     def test_a_failed_index_purge_keeps_the_contract(self):
         result, _ = self.delete(self.manager, purge=ConnectionError('qdrant down'))
         self.assertEqual(result.status, 502)
-        self.assertTrue(Contract.objects.filter(pk=self.contract.pk).exists())
+        self.assertTrue(Contract.all_objects.filter(pk=self.contract.pk).exists())
         self.assertTrue(self.stored.exists())
+
+    def test_only_a_contract_in_the_trash_can_be_deleted_for_good(self):
+        with ExitStack() as stack:
+            _, purged = self.services(stack)
+            result = ops.purge_contract(self.contract.pk, self.manager)
+        self.assertEqual(result.status, 404)
+        purged.assert_not_called()
+        self.assertTrue(Contract.objects.filter(pk=self.contract.pk).exists())
 
     def test_the_endpoint_answers_delete(self):
         self.client.force_login(self.manager)
+        self.trash()
         with ExitStack() as stack:
             self.services(stack)
-            response = self.client.delete(f'/api/contracts/{self.contract.pk}/')
+            response = self.client.delete(f'/api/contracts/{self.contract.pk}/purge/')
         self.assertEqual((response.status_code, response.json()['success']), (200, True))
+        self.assertFalse(Contract.all_objects.filter(pk=self.contract.pk).exists())

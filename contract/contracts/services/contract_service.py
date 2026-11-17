@@ -46,10 +46,15 @@ class ContractService:
         else:
             contracts = self.contract_repo.get_all_contracts()
         data = []
+        analyses = data_repository.latest_analyses_by_contract(contracts)
         for c in contracts:
-            latest_analysis = data_repository.first_ai_analyses_for_list_all_contracts(c)
-            data.append({'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value else None, 'status': c.status, 'risk_score': int(latest_analysis.overall_score) if latest_analysis and latest_analysis.overall_score is not None else None, 'risk_level': latest_analysis.risk_level if latest_analysis else None, 'created_at': c.created_at.isoformat()})
+            latest_analysis = analyses.get(c.id)
+            data.append(dict(self.contract_summary(c), risk_score=int(latest_analysis.overall_score) if latest_analysis and latest_analysis.overall_score is not None else None, risk_level=latest_analysis.risk_level if latest_analysis else None))
         return data
+
+    @staticmethod
+    def contract_summary(c):
+        return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value is not None else None, 'status': c.status, 'created_at': c.created_at.isoformat()}
 
     def get_contract_details(self, contract_id, version_id=None):
         from contract.approvals.services.workflow_service import WorkflowService
@@ -117,9 +122,9 @@ class ContractService:
                 workflow_id = wf_status.get('workflow_id')
         except Exception:
             pass
-        return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value else None, 'status': c.status, 'file_path': f'/api/contracts/{c.id}/download-pdf/?version_id={version.id}', 'raw_content': raw_content, 'clauses': clauses_data, 'parties': parties_data, 'tags': tags_data, 'analysis': analysis_data, 'findings': findings_data, 'reviews': reviews_data, 'active_version_id': version.id, 'active_version_number': version.version_number, 'active_version_change_summary': version.change_summary, 'versions': versions_list, 'ai_summary': summary_data, 'has_workflow': has_workflow, 'workflow_id': workflow_id, 'legal': legal_data, 'legal_statuses': STATUSES}
+        return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value is not None else None, 'status': c.status, 'file_path': f'/api/contracts/{c.id}/download-pdf/?version_id={version.id}', 'raw_content': raw_content, 'clauses': clauses_data, 'parties': parties_data, 'tags': tags_data, 'analysis': analysis_data, 'findings': findings_data, 'reviews': reviews_data, 'active_version_id': version.id, 'active_version_number': version.version_number, 'active_version_change_summary': version.change_summary, 'versions': versions_list, 'ai_summary': summary_data, 'has_workflow': has_workflow, 'workflow_id': workflow_id, 'legal': legal_data, 'legal_statuses': STATUSES}
 
-    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None):
+    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None, summarize=None):
         if not code or not title:
             raise ValueError('Contract code and title are required.')
         contract = self.contract_repo.create_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, status='DRAFT', company=company)
@@ -127,9 +132,11 @@ class ContractService:
         saved_file_path = _store_document(file_obj, raw_content, f'contract_{_safe_code(code)}.txt')
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
+            from ai.ai_extract.services.summary_service import schedule_auto_summary
+            schedule_auto_summary(version, summarize)
         return contract
 
-    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary=''):
+    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary='', summarize=None):
         contract = self.contract_repo.get_contract_by_id(contract_id)
         if not contract:
             raise ValueError('Contract not found.')
@@ -139,6 +146,8 @@ class ContractService:
         saved_file_path = _store_document(file_obj, raw_content, f'contract_{_safe_code(contract.contract_code)}_v{next_num}.txt')
         if saved_file_path:
             self.file_repo.create_file_record(version, saved_file_path)
+            from ai.ai_extract.services.summary_service import schedule_auto_summary
+            schedule_auto_summary(version, summarize)
         contract.status = 'DRAFT'
         data_repository.save_contract_for_create_new_version(contract)
         return version

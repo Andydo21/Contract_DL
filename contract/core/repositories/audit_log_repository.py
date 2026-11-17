@@ -7,7 +7,7 @@ class AuditLogRepository:
         contract = None
         if target_model == "Contract":
             try:
-                contract = Contract.objects.get(id=target_id)
+                contract = Contract.all_objects.get(id=target_id)
             except Contract.DoesNotExist:
                 pass
         elif target_model == "Review":

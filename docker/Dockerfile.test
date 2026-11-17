@@ -1,0 +1,11 @@
+# Test runner: the web requirements (including qdrant-client for the in-memory Qdrant tests) without
+# installing anything on the host. The source is bind-mounted, so rebuild only when requirements.txt changes.
+#   docker build -f docker/Dockerfile.test -t contract-dl-test .
+#   docker run --rm --network riskdl-net -v "$PWD:/app" -e DB_HOST=postgres -e DB_PORT=5432 \
+#       contract-dl-test python manage.py test contracts NewIdea --noinput
+FROM python:3.11-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+CMD ["python", "manage.py", "test", "--noinput"]
