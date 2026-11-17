@@ -229,8 +229,10 @@ class ContractCrudTests(TestCase):
 
     def test_the_trash_lists_what_the_company_deleted_and_restores_it(self):
         self.delete(self.manager)
-        trash = self.client.get('/api/contracts/trash/').json()['contracts']
+        answer = self.client.get('/api/contracts/trash/').json()
+        trash = answer['contracts']
         self.assertEqual([(row['contract_code'], row['deleted_by'], row['code_taken']) for row in trash], [('C-1', 'manager', False)])
+        self.assertFalse(answer['truncated'])
         self.client.force_login(self.staff)
         self.assertEqual(self.client.get('/api/contracts/trash/').status_code, 403)
         self.assertEqual(self.client.post(f'/api/contracts/{self.contract.pk}/restore/', '{}', content_type='application/json').status_code, 403)

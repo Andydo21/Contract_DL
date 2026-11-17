@@ -234,3 +234,13 @@
 .summary-panel .sp-btn:focus-visible, .summary-panel .sp-select:focus-visible, .summary-panel .sp-cite:focus-visible {
     outline: 2px solid #05359d; outline-offset: 2px;
 }
+
+/* Read by screen readers only: the panel's state when it changes. */
+.summary-panel .sp-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}

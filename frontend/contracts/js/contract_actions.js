@@ -67,32 +67,45 @@
         return end ? `Đến ${day(end)}` : '';
     }
 
-    // One message at a time at the bottom of the screen, with an optional action such as Undo.
+    // One message at a time at the bottom of the screen, with an optional action such as Undo. It stays while the
+    // pointer or the keyboard is on it, so Undo cannot vanish under the person reaching for it.
     function toast(message, {action, onAction, tone = '', timeout = 9000} = {}) {
         document.querySelectorAll('.ca-toast').forEach(node => node.remove());
-        const close = () => node.remove();
+        let timer = null;
+        const close = () => { clearTimeout(timer); node.remove(); };
         const node = el('div', {class: `ca-toast ${tone}`, role: 'status'}, el('span', {}, message),
             action ? el('button', {type: 'button', class: 'ca-toast-action', onclick: () => { close(); onAction(); }}, action) : null,
             el('button', {type: 'button', class: 'ca-toast-close', 'aria-label': 'Đóng thông báo', onclick: close}, '×'));
+        const hold = () => clearTimeout(timer);
+        const resume = () => {
+            clearTimeout(timer);
+            if (timeout && !node.matches(':hover') && !node.contains(document.activeElement)) timer = setTimeout(close, timeout);
+        };
+        node.addEventListener('mouseenter', hold);
+        node.addEventListener('focusin', hold);
+        node.addEventListener('mouseleave', resume);
+        node.addEventListener('focusout', () => setTimeout(resume));
         document.body.append(node);
-        if (timeout) setTimeout(close, timeout);
+        resume();
         return node;
     }
 
     // A modal dialog: focus moves in and stays in, Escape and the backdrop close it (not while a request runs),
     // and focus goes back to the button that opened it.
-    function openDialog({title, iconName, body, footer, opener, initialFocus, alert = false, wide = false}) {
+    // dirty(): there is input that closing would throw away; the person is asked first.
+    function openDialog({title, iconName, body, footer, opener, initialFocus, alert = false, wide = false, dirty = null}) {
         const state = {busy: false};
         const titleId = `ca-title-${Date.now()}`;
         const error = el('div', {class: 'ca-error', role: 'alert', hidden: true});
-        const close = () => {
+        const close = (force = false) => {
             if (state.busy) return;
+            if (force !== true && dirty && dirty() && !window.confirm('Bỏ các thay đổi chưa lưu?')) return;
             overlay.remove();
             if (opener && opener.isConnected) opener.focus();
         };
         const dialog = el('div', {class: `ca-dialog ${wide ? 'wide' : ''}`, role: alert ? 'alertdialog' : 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId},
             el('div', {class: 'ca-head'}, el('h3', {id: titleId}, iconName ? icon(iconName) : null, ' ', title),
-                el('button', {type: 'button', class: 'ca-close', 'aria-label': 'Đóng', onclick: close}, '×')),
+                el('button', {type: 'button', class: 'ca-close', 'aria-label': 'Đóng', onclick: () => close()}, '×')),
             el('div', {class: 'ca-body'}, body, error),
             footer ? el('div', {class: 'ca-foot'}, footer) : null);
         const overlay = el('div', {class: 'ca-overlay'}, dialog);
@@ -125,6 +138,18 @@
 
     const cancelButton = dialog => el('button', {type: 'button', class: 'ca-btn', onclick: () => dialog.close()}, 'Hủy');
 
+    // Under an amount box: what was typed, read back in đồng, so 150000000 is not mistaken for 15000000.
+    function amountEcho(input, emptyText = '') {
+        const echo = el('small', {class: 'ca-hint ca-amount', 'aria-live': 'polite'});
+        const show = () => {
+            const raw = input.value.trim();
+            echo.textContent = raw === '' ? emptyText : Number(raw) >= 0 ? `= ${money(raw)}` : '';
+        };
+        input.addEventListener('input', show);
+        show();
+        return echo;
+    }
+
     function field(name, label, {full, ...attrs}, value, hint) {
         const input = el('input', {class: 'ca-input', id: `ca-${name}`, name, ...attrs});
         input.value = value === null || value === undefined ? '' : value;
@@ -143,11 +168,14 @@
                   contract.contract_value, 'Để trống nếu chưa xác định.'));
         const values = () => Object.fromEntries(FIELDS.map(name => [name, form.elements[name].value.trim()]));
         const original = values();
+        const valueHint = form.querySelector('.ca-field input[name="contract_value"] ~ .ca-hint');
+        valueHint.replaceWith(amountEcho(form.elements.contract_value, 'Để trống nếu chưa xác định.'));
         const note = el('p', {class: 'ca-note', hidden: true});
         const suggestButton = el('button', {type: 'button', class: 'ca-btn ghost', onclick: () => suggest()}, icon('fa-wand-magic-sparkles'), ' Gợi ý từ văn bản');
         const save = el('button', {type: 'submit', class: 'ca-btn primary'}, icon('fa-floppy-disk'), ' Lưu');
         const dialog = openDialog({title: 'Sửa thông tin hợp đồng', iconName: 'fa-pen', opener, initialFocus: form.elements.title,
-                                   body: [form, note], footer: [suggestButton, el('span', {class: 'ca-spacer'}), null, save]});
+                                   body: [form, note], footer: [suggestButton, el('span', {class: 'ca-spacer'}), null, save],
+                                   dirty: () => JSON.stringify(values()) !== JSON.stringify(original)});
         dialog.node.querySelector('.ca-foot').insertBefore(cancelButton(dialog), save);
         save.setAttribute('form', form.id = `ca-form-${Date.now()}`);
 
@@ -202,7 +230,7 @@
             try {
                 const data = await api(`/api/contracts/${contract.id}/`, 'PATCH', body);
                 dialog.busy(save, '');
-                dialog.close();
+                dialog.close(true);
                 toast('Đã lưu thay đổi.', {tone: 'ok', timeout: 4000});
                 if (onSaved) onSaved(data.contract || {...contract, ...body});
             } catch (error) {
@@ -218,7 +246,7 @@
     // Deleting hides the contract; the toast that follows can put it straight back.
     function undoToast(contracts, onRestored) {
         const text = contracts.length === 1 ? `Đã xóa hợp đồng ${contracts[0].contract_code}.` : `Đã xóa ${contracts.length} hợp đồng.`;
-        toast(text, {action: 'Hoàn tác', onAction: async () => {
+        toast(text, {action: 'Hoàn tác', timeout: contracts.length > 1 ? 15000 : 9000, onAction: async () => {
             const failed = [];
             for (const contract of contracts) {
                 try { await restore(contract.id); } catch (error) { failed.push(`${contract.contract_code}: ${error.message}`); }
@@ -270,7 +298,8 @@
             dialog.fail('');
             dialog.busy(confirm, 'Đang xóa…');
             const deleted = [], failed = [];
-            for (const contract of contracts) {
+            for (const [index, contract] of contracts.entries()) {
+                dialog.busy(confirm, `Đang xóa ${index + 1}/${contracts.length}…`);
                 try {
                     await api(`/api/contracts/${contract.id}/`, 'DELETE');
                     deleted.push(contract);
@@ -335,6 +364,9 @@
                 node.remove();
                 if (!list.querySelector('.ca-trash-row')) list.replaceChildren(el('p', {class: 'ca-empty'}, 'Thùng rác trống.'));
             };
+            node.dataset.search = `${item.contract_code} ${item.title}`.toLowerCase();
+            typed.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); purgeConfirm.click(); } });
+            code?.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); button.click(); } });
             purge.addEventListener('click', () => {
                 purgeBox.hidden = !purgeBox.hidden;
                 if (!purgeBox.hidden) typed.focus();
@@ -375,8 +407,19 @@
             });
             return node;
         };
-        api('/api/contracts/trash/').then(({contracts}) => {
-            list.replaceChildren(...(contracts.length ? contracts.map(row) : [el('p', {class: 'ca-empty'}, 'Thùng rác trống.')]));
+        api('/api/contracts/trash/').then(({contracts, truncated}) => {
+            if (!contracts.length) return list.replaceChildren(el('p', {class: 'ca-empty'}, 'Thùng rác trống.'));
+            const rows = contracts.map(row);
+            const search = el('input', {class: 'ca-input ca-trash-search', type: 'search', placeholder: 'Tìm theo mã hoặc tiêu đề…',
+                                        'aria-label': 'Tìm trong thùng rác'});
+            const none = el('p', {class: 'ca-empty', hidden: true}, 'Không có hợp đồng nào khớp.');
+            search.addEventListener('input', () => {
+                const query = search.value.trim().toLowerCase();
+                rows.forEach(node => { node.hidden = !!query && !node.dataset.search.includes(query); });
+                none.hidden = rows.some(node => node.isConnected && !node.hidden);
+            });
+            list.replaceChildren(contracts.length > 5 ? search : '',
+                truncated ? el('p', {class: 'ca-note'}, `Đang hiện ${contracts.length} hợp đồng xóa gần nhất.`) : '', ...rows, none);
         }).catch(error => { list.replaceChildren(); dialog.fail(error.message); });
         return dialog;
     }
@@ -395,5 +438,5 @@
         if (contract && contract.id) undoToast([contract], onRestored);
     }
 
-    window.ContractActions = {edit, remove, removeMany, history, trash, toast, money, day, period, announceDeleted, showAnnouncedDeletion};
+    window.ContractActions = {edit, remove, removeMany, history, trash, toast, money, day, period, amountEcho, announceDeleted, showAnnouncedDeletion};
 })();

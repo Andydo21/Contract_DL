@@ -149,9 +149,11 @@ def deleted_contracts(user):
         return ServiceResult({'error': 'Permission Denied: Only Managers can see deleted contracts.'}, status=403)
     if not user.is_superuser and not user.company_id:
         return ServiceResult({'contracts': []})
-    rows = list(ContractRepository.deleted_contracts(None if user.is_superuser else user.company_id)[:200])
+    limit = 200
+    rows = list(ContractRepository.deleted_contracts(None if user.is_superuser else user.company_id)[:limit + 1])
+    truncated, rows = len(rows) > limit, rows[:limit]  # the newest deletions; the page says when more exist
     in_use = ContractRepository.codes_in_use(row.contract_code for row in rows)
-    return ServiceResult({'contracts': [dict(
+    return ServiceResult({'truncated': truncated, 'contracts': [dict(
         id=row.id, contract_code=row.contract_code, title=row.title, deleted_at=row.deleted_at.isoformat(),
         deleted_by=row.deleted_by.username if row.deleted_by else None,
         # Another contract took the code meanwhile: restoring needs a new one.

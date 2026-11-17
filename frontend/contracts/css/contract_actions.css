@@ -447,3 +447,14 @@
         animation: none;
     }
 }
+
+/* An amount read back in đồng under its box. */
+.ca-hint.ca-amount {
+    color: #1d4ed8;
+    font-variant-numeric: tabular-nums;
+}
+
+.ca-trash-search {
+    width: 100%;
+    margin-bottom: 8px;
+}

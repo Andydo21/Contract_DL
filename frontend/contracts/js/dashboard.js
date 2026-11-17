@@ -36,6 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeUploadBtn = document.getElementById('btn-close-upload');
     const cancelUploadBtn = document.getElementById('btn-cancel-upload');
     const uploadForm = document.getElementById('upload-form');
+    // The amount read back in đồng under its box (also cleared when the form is reset).
+    const uploadValue = document.getElementById('upload-value');
+    if (uploadValue) {
+        uploadValue.after(ContractActions.amountEcho(uploadValue));
+        uploadForm.addEventListener('reset', () => setTimeout(() => uploadValue.dispatchEvent(new Event('input'))));
+    }
     const scannerLoader = document.getElementById('scanner-loader');
     const fileInput = document.getElementById('file-input');
     const fileDropZone = document.getElementById('file-drop-zone');

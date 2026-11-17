@@ -157,9 +157,12 @@
             this.timer = null;
             this.ticker = null;
             this.against = null;
-            this.options = optionsBar(() => this.changeView());
+            this.options = optionsBar(() => this.scheduleView());
+            this.viewTimer = null;
+            // Screen readers hear the state when it changes ("Đang tóm tắt", "Đã có tóm tắt"), never the
+            // seconds counter, which updates every second.
+            this.live = el('div', {class: 'sp-sr', role: 'status', 'aria-live': 'polite'});
             root.classList.add('summary-panel');
-            root.setAttribute('aria-live', 'polite');
             this.refresh();
         }
 
@@ -173,6 +176,7 @@
             if (next === this.versionId) return this.refresh();
             this.versionId = next;
             this.seq++;  // answers for the previous version no longer apply
+            clearTimeout(this.viewTimer);
             this.polls = 0;
             this.sections = null;
             this.changesFor = null;
@@ -276,6 +280,12 @@
             return el('pre', {class: 'sp-text'}, parts.map((part, index) => index % 2
                 ? el('button', {class: 'sp-cite', type: 'button', title: 'Xem điều khoản gốc', onclick: () => this.openCitation(part)}, part)
                 : part));
+        }
+
+        // Changing audience and length one after the other is one request, not two.
+        scheduleView() {
+            clearTimeout(this.viewTimer);
+            this.viewTimer = setTimeout(() => this.changeView(), 600);
         }
 
         changeView() {
@@ -424,7 +434,10 @@
             const canRun = !loading && !working && !running && saved && (saved.has_text || saved.file_name);
             const actionLabel = text ? ' Tóm tắt lại' : failed ? ' Thử lại' : ' Tóm tắt ngay';
             const focused = this.root.contains(document.activeElement) ? document.activeElement : null;
+            const announce = working || running ? 'Đang tóm tắt' : label;
+            if (this.live.textContent !== announce) this.live.textContent = announce;
             this.root.replaceChildren(
+                this.live,
                 el('div', {class: 'sp-head'},
                     el('div', {class: 'sp-title'}, el('i', {class: 'fa-solid fa-wand-magic-sparkles'}), ' Tóm tắt hợp đồng',
                         saved && saved.version_number ? el('span', {class: 'sp-version'}, `v${saved.version_number}`) : null),
