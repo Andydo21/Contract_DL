@@ -34,7 +34,7 @@ class VietnameseFileNameTests(TestCase):
         contract = Contract.objects.create(company=company, contract_code='HD-01', title='Hợp đồng mua bán')
         self.version = ContractVersion.objects.create(contract=contract, version_number=1)
         self.raw = b'%PDF-1.7 original bytes'
-        url = _store_document(Upload('Hợp đồng mua bán.pdf', self.raw), None, 'unused.txt')
+        url = _store_document(Upload('Hợp đồng mua bán.pdf', self.raw), None, 'unused.txt')['url']
         self.file = ContractFileRepository.create_file_record(self.version, url)
 
     def test_the_url_is_percent_encoded_but_the_name_stays_readable(self):
@@ -57,7 +57,7 @@ class VietnameseFileNameTests(TestCase):
         self.assertFalse(path.exists())
 
     def test_a_pasted_text_is_read_back_as_text(self):
-        url = _store_document(None, 'Điều 1. Nội dung', 'contract_HD-01.txt')
+        url = _store_document(None, 'Điều 1. Nội dung', 'contract_HD-01.txt')['url']
         stored = ContractFile.objects.create(version=self.version, file_path=url, file_name=Path(url).name)
         self.assertEqual(document_text(stored), 'Điều 1. Nội dung')
 

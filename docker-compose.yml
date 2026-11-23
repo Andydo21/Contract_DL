@@ -99,6 +99,8 @@ services:
       # 1 = summarize every uploaded file in the background; off by default on the shared model.
       AI_SUMMARY_AUTO: ${AI_SUMMARY_AUTO:-0}
       AI_SUMMARY_AUTO_PARALLEL: ${AI_SUMMARY_AUTO_PARALLEL:-1}
+      # The summary-worker service below runs the queued summaries; the web process does not start threads for them.
+      AI_SUMMARY_WORKER: ${AI_SUMMARY_WORKER:-1}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

@@ -98,7 +98,7 @@ class Contract(models.Model):
         ('APPROVED', 'Approved'),
     )
     company = models.ForeignKey(Company, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts', verbose_name="Company")
-    # Unique among the contracts not deleted (see Meta), so the code of a deleted contract can be used again.
+    # Unique per company among the contracts not deleted (see Meta), so the code of a deleted contract can be used again.
     contract_code = models.CharField(max_length=50, verbose_name="Contract Code")
     title = models.CharField(max_length=255, verbose_name="Title")
     contract_type = models.CharField(max_length=100, blank=True, null=True, verbose_name="Contract Type")
@@ -121,8 +121,16 @@ class Contract(models.Model):
         verbose_name_plural = 'Contracts'
         # Related lookups (version.contract, audit_log.contract) still reach a deleted contract.
         base_manager_name = 'all_objects'
-        constraints = [models.UniqueConstraint(fields=['contract_code'], condition=models.Q(deleted_at__isnull=True),
-                                               name='contract_code_unique_when_not_deleted')]
+        # A code is unique within one company among its contracts not deleted; another company may use the same code.
+        # Contracts without a company (made by a superuser) share one namespace of their own.
+        constraints = [
+            models.UniqueConstraint(fields=['company', 'contract_code'],
+                                    condition=models.Q(deleted_at__isnull=True, company__isnull=False),
+                                    name='contract_code_unique_per_company'),
+            models.UniqueConstraint(fields=['contract_code'],
+                                    condition=models.Q(deleted_at__isnull=True, company__isnull=True),
+                                    name='contract_code_unique_without_company'),
+        ]
 
     def __str__(self):
         return f"{self.contract_code} - {self.title}"
@@ -183,6 +191,8 @@ class ContractVersion(models.Model):
     class Meta:
         verbose_name = 'Contract Version'
         verbose_name_plural = 'Contract Versions'
+        # Two uploads at the same moment must not both become, say, v2.
+        constraints = [models.UniqueConstraint(fields=['contract', 'version_number'], name='contract_version_number_unique')]
 
     def __str__(self):
         return f"{self.contract.contract_code} - v{self.version_number}"

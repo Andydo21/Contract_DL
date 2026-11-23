@@ -20,7 +20,7 @@
     <link rel="stylesheet" href="{% static 'contracts/css/summary_panel.css' %}?v=1.7.0">
     <link rel="stylesheet" href="{% static 'contracts/css/contract_actions.css' %}?v=1.2.0">
 </head>
-<body class="cg-app"{% if user.is_superuser or user.role.role_name|upper == 'ADMIN' %} data-summary-lab="1"{% endif %}>
+<body class="cg-app"{% if user.is_superuser or user.role.role_name|upper == 'ADMIN' %} data-summary-lab="1"{% endif %}{% if user.is_superuser or user.role.role_name|upper == 'MANAGER' or user.role.role_name|upper == 'ADMIN' %} data-summary-rerun="1"{% endif %}>
     {% include 'common/_sidebar.html' with active='contracts' %}
     <div class="cg-main">
     <div class="app-container" data-can-manage="{% if user.is_superuser or user.role.role_name|upper == 'MANAGER' or user.role.role_name|upper == 'ADMIN' %}1{% endif %}">

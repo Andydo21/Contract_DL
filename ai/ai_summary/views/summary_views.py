@@ -12,7 +12,9 @@ from ai.ai_summary.schemas import CompareRequest, RenderOptions, SummarizeReques
 from ai.ai_summary.services import insights_service as insights
 from ai.ai_summary.services import llm_service as llm
 from ai.ai_summary.services import reader_service as reader
+from ai.ai_summary.services import request_guard
 from ai.ai_summary.services import summary_service as services
+from contract.core.services.access_service import is_admin
 from contract.core.views.access import api_login_required
 
 logger = logging.getLogger('ai_summary')
@@ -29,7 +31,7 @@ def summary_api(view):
     def wrapped(request, *args, **kwargs):
         try:
             return view(request, *args, **kwargs)
-        except RequestError as error:
+        except (RequestError, request_guard.GuardError) as error:
             return JsonResponse({'detail': str(error)}, status=error.status)
         except ValidationError as error:
             return JsonResponse({'detail': error.errors(include_url=False)}, status=422, json_dumps_params={'default': str})
@@ -56,7 +58,13 @@ def read_upload(request, field):
     upload = request.FILES.get(field)
     if upload is None:
         raise RequestError(f'Missing file field "{field}".', 422)
+    request_guard.check(request.user, uploads=[upload], model_call=False)  # before reading it into memory
     return services.read_document(upload.read(), upload.name or '')
+
+
+def guard(request, force=False, texts=(), fields=()):
+    """Size, force and per-minute limits for a route that may call the model; checked before any work."""
+    request_guard.check(request.user, force=force, texts=texts, uploads=[request.FILES.get(f) for f in fields])
 
 
 def form_options(request):
@@ -80,6 +88,7 @@ def source_info(document):
 def summarize_contract(request):
     """Summary of a plain text (JSON: text, contract_metadata, perspective, length, explain_terms, force, model)."""
     payload = SummarizeRequest(**json_body(request))
+    guard(request, payload.force, [payload.text])
     return JsonResponse(services.summarize(payload.text, payload.contract_metadata, payload.force, payload.model,
                                            payload.perspective, payload.length, payload.explain_terms))
 
@@ -90,6 +99,7 @@ def summarize_contract(request):
 def compare_versions(request):
     """Summaries of two versions (or a contract and its amended text) and the field-level changes."""
     payload = CompareRequest(**json_body(request))
+    guard(request, payload.force, [payload.old_text, payload.new_text])
     return JsonResponse(services.compare(payload.old_text, payload.new_text, payload.force, payload.model,
                                          payload.perspective, payload.length, payload.explain_terms))
 
@@ -100,6 +110,7 @@ def compare_versions(request):
 def prepare_contract(request):
     """Sections, facts and chunk plan for a text; no model call."""
     payload = SummarizeRequest(**json_body(request))
+    request_guard.check(request.user, texts=[payload.text], model_call=False)
     return JsonResponse(services.prepare(payload.text))
 
 
@@ -128,6 +139,7 @@ def file_sections(request):
 def summarize_file(request):
     """Read an uploaded file and summarize it."""
     options = form_options(request)
+    guard(request, form_flag(request, 'force'), fields=['file'])
     document = read_upload(request, 'file')
     metadata = json.loads(request.POST.get('contract_metadata') or '{}')
     result = services.summarize(document['text'], metadata, form_flag(request, 'force'), request.POST.get('model') or None,
@@ -140,6 +152,7 @@ def summarize_file(request):
 @summary_api
 def compare_files(request):
     options = form_options(request)
+    guard(request, form_flag(request, 'force'), fields=['old_file', 'new_file'])
     old, new = read_upload(request, 'old_file'), read_upload(request, 'new_file')
     result = services.compare(old['text'], new['text'], form_flag(request, 'force'), request.POST.get('model') or None,
                               options.perspective, options.length, options.explain_terms)
@@ -149,9 +162,11 @@ def compare_files(request):
 @require_GET
 def health_check(request):
     connected = llm.is_connected()
+    # Open for monitoring, so the address of the model server (an internal URL) is shown to administrators only.
+    show_url = request.user.is_authenticated and is_admin(request.user)
     return JsonResponse({
         'status': 'healthy' if connected else 'degraded',
-        'llm_url': llm.base_url() or None,
+        **({'llm_url': llm.base_url() or None} if show_url else {}),
         'model': llm.model_id(),
         'analysis_version': services.analysis_version(),
         'llm_connected': connected,

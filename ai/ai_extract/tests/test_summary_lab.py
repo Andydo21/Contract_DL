@@ -74,13 +74,16 @@ class RunAtOnce:
 
 
 @override_settings(ROOT_URLCONF='contract.contracts.tests.integration_urls', AI_SUMMARY_URL='http://summary.test',
-                   MEDIA_URL='media/', AI_SUMMARY_AUTO=False)
+                   MEDIA_URL='media/', AI_SUMMARY_AUTO=False, AI_SUMMARY_WORKER=False, AI_SUMMARY_RATE_PER_MINUTE=0)
 class SummaryLabTests(TestCase):
     def setUp(self):
         answer = patch.object(summary_service, '_summary_answer', side_effect=fake_answer)
         answer.start()
         self.addCleanup(answer.stop)
         intelligence_tests.ContractIntelligenceTests.setUp(self)
+        # These tests are about the pipeline; re-running (force) is a manager's action. Limits have their own tests.
+        self.user.role = self.manager_role
+        self.user.save(update_fields=['role'])
         media = tempfile.TemporaryDirectory()
         self.addCleanup(media.cleanup)
         self.media = Path(media.name)

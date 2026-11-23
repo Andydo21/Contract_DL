@@ -62,9 +62,56 @@ def images_to_pdf(uploads):
     return ContentFile(buffer.getvalue(), name=f'{stem}_{len(uploads)}_trang.pdf')
 
 
+# What a single uploaded document may be, and the bytes each kind starts with: a renamed .exe or a truncated
+# download is refused at the door instead of failing later inside the extraction.
+DOCUMENT_SIGNATURES = {'.pdf': (b'%PDF',), '.docx': (b'PK\x03\x04',), '.doc': (b'\xd0\xcf\x11\xe0',), '.txt': ()}
+MAX_TEXT_CHARS = 2_000_000
+
+
+def max_document_bytes():
+    from django.conf import settings
+    return int(getattr(settings, 'CONTRACT_UPLOAD_MAX_MB', 50))*1024*1024
+
+
+def check_document(upload):
+    """Refuse a single file that is too large, of a kind the pipeline does not read, or not what its name says."""
+    suffix = Path(upload.name or '').suffix.lower()
+    if suffix not in DOCUMENT_SIGNATURES and suffix not in IMAGE_SUFFIXES:
+        raise PageImagesError(f'Không nhận loại file "{suffix or upload.name}". Hãy tải PDF, DOCX, DOC, TXT hoặc ảnh.')
+    limit = max_document_bytes()
+    if upload.size is not None and upload.size > limit:
+        raise PageImagesError(f'File {upload.name} vượt quá {limit//(1024*1024)} MB.')
+    if not upload.size:
+        raise PageImagesError(f'File {upload.name} rỗng.')
+    head = upload.read(2048)
+    upload.seek(0)
+    if suffix in IMAGE_SUFFIXES:
+        from PIL import Image, UnidentifiedImageError
+        try:
+            with Image.open(upload) as probe:
+                probe.verify()
+        except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as error:
+            raise PageImagesError(f'File {upload.name} không phải ảnh đọc được.') from error
+        finally:
+            upload.seek(0)
+        return upload
+    signatures = DOCUMENT_SIGNATURES[suffix]
+    # A PDF may carry a few junk bytes before its header; readers accept it within the first kilobyte.
+    if signatures and not any(head.startswith(s) or (suffix == '.pdf' and s in head[:1024]) for s in signatures):
+        raise PageImagesError(f'Nội dung file {upload.name} không phải {suffix.lstrip(".").upper()}.')
+    if suffix == '.txt' and b'\x00' in head:
+        raise PageImagesError(f'File {upload.name} không phải văn bản thuần.')
+    return upload
+
+
+def check_raw_content(text):
+    if text and len(text) > MAX_TEXT_CHARS:
+        raise PageImagesError(f'Nội dung dán vào dài quá {MAX_TEXT_CHARS:,} ký tự; hãy tải file thay vì dán.'.replace(',', '.'))
+
+
 def document_upload(uploads):
-    """The one file to store for an upload: a single file as it is, several photos joined into a PDF."""
+    """The one file to store for an upload: a single file as it is (checked), several photos joined into a PDF."""
     files = list(uploads.getlist('file')) if hasattr(uploads, 'getlist') else [f for f in [uploads.get('file')] if f]
     if len(files) <= 1:
-        return files[0] if files else None
+        return check_document(files[0]) if files else None
     return images_to_pdf(files)

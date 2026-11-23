@@ -325,7 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('summary overview:', error.message);  // the list itself still works
         }
     }
-    setInterval(refreshSummaryOverview, 30000);
+    // A hidden tab does not poll (each poll checks every contract's text); it catches up as soon as it is shown again.
+    setInterval(() => { if (!document.hidden) refreshSummaryOverview(); }, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshSummaryOverview(); });
 
     function renderStats(contracts) {
         refreshSummaryOverview();

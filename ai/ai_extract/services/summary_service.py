@@ -132,6 +132,15 @@ def version_file(version):
     return source
 
 
+def guard(user, **limits):
+    """request_guard.check, answered as an ExtractionError with its status (413 / 403 / 429)."""
+    from ai.ai_summary.services import request_guard
+    try:
+        request_guard.check(user, **limits)
+    except request_guard.GuardError as error:
+        raise ExtractionError(str(error), error.status) from error
+
+
 def select_version(user, contract_id, version_id=None):
     contract = extraction_repository.contract_for(user, contract_id)
     version = extraction_repository.version_for(contract, version_id)
@@ -143,8 +152,9 @@ def select_version(user, contract_id, version_id=None):
 class SummarizeService:
     """Send a version's original file to ai_summary and persist the result."""
 
-    def summarize_version(self, version, force=False, options=None, refresh=False) -> dict:
-        """refresh: the stored summary is known to be out of date, so this counts as a run even without force."""
+    def summarize_version(self, version, force=False, options=None, refresh=False, cached_only=False) -> dict:
+        """refresh: the stored summary is known to be out of date, so this counts as a run even without force.
+        cached_only: only re-render the current analysis; refuse (409) instead of starting a new run."""
         source = version_file(version)
         metadata = {'contract_code': version.contract.contract_code, 'title': version.contract.title,
                     'version': version.version_number}
@@ -155,6 +165,8 @@ class SummarizeService:
         current = ContractSummaryRepository.get_by_version(version)
         out_of_date = bool(current and current.source_fingerprint and current.source_fingerprint != source['fingerprint'])
         tracked = force or refresh or current is None or out_of_date
+        if tracked and cached_only:
+            raise ExtractionError('Bản tóm tắt đã cũ so với văn bản hiện tại. Hãy tóm tắt lại trước khi xuất chế độ xem này.', 409)
         if tracked and not ContractSummaryRepository.try_start_run(version.id, run_lease(), source['fingerprint']):
             raise SummaryBusy('Phiên bản này đang được tóm tắt, vui lòng đợi kết quả.', 409)
         data, stored = self._run(version, source, force, options, metadata, tracked, default_view)
@@ -210,6 +222,13 @@ def _row_state(row):
     return (_status_of(row) or {}).get('state') if row and row.get('run_status') else None
 
 
+def _run_row(row):
+    """The run-state part of a ContractSummary, in the shape run_status() returns; None when no run was recorded."""
+    if row is None or not row.run_status:
+        return None
+    return {'run_status': row.run_status, 'run_error': row.run_error, 'run_status_at': row.run_status_at}
+
+
 def get_status(version_id):
     return _status_of(ContractSummaryRepository.run_status(version_id))
 
@@ -234,6 +253,10 @@ def schedule_auto_summary(version, requested=None):
         return
     version_id = version.id
     set_status(version_id, 'queued')
+    if getattr(settings, 'AI_SUMMARY_WORKER', False):
+        # The summary worker (retry_summaries --watch) picks up queued runs: it survives web restarts, and its
+        # --parallel limit holds for the whole deployment instead of once per web process.
+        return
     # robust: the upload is already committed, so a failure to start the summary must not turn it into an error.
     transaction.on_commit(lambda: threading.Thread(target=_auto_summary, args=(version_id,), daemon=True,
                                                    name=f'auto-summary-{version_id}').start(), robust=True)
@@ -323,26 +346,29 @@ def retry_failed_runs(settle=None, parallel=1):
 
 def summarize(user, contract_id, data):
     _, version = select_version(user, contract_id, data.get('version_id'))
+    guard(user, force=flag(data.get('force', False)))
     return SummarizeService().summarize_version(version, force=flag(data.get('force', False)), options=render_options(data))
 
 
 def summary(user, contract_id, version_id=None):
     """The stored summary of a version (None when there is none yet) and the state of its automatic run."""
     contract, version = select_version(user, contract_id, version_id)
-    obj = ContractSummaryRepository.get_by_version(version)
+    row = ContractSummaryRepository.summary_row(version.id)
+    obj = row if row and row.summary else None
     record = ContractSummaryRepository.latest_file(version)
-    stored = ContractSummaryRepository.stored_result(version.id)
+    stored = (row.result or {}) if row else {}
     fingerprint = ContractSummaryRepository.text_fingerprints([version.id]).get(version.id)
+    versions = [dict(id=v.id, number=v.version_number) for v in ContractSummaryRepository.versions_of(contract)]
     return dict(id=obj.id if obj else None, contract_id=contract.id, version_id=version.id,
                 version_number=version.version_number, summary=obj.summary if obj else None,
                 result=stored if obj else None, preliminary=stored.get('preliminary', '') if not obj else '',
-                has_previous=ContractSummaryRepository.previous_version(version) is not None,
-                versions=[dict(id=v.id, number=v.version_number) for v in ContractSummaryRepository.versions_of(contract)],
+                has_previous=any(v['number'] < version.version_number for v in versions),
+                versions=versions,
                 stale=bool(obj and fingerprint and obj.source_fingerprint != fingerprint),
                 # Whether the worker brings a stale summary up to date by itself, or the person has to re-run it.
                 auto_refresh=bool(getattr(settings, 'AI_SUMMARY_AUTO', False)),
                 model_id=obj.model_id if obj else '', created_at=obj.created_at.isoformat() if obj else None,
-                updated_at=obj.updated_at.isoformat() if obj else None, status=get_status(version.id),
+                updated_at=obj.updated_at.isoformat() if obj else None, status=_status_of(_run_row(row)),
                 file_name=ContractSummaryRepository.display_name(record),
                 has_text=bool(fingerprint))
 
@@ -353,6 +379,7 @@ def changes_from_previous(user, contract_id, version_id=None, against_id=None):
     previous = select_version(user, contract_id, against_id)[1] if against_id else ContractSummaryRepository.previous_version(version)
     if previous is None or previous.id == version.id:
         return dict(previous_number=None, changes=[], summary='')
+    guard(user)
     first, second = sorted((previous, version), key=lambda v: v.version_number)  # always described oldest to newest
     old, new = version_file(first), version_file(second)
     data = call_summary('/api/v1/compare-files', files={'old_file': (old['name'], old['data']), 'new_file': (new['name'], new['data'])},
@@ -365,7 +392,7 @@ def summary_overview(user):
     contracts = extraction_repository.visible_contract_rows(user)
     latest = ContractSummaryRepository.latest_versions([c['id'] for c in contracts])
     rows = ContractSummaryRepository.summary_rows(latest.values())
-    fingerprints = ContractSummaryRepository.text_fingerprints(latest.values())
+    fingerprints = ContractSummaryRepository.cached_text_fingerprints(latest.values())
     today = timezone.localdate()
     auto = getattr(settings, 'AI_SUMMARY_AUTO', False)
     items, expiring = {}, []
@@ -441,7 +468,8 @@ def export_docx(user, contract_id, version_id=None, options=None):
     if options == DEFAULT_OPTIONS:
         text, details = obj.summary, obj.result or {}
     else:
-        details = SummarizeService().summarize_version(version, options=options)
+        # Only another rendering of the current analysis: exporting never starts a new run on the model.
+        details = SummarizeService().summarize_version(version, options=options, cached_only=True)
         text = details['summary']
     view = ', '.join(filter(None, (PERSPECTIVES[options['perspective']], LENGTHS[options['length']],
                                    'có giải thích thuật ngữ' if options['explain_terms'] else '')))
@@ -479,6 +507,7 @@ def summary_lab_read(user, upload):
     """What the document says about itself, to prefill the upload form; nothing is saved and the model is not called."""
     if upload is None:
         raise ExtractionError("Field 'file' is required.")
+    guard(user, uploads=[upload], model_call=False)
     data = call_summary('/api/v1/read', files={'file': (upload.name, upload.read())})
     return dict(suggest=data['suggest'], source=data['source'])
 
@@ -510,6 +539,7 @@ def summary_lab_text(user, data):
     text = data.get('text', '')
     if not isinstance(text, str) or not text.strip():
         raise ExtractionError("Field 'text' is required.")
+    guard(user, texts=[text], force=flag(data.get('force', False)), model_call=not data.get('prepare_only'))
     if data.get('prepare_only'):
         return call_summary('/api/v1/prepare', {'text': text})
     return call_summary('/api/v1/summarize', {'text': text, 'force': flag(data.get('force', False)), **render_options(data)})
@@ -519,12 +549,14 @@ def summary_lab_file(user, upload, data):
     """Summarize an uploaded PDF/DOCX/TXT without saving it anywhere."""
     if upload is None:
         raise ExtractionError("Field 'file' is required.")
+    guard(user, uploads=[upload], force=flag(data.get('force', False)))
     return call_summary('/api/v1/summarize-file', files={'file': (upload.name, upload.read())},
                         form=form_fields(render_options(data), flag(data.get('force', False))))
 
 
 def summary_lab_compare(user, data):
     """Changes between two versions' files, or between two pasted texts."""
+    guard(user, texts=[data.get('old_text'), data.get('new_text')], force=flag(data.get('force', False)))
     if data.get('contract_id'):
         old, new = (select_version(user, data['contract_id'], data.get(key))[1] for key in ('old_version_id', 'new_version_id'))
         if old.id == new.id:  # checked after the lookup, so another company's contract is still a 404
@@ -543,7 +575,11 @@ def summary_lab_compare(user, data):
 
 
 def summary_lab_health(user):
+    from contract.core.services.access_service import is_admin
     try:
-        return call_summary('/health')
+        health = call_summary('/health')
     except RuntimeError as error:
         return dict(status='unreachable', llm_connected=False, error=str(error))
+    if not is_admin(user):  # the model server's internal address is for administrators
+        health.pop('llm_url', None)
+    return health

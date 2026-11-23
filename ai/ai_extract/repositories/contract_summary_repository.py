@@ -17,6 +17,12 @@ class ContractSummaryRepository:
         return ContractSummary.objects.filter(version=version).exclude(summary="").first()
 
     @staticmethod
+    def summary_row(version_id):
+        """The version's ContractSummary row whether or not it holds a summary yet (it also carries the run state and
+        the fallback values), or None."""
+        return ContractSummary.objects.filter(version_id=version_id).first()
+
+    @staticmethod
     def previous_version(version: ContractVersion):
         return version.contract.versions.filter(version_number__lt=version.version_number).order_by("-version_number").first()
 
@@ -35,11 +41,13 @@ class ContractSummaryRepository:
 
     @staticmethod
     def retryable_version_ids(lost_before):
-        """Runs that failed because the model was down, or died with their process."""
+        """Runs that are queued (an upload asked for a summary), failed because the model was down, or died with
+        their process."""
         waiting = ContractSummary.objects.filter(run_status="failed", result__retry=True)
-        lost = ContractSummary.objects.filter(run_status__in=("queued", "running"), run_status_at__lt=lost_before)
+        queued = ContractSummary.objects.filter(run_status="queued")
+        lost = ContractSummary.objects.filter(run_status="running", run_status_at__lt=lost_before)
         # A deleted contract is not summarized again.
-        return list((waiting | lost).filter(version__contract__deleted_at__isnull=True).values_list("version_id", flat=True))
+        return list((waiting | queued | lost).filter(version__contract__deleted_at__isnull=True).values_list("version_id", flat=True))
 
     @staticmethod
     def _text_rows():
@@ -57,6 +65,26 @@ class ContractSummaryRepository:
         for version_id, digest in rows.values_list("version_id", "digest"):
             digests.setdefault(version_id, []).append(digest)
         return {version_id: hashlib.sha256("|".join(parts).encode()).hexdigest() for version_id, parts in digests.items()}
+
+    FINGERPRINT_CACHE_SECONDS = 300
+
+    @staticmethod
+    def cached_text_fingerprints(version_ids) -> dict:
+        """text_fingerprints for the contract list, which polls: hashing every page of every contract on each poll is
+        the expensive part. The cache key carries the count and highest id of the text rows, so a page added, replaced
+        (extraction deletes and re-creates rows) or removed is seen at once; an edit in place shows within the TTL."""
+        from django.core.cache import cache
+        from django.db.models import Count, Max
+        ids = sorted(set(version_ids))
+        if not ids:
+            return {}
+        stamp = ContractContext.objects.filter(version_id__in=ids, context_type="raw_text").aggregate(top=Max("id"), n=Count("id"))
+        key = "summary-fingerprints:" + hashlib.sha256(f"{ids}|{stamp['top']}|{stamp['n']}".encode()).hexdigest()
+        found = cache.get(key)
+        if found is None:
+            found = ContractSummaryRepository.text_fingerprints(ids)
+            cache.set(key, found, ContractSummaryRepository.FINGERPRINT_CACHE_SECONDS)
+        return found
 
     @staticmethod
     def versions_needing_summary(analysis_version="") -> dict:

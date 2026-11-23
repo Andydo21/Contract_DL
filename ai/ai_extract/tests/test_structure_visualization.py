@@ -43,7 +43,7 @@ class VisualizationTests(TestCase):
         page = LayoutExtractionPage.objects.create(run=partial, page_number=1, extracted_text='Retained source')
         context = inspect_page(self.user, self.contract.pk, 1, self.version.pk, run_id=partial.pk)
         self.assertEqual(context['page'].pk, page.pk)
-        other_version = ContractVersion.objects.create(contract=self.contract)
+        other_version = ContractVersion.objects.create(contract=self.contract, version_number=2)
         with self.assertRaises(LayoutExtractionRun.DoesNotExist):
             inspect_page(self.user, self.contract.pk, 1, other_version.pk, run_id=partial.pk)
 

@@ -2,6 +2,7 @@ from contract.contracts.repositories import contract_data_repository as data_rep
 import logging
 from decimal import Decimal
 from django.core.files.base import ContentFile
+from django.db import transaction
 from contract.contracts.repositories.contract_repository import ContractRepository
 from contract.contracts.repositories.contract_file_repository import ContractFileRepository
 from ai.analysis.repositories.ai_analysis_repository import AIAnalysisRepository
@@ -13,7 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 def _store_document(file_obj, raw_content, text_name):
-    """Encrypt and store an uploaded file, or pasted text as a .txt file; the storage URL, or None for neither."""
+    """Encrypt and store an uploaded file, or pasted text as a .txt file.
+
+    Returns {'url', 'name', 'sha256'} (the hash is of the original bytes, before encryption), or None for neither."""
+    import hashlib
     from django.core.files.storage import FileSystemStorage
     from contract.core.services.document_encryption_service import encrypt_pdf
     if file_obj:
@@ -23,7 +27,41 @@ def _store_document(file_obj, raw_content, text_name):
     else:
         return None
     storage = FileSystemStorage()
-    return storage.url(storage.save(name, ContentFile(encrypt_pdf(data))))
+    saved = storage.save(name, ContentFile(encrypt_pdf(data)))
+    return {'url': storage.url(saved), 'name': saved, 'sha256': hashlib.sha256(data).hexdigest()}
+
+
+def _discard_stored(stored):
+    """Remove a stored file whose database rows were rolled back; it would otherwise be an orphan on disk."""
+    if not stored:
+        return
+    from django.core.files.storage import FileSystemStorage
+    try:
+        FileSystemStorage().delete(stored['name'])
+    except OSError:
+        logger.warning('Could not remove orphaned upload %s', stored['name'], exc_info=True)
+
+
+def _attach_document(version, stored, summarize):
+    """File record and hash of the stored document; its automatic summary starts once the transaction commits."""
+    if not stored:
+        return
+    ContractFileRepository().create_file_record(version, stored['url'])
+    data_repository.set_file_hash(version, stored['sha256'])
+    from ai.ai_extract.services.summary_service import schedule_auto_summary
+    schedule_auto_summary(version, summarize)
+
+
+def _version_row(version, analysis):
+    return {'id': version.id, 'version_number': version.version_number, 'change_summary': version.change_summary or 'Initial version',
+            'created_at': version.created_at.isoformat(), 'file_hash': version.file_hash,
+            'overall_score': float(analysis.overall_score) if analysis and analysis.overall_score is not None else None,
+            'risk_level': analysis.risk_level if analysis else 'NONE'}
+
+
+def versions_list(contract):
+    """The versions of a contract, newest first, with the risk level of each one's newest analysis."""
+    return [_version_row(version, analysis) for version, analysis in data_repository.versions_with_latest_analysis(contract)]
 
 
 def _safe_code(code):
@@ -40,42 +78,46 @@ class ContractService:
         self.review_repo = ReviewRepository()
         self.audit_repo = AuditLogRepository()
 
-    def list_all_contracts(self, company=None):
+    def list_all_contracts(self, company=None, query=None, status=None, limit=None, offset=0):
+        """Rows for the contract list. With limit, only that page (from offset) and the total that matched."""
         if company:
             contracts = self.contract_repo.get_contracts_by_company(company)
         else:
             contracts = self.contract_repo.get_all_contracts()
+        contracts = data_repository.contract_list_rows(contracts, query=query, status=status)
+        total = None
+        if limit is not None:
+            total = contracts.count()
+            contracts = contracts[offset:offset + limit]
+        contracts = list(contracts)
         data = []
         analyses = data_repository.latest_analyses_by_contract(contracts)
         for c in contracts:
             latest_analysis = analyses.get(c.id)
             data.append(dict(self.contract_summary(c), risk_score=int(latest_analysis.overall_score) if latest_analysis and latest_analysis.overall_score is not None else None, risk_level=latest_analysis.risk_level if latest_analysis else None))
-        return data
+        if limit is None:
+            return data
+        return {'items': data, 'total': total, 'offset': offset, 'limit': limit}
 
     @staticmethod
     def contract_summary(c):
         return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value is not None else None, 'status': c.status, 'created_at': c.created_at.isoformat()}
 
     def get_contract_details(self, contract_id, version_id=None):
+        """Everything the detail page shows for one version (the latest when version_id is not given).
+
+        None when the contract does not exist or version_id is not one of its versions: the caller answers 404 rather
+        than silently showing another version. Reading the page never writes anything."""
         from contract.approvals.services.workflow_service import WorkflowService
-        c = self.contract_repo.get_contract_by_id(contract_id)
+        c = self.contract_repo.get_contract(contract_id)
         if not c:
             return None
-        if version_id:
-            try:
-                version = data_repository.get_versions_for_get_contract_details(c, version_id)
-            except Exception:
-                version = c.latest_version
+        if version_id not in (None, ''):
+            version = data_repository.version_of(c, version_id)
+            if version is None:
+                return None
         else:
             version = c.latest_version
-        if not version:
-            version = data_repository.create_contract_version_for_get_contract_details(c)
-        latest_file = data_repository.first_files_for_get_contract_details(version)
-        # Only a real AI run is an analysis: opening the page records nothing.
-        latest_analysis = data_repository.first_ai_analyses_for_get_contract_details(version)
-        if latest_analysis is not None and latest_analysis.model_name == 'N/A':
-            latest_analysis = None
-        clauses_data = []
         from contract.contracts.repositories import party_tag_repository
         from contract.contracts.services.party_tag_service import serialize_party
         # Parties are the ones the user entered; the AI does not guess them.
@@ -86,19 +128,36 @@ class ContractService:
         from contract.contracts.services.legal_mark_service import STATUSES, serialize
         from ai.legal_ai.repositories.knowledge_repository import legal_document_for
         legal_data = serialize(legal_document_for(c))
+        details = {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type,
+                   'start_date': c.start_date.isoformat() if c.start_date else None,
+                   'end_date': c.end_date.isoformat() if c.end_date else None,
+                   'contract_value': float(c.contract_value) if c.contract_value is not None else None, 'status': c.status,
+                   'parties': parties_data, 'tags': tags_data, 'legal': legal_data, 'legal_statuses': STATUSES,
+                   'file_path': None, 'raw_content': '', 'clauses': [], 'analysis': None, 'findings': [], 'reviews': [],
+                   'active_version_id': None, 'active_version_number': None, 'active_version_change_summary': None,
+                   'versions': versions_list(c), 'ai_summary': None, 'has_workflow': False, 'workflow_id': None}
+        if version is None:  # a contract that never got a version (older data): the page shows it empty
+            return details
+        latest_file = data_repository.first_files_for_get_contract_details(version)
+        # Only a real AI run is an analysis: opening the page records nothing.
+        latest_analysis = data_repository.first_ai_analyses_for_get_contract_details(version)
+        if latest_analysis is not None and latest_analysis.model_name == 'N/A':
+            latest_analysis = None
         source_pages = data_repository.clause_source_pages_for_get_contract_details(version)
-        for cl in data_repository.all_ai_extract_clauses_for_get_contract_details(version):
-            entities_list = [{'id': ee.id, 'entity_type': ee.entity_type, 'entity_value': ee.entity_value, 'confidence_score': float(ee.confidence_score)} for ee in data_repository.all_ai_extract_entities_for_get_contract_details(cl)]
-            clauses_data.append({'id': cl.id, 'title': cl.clause_title, 'clause_type': cl.clause_type, 'content': cl.clause_content, 'entities': entities_list, 'source_pages': source_pages.get(cl.clause_title, [])})
-        reviews_data = []
-        for analysis in data_repository.all_ai_analyses_for_get_contract_details(version):
-            for r in data_repository.all_reviews_for_get_contract_details(analysis):
-                reviews_data.append({'id': r.id, 'comment': r.note, 'final_risk_level': r.decision, 'reviewer': r.user.username if r.user else 'Legal Expert', 'reviewed_at': r.reviewed_at.isoformat() if r.reviewed_at else ''})
+        clauses_data = [{'id': cl.id, 'title': cl.clause_title, 'clause_type': cl.clause_type, 'content': cl.clause_content,
+                         'entities': [{'id': ee.id, 'entity_type': ee.entity_type, 'entity_value': ee.entity_value,
+                                       'confidence_score': float(ee.confidence_score)} for ee in cl.ai_extract_entities.all()],
+                         'source_pages': source_pages.get(cl.clause_title, [])}
+                        for cl in data_repository.clauses_with_entities(version)]
+        reviews_data = [{'id': r.id, 'comment': r.note, 'final_risk_level': r.decision,
+                         'reviewer': r.user.username if r.user else 'Legal Expert',
+                         'reviewed_at': r.reviewed_at.isoformat() if r.reviewed_at else ''}
+                        for r in data_repository.reviews_of_version(version)]
         analysis_data = None
         findings_data = []
         if latest_analysis:
             analysis_data = {'id': latest_analysis.id, 'model_name': latest_analysis.model_name, 'overall_score': float(latest_analysis.overall_score), 'risk_level': latest_analysis.risk_level, 'summary': latest_analysis.summary, 'created_at': latest_analysis.created_at.isoformat()}
-            findings_data = [{'id': f.id, 'clause_id': f.clause.id if f.clause else None, 'clause_title': f.clause.clause_title if f.clause else '', 'risk_name': f.rule.rule_name, 'risk_level': f.risk_level, 'explanation': f.explanation, 'recommendation': f.recommendation, 'disadvantaged_party': f.disadvantaged_party, 'is_suggestion': f.is_suggestion} for f in data_repository.all_findings_for_get_contract_details(latest_analysis)]
+            findings_data = [{'id': f.id, 'clause_id': f.clause.id if f.clause else None, 'clause_title': f.clause.clause_title if f.clause else '', 'risk_name': f.rule.rule_name, 'risk_level': f.risk_level, 'explanation': f.explanation, 'recommendation': f.recommendation, 'disadvantaged_party': f.disadvantaged_party, 'is_suggestion': f.is_suggestion} for f in data_repository.findings_of_analysis(latest_analysis)]
             # Legal risks first, then the drafting suggestions under their own heading.
             findings_data.sort(key=lambda f: f['is_suggestion'])
         from contract.core.services.stored_file_service import document_text
@@ -107,10 +166,6 @@ class ContractService:
             raw_content = document_text(latest_file)
         if not raw_content and clauses_data:
             raw_content = '\n\n'.join([f"--- {cl['title']} ---\n{cl['content']}" for cl in clauses_data])
-        versions_list = []
-        for v in data_repository.order_by_versions_for_get_contract_details(c):
-            v_analysis = data_repository.latest_analysis_for_listed_version(v)
-            versions_list.append({'id': v.id, 'version_number': v.version_number, 'change_summary': v.change_summary or 'Initial version', 'created_at': v.created_at.isoformat(), 'overall_score': float(v_analysis.overall_score) if v_analysis and v_analysis.overall_score is not None else None, 'risk_level': v_analysis.risk_level if v_analysis else 'NONE'})
         summary_obj = data_repository.first_contract_summary_for_get_contract_details(version)
         summary_data = {'id': summary_obj.id, 'summary': summary_obj.summary, 'model_id': summary_obj.model_id, 'created_at': summary_obj.created_at.isoformat(), 'updated_at': summary_obj.updated_at.isoformat()} if summary_obj else None
         has_workflow = False
@@ -120,40 +175,61 @@ class ContractService:
             if wf_status and wf_status.get('workflow_id'):
                 has_workflow = True
                 workflow_id = wf_status.get('workflow_id')
-        except Exception:
-            pass
-        return {'id': c.id, 'contract_code': c.contract_code, 'title': c.title, 'contract_type': c.contract_type, 'start_date': c.start_date.isoformat() if c.start_date else None, 'end_date': c.end_date.isoformat() if c.end_date else None, 'contract_value': float(c.contract_value) if c.contract_value is not None else None, 'status': c.status, 'file_path': f'/api/contracts/{c.id}/download-pdf/?version_id={version.id}', 'raw_content': raw_content, 'clauses': clauses_data, 'parties': parties_data, 'tags': tags_data, 'analysis': analysis_data, 'findings': findings_data, 'reviews': reviews_data, 'active_version_id': version.id, 'active_version_number': version.version_number, 'active_version_change_summary': version.change_summary, 'versions': versions_list, 'ai_summary': summary_data, 'has_workflow': has_workflow, 'workflow_id': workflow_id, 'legal': legal_data, 'legal_statuses': STATUSES}
+        except Exception as error:
+            # The page still opens without the workflow service; the log says why the approval button is missing.
+            logger.warning('Workflow status of contract %s unavailable: %s', c.id, error)
+        return dict(details, file_path=f'/api/contracts/{c.id}/download-pdf/?version_id={version.id}', raw_content=raw_content,
+                    clauses=clauses_data, analysis=analysis_data, findings=findings_data, reviews=reviews_data,
+                    active_version_id=version.id, active_version_number=version.version_number,
+                    active_version_change_summary=version.change_summary, ai_summary=summary_data,
+                    has_workflow=has_workflow, workflow_id=workflow_id)
 
-    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None, summarize=None):
+    def create_and_analyze_contract(self, code, title, contract_type, start_date, end_date, contract_value, file_obj=None, raw_content=None, company=None, summarize=None, after_create=None):
+        """Create the contract, its first version and its stored document together, or none of them.
+
+        after_create(contract) runs in the same transaction (the caller's audit row, the legal mark), so a failure
+        there also leaves no contract behind; the stored file is removed whenever the rows are rolled back."""
         if not code or not title:
             raise ValueError('Contract code and title are required.')
-        contract = self.contract_repo.create_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, status='DRAFT', company=company)
-        version = data_repository.create_contract_version_for_create_and_analyze_contract(contract)
-        saved_file_path = _store_document(file_obj, raw_content, f'contract_{_safe_code(code)}.txt')
-        if saved_file_path:
-            self.file_repo.create_file_record(version, saved_file_path)
-            from ai.ai_extract.services.summary_service import schedule_auto_summary
-            schedule_auto_summary(version, summarize)
+        stored = _store_document(file_obj, raw_content, f'contract_{_safe_code(code)}.txt')
+        try:
+            with transaction.atomic():
+                contract = self.contract_repo.create_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, status='DRAFT', company=company)
+                version = data_repository.create_contract_version_for_create_and_analyze_contract(contract)
+                _attach_document(version, stored, summarize)
+                if after_create:
+                    after_create(contract)
+        except BaseException:
+            _discard_stored(stored)
+            raise
         return contract
 
-    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary='', summarize=None):
-        contract = self.contract_repo.get_contract_by_id(contract_id)
-        if not contract:
+    def create_new_version(self, contract_id, file_obj=None, raw_content=None, change_summary='', summarize=None, after_create=None):
+        """Add the next version with its stored document. The contract row is locked while the number is chosen, so
+        two uploads at once become v2 and v3 instead of two v2s."""
+        if not self.contract_repo.get_contract(contract_id):
             raise ValueError('Contract not found.')
-        latest = contract.latest_version
-        next_num = latest.version_number + 1 if latest else 1
-        version = data_repository.create_contract_version_for_create_new_version(change_summary, contract, next_num)
-        saved_file_path = _store_document(file_obj, raw_content, f'contract_{_safe_code(contract.contract_code)}_v{next_num}.txt')
-        if saved_file_path:
-            self.file_repo.create_file_record(version, saved_file_path)
-            from ai.ai_extract.services.summary_service import schedule_auto_summary
-            schedule_auto_summary(version, summarize)
-        contract.status = 'DRAFT'
-        data_repository.save_contract_for_create_new_version(contract)
+        stored = None
+        try:
+            with transaction.atomic():
+                contract = self.contract_repo.lock_contract(contract_id)
+                if not contract:  # deleted in between
+                    raise ValueError('Contract not found.')
+                next_num = data_repository.next_version_number(contract)
+                stored = _store_document(file_obj, raw_content, f'contract_{_safe_code(contract.contract_code)}_v{next_num}.txt')
+                version = data_repository.create_contract_version_for_create_new_version(change_summary, contract, next_num)
+                _attach_document(version, stored, summarize)
+                contract.status = 'DRAFT'
+                data_repository.save_contract_for_create_new_version(contract)
+                if after_create:
+                    after_create(version)
+        except BaseException:
+            _discard_stored(stored)
+            raise
         return version
 
     def analyze_contract(self, contract_id, version_id=None, user=None, progress=None):
-        contract = self.contract_repo.get_contract_by_id(contract_id)
+        contract = self.contract_repo.get_contract(contract_id)
         if not contract:
             raise ValueError('Contract not found.')
         if user is None:

@@ -23,7 +23,7 @@ def contract_access_error(user, contract_id):
     """Check scope before reading versions or contacting another service."""
     from contract.contracts.repositories.contract_repository import ContractRepository
     from contract.core.services.results import ServiceResult
-    contract = ContractRepository.get_contract_by_id(contract_id)
+    contract = ContractRepository.get_contract(contract_id)  # a scope check needs no versions or analyses
     if contract is None:
         return ServiceResult({'error': 'Contract not found.'}, status=404)
     if not check_contract_permission(user, contract):

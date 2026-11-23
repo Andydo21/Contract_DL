@@ -7,6 +7,8 @@ from contract.core.services.access_service import contract_access_error, is_mana
 import logging
 logger = logging.getLogger(__name__)
 contract_service = ContractService()
+# What the client sees when something unexpected fails; the details go to the log, never to the browser.
+INTERNAL_ERROR = 'Đã có lỗi hệ thống. Hãy thử lại; nếu vẫn lỗi, báo quản trị viên.'
 
 def summarize_choice(form):
     """The upload form's "summarize right away" checkbox; None when the field was not sent (use the default)."""
@@ -27,9 +29,6 @@ def contract_detail_page(contract_id, user, query):
     if not details:
         return ServiceResult({}, status=404, template='common/not_found.html')
     return ServiceResult({'contract': details}, template='contracts/contract_detail.html')
-
-def _is_manager(user):
-    return bool(user.is_superuser or (user.role and user.role.role_name.upper() in ('MANAGER', 'ADMIN')))
 
 EDITABLE_FIELDS = ('contract_code', 'title', 'contract_type', 'start_date', 'end_date', 'contract_value')
 
@@ -92,7 +91,7 @@ def _clean_contract_fields(data, contract):
 def _managed_contract(contract_id, user):
     """The contract a manager of its company may change, or the error result to return."""
     from contract.contracts.models import Contract
-    if not _is_manager(user):
+    if not is_manager(user):
         return None, ServiceResult({'error': 'Permission Denied: Only Managers can change contracts.'}, status=403)
     try:
         contract = data_repository.get_contract_for_contract_detail(contract_id)
@@ -145,25 +144,25 @@ def delete_contract(contract_id, user):
 def deleted_contracts(user):
     """GET: the trash. What managers of the company deleted and can bring back."""
     from contract.contracts.repositories.contract_repository import ContractRepository
-    if not _is_manager(user):
+    if not is_manager(user):
         return ServiceResult({'error': 'Permission Denied: Only Managers can see deleted contracts.'}, status=403)
     if not user.is_superuser and not user.company_id:
         return ServiceResult({'contracts': []})
     limit = 200
     rows = list(ContractRepository.deleted_contracts(None if user.is_superuser else user.company_id)[:limit + 1])
     truncated, rows = len(rows) > limit, rows[:limit]  # the newest deletions; the page says when more exist
-    in_use = ContractRepository.codes_in_use(row.contract_code for row in rows)
+    in_use = ContractRepository.codes_in_use(rows)
     return ServiceResult({'truncated': truncated, 'contracts': [dict(
         id=row.id, contract_code=row.contract_code, title=row.title, deleted_at=row.deleted_at.isoformat(),
         deleted_by=row.deleted_by.username if row.deleted_by else None,
         # Another contract took the code meanwhile: restoring needs a new one.
-        code_taken=row.contract_code in in_use) for row in rows]})
+        code_taken=(row.company_id, row.contract_code) in in_use) for row in rows]})
 
 def restore_contract(contract_id, user, data=None):
     """POST: bring a deleted contract back, under a new code when another contract uses its code now."""
     from contract.contracts.models import Contract
     from contract.contracts.repositories.contract_repository import ContractRepository
-    if not _is_manager(user):
+    if not is_manager(user):
         return ServiceResult({'error': 'Permission Denied: Only Managers can restore contracts.'}, status=403)
     contract = ContractRepository.deleted_contract(contract_id)
     if contract is None:
@@ -306,19 +305,45 @@ def purge_contract(contract_id, user):
                           'workflows_deleted': workflows, 'background_extraction_cancelled': extracting})
 
 
-def contracts_list(user, method, form=None, uploads=None):
+LIST_PAGE_MAX = 200
+
+
+def _page_params(query):
+    """limit/offset of a paged list request, or (None, 0) for the whole list as before."""
+    if not query or query.get('limit') in (None, ''):
+        return None, 0
+    try:
+        limit, offset = int(query['limit']), int(query.get('offset') or 0)
+    except (TypeError, ValueError):
+        raise ValueError('limit và offset phải là số nguyên.')
+    if limit < 1 or offset < 0:
+        raise ValueError('limit phải ≥ 1 và offset ≥ 0.')
+    return min(limit, LIST_PAGE_MAX), offset
+
+
+def contracts_list(user, method, form=None, uploads=None, query=None):
     """
-    GET: Get list of all contracts.
+    GET: the contracts of the user's company. ?q= searches code/title/type, ?status= filters; with ?limit= (and
+    ?offset=) the answer is one page: {items, total, offset, limit}. Without limit it is the whole list, as before.
+    POST: create a contract (managers only).
     """
     if method == 'GET':
+        if not user.is_superuser and not user.company_id:
+            return ServiceResult([])
+        query = query or {}
         try:
-            if not user.is_superuser and not user.company_id:
-                return ServiceResult([])
-            company = None if user.is_superuser else user.company
-            contracts = contract_service.list_all_contracts(company=company)
-            return ServiceResult(contracts)
-        except Exception as e:
-            return ServiceResult({'error': str(e)}, status=500)
+            limit, offset = _page_params(query)
+        except ValueError as error:
+            return ServiceResult({'error': str(error)}, status=400)
+        company = None if user.is_superuser else user.company
+        try:
+            contracts = contract_service.list_all_contracts(company=company, query=(query.get('q') or '').strip() or None,
+                                                            status=(query.get('status') or '').strip().upper() or None,
+                                                            limit=limit, offset=offset)
+        except Exception:
+            logger.exception('Listing contracts failed')
+            return ServiceResult({'error': INTERNAL_ERROR}, status=500)
+        return ServiceResult(contracts)
     elif method == 'POST':
         if not is_manager(user):
             return ServiceResult({'error': 'Permission Denied: Only Managers can create contracts.'}, status=403)
@@ -353,29 +378,33 @@ def create_contract(user, method, form, uploads):
     contract_type = fields.get('contract_type', '')
     start_date, end_date = fields.get('start_date'), fields.get('end_date')
     contract_value = fields.get('contract_value', '0.00')
-    from contract.contracts.services.page_images_service import PageImagesError, document_upload
+    from contract.contracts.services.page_images_service import PageImagesError, check_raw_content, document_upload
     try:
         file_obj = document_upload(uploads)
+        check_raw_content(raw_content)
     except PageImagesError as error:
         return ServiceResult({'error': str(error)}, status=400)
     if not file_obj and not (raw_content or '').strip():
         return ServiceResult({'error': 'Cần tải tệp hợp đồng hoặc dán nội dung hợp đồng.'}, status=400)
-    try:
-        company = None
-        if user.is_authenticated:
-            company = getattr(user, 'company', None)
-        contract = contract_service.create_and_analyze_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, file_obj=file_obj, raw_content=raw_content, company=company, summarize=summarize_choice(form))
+
+    def record(contract):  # in the creating transaction: a contract never exists without its audit row
         if form.get('document_kind') == 'legal':
             from ai.legal_ai.repositories.knowledge_repository import mark_legal
             mark_legal(contract)
         data_repository.log_contract_action(user, contract, f'Created contract: {contract.contract_code}')
-        job = _extract_after_upload(user, contract.id) if file_obj or raw_content else None
-        return ServiceResult({'success': True, 'contract_id': contract.id, 'contract_code': contract.contract_code, 'status': contract.status,
-                              'extraction_job_id': job and job['id']})
+    try:
+        company = getattr(user, 'company', None) if user.is_authenticated else None
+        contract = contract_service.create_and_analyze_contract(code=code, title=title, contract_type=contract_type, start_date=start_date, end_date=end_date, contract_value=contract_value, file_obj=file_obj, raw_content=raw_content, company=company, summarize=summarize_choice(form), after_create=record)
     except IntegrityError:
         return ServiceResult({'error': f'Mã hợp đồng "{code}" đã tồn tại. Hãy dùng mã khác.'}, status=400)
-    except Exception as e:
-        return ServiceResult({'error': str(e)}, status=400)
+    except ValueError as error:
+        return ServiceResult({'error': str(error)}, status=400)
+    except Exception:
+        logger.exception('Creating contract %s failed', code)
+        return ServiceResult({'error': INTERNAL_ERROR}, status=500)
+    job = _extract_after_upload(user, contract.id) if file_obj or raw_content else None
+    return ServiceResult({'success': True, 'contract_id': contract.id, 'contract_code': contract.contract_code, 'status': contract.status,
+                          'extraction_job_id': job and job['id']})
 
 def contract_versions(contract_id, user, method, form, uploads):
     """
@@ -388,26 +417,35 @@ def contract_versions(contract_id, user, method, form, uploads):
     if method == 'POST' and not is_manager(user):
         return ServiceResult({'error': 'Manager role required.'}, status=403)
     if method == 'GET':
-        details = contract_service.get_contract_details(contract_id)
-        if not details:
+        # Only the list: not the whole detail payload (text, clauses, workflow call) it used to be cut from.
+        from contract.contracts.repositories.contract_repository import ContractRepository
+        from contract.contracts.services.contract_service import versions_list
+        contract = ContractRepository.get_contract(contract_id)
+        if not contract:
             return ServiceResult({'error': 'Contract not found.'}, status=404)
-        return ServiceResult({'versions': details.get('versions', [])})
+        return ServiceResult({'versions': versions_list(contract)})
     elif method == 'POST':
         change_summary = form.get('change_summary', '')
         raw_content = form.get('raw_content')
-        from contract.contracts.services.page_images_service import PageImagesError, document_upload
+        from contract.contracts.services.page_images_service import PageImagesError, check_raw_content, document_upload
         try:
             file_obj = document_upload(uploads)
+            check_raw_content(raw_content)
         except PageImagesError as error:
             return ServiceResult({'error': str(error)}, status=400)
-        if not file_obj and (not raw_content):
+        if not file_obj and not (raw_content or '').strip():
             return ServiceResult({'error': 'Either a file or text content is required for the new version.'}, status=400)
         try:
-            version = contract_service.create_new_version(contract_id=contract_id, file_obj=file_obj, raw_content=raw_content, change_summary=change_summary, summarize=summarize_choice(form))
-            data_repository.log_contract_action(user, version.contract, f'Added version: v{version.version_number}')
-            job = _extract_after_upload(user, int(contract_id))
-            return ServiceResult({'success': True, 'version_id': version.id, 'version_number': version.version_number, 'change_summary': version.change_summary,
-                                  'extraction_job_id': job and job['id']})
-        except Exception as e:
-            return ServiceResult({'error': str(e)}, status=400)
+            version = contract_service.create_new_version(
+                contract_id=contract_id, file_obj=file_obj, raw_content=raw_content, change_summary=change_summary,
+                summarize=summarize_choice(form),
+                after_create=lambda v: data_repository.log_contract_action(user, v.contract, f'Added version: v{v.version_number}'))
+        except ValueError as error:
+            return ServiceResult({'error': str(error)}, status=400)
+        except Exception:
+            logger.exception('Adding a version to contract %s failed', contract_id)
+            return ServiceResult({'error': INTERNAL_ERROR}, status=500)
+        job = _extract_after_upload(user, int(contract_id))
+        return ServiceResult({'success': True, 'version_id': version.id, 'version_number': version.version_number, 'change_summary': version.change_summary,
+                              'extraction_job_id': job and job['id']})
     return ServiceResult({'error': 'Method not allowed.'}, status=405)

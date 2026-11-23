@@ -190,6 +190,17 @@ KAGGLE_QWEN_SERVICE_URL = os.environ.get(
 AI_SUMMARY_TIMEOUT = int(os.environ.get("AI_SUMMARY_TIMEOUT", "600"))
 # Summarize every uploaded file in the background, independently of the extraction pipeline.
 AI_SUMMARY_AUTO = os.environ.get("AI_SUMMARY_AUTO", "0") == "1"
+# 1 = a separate `retry_summaries --watch` process runs the summaries; the web process only marks them as queued.
+# 0 (local runs without that worker) = the web process starts a background thread itself.
+AI_SUMMARY_WORKER = os.environ.get("AI_SUMMARY_WORKER", "0") == "1"
+# Model calls one account may start per minute through the summary endpoints (0 = no limit).
+AI_SUMMARY_RATE_PER_MINUTE = int(os.environ.get("AI_SUMMARY_RATE_PER_MINUTE", "10"))
+# Largest file or pasted text the summary endpoints accept.
+AI_SUMMARY_MAX_UPLOAD_MB = int(os.environ.get("AI_SUMMARY_MAX_UPLOAD_MB", "25"))
+AI_SUMMARY_MAX_TEXT_CHARS = int(os.environ.get("AI_SUMMARY_MAX_TEXT_CHARS", "500000"))
+
+# Largest single contract file accepted on upload (photos joined into a PDF have their own per-page limit).
+CONTRACT_UPLOAD_MAX_MB = int(os.environ.get("CONTRACT_UPLOAD_MAX_MB", "50"))
 
 # PlanA remote ColPali endpoint (Kaggle/ngrok) and shared Qdrant storage.
 COLPALI_BASE_URL = os.environ.get("COLPALI_BASE_URL", "")

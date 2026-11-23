@@ -432,6 +432,8 @@
             if (problem) body.push(el('div', {class: 'sp-error', role: 'alert'}, friendly(problem)));
 
             const canRun = !loading && !working && !running && saved && (saved.has_text || saved.file_name);
+            // Re-running replaces a summary everyone reads and calls the model again: managers only (the server checks too).
+            const canForce = document.body.dataset.summaryRerun === '1';
             const actionLabel = text ? ' Tóm tắt lại' : failed ? ' Thử lại' : ' Tóm tắt ngay';
             const focused = this.root.contains(document.activeElement) ? document.activeElement : null;
             const announce = working || running ? 'Đang tóm tắt' : label;
@@ -458,7 +460,7 @@
                         el('button', {class: 'sp-btn', type: 'button', onclick: () => this.update({confirming: false})}, 'Hủy'))) : null,
                 el('div', {class: 'sp-actions'},
                     el('div', {class: 'sp-buttons'},
-                        confirming && canRun ? null : el('button', {class: 'sp-btn primary sp-run', type: 'button', ...(canRun ? {} : {disabled: ''}),
+                        (confirming && canRun) || (text && !canForce) ? null : el('button', {class: 'sp-btn primary sp-run', type: 'button', ...(canRun ? {} : {disabled: ''}),
                                       onclick: () => text ? this.update({confirming: true}) : this.request(this.options.value(), false, 'run')},
                             el('i', {class: text ? 'fa-solid fa-rotate' : 'fa-solid fa-play'}), actionLabel),
                         text ? el('button', {class: 'sp-btn', type: 'button', onclick: event => this.copy(text, event.currentTarget)},
